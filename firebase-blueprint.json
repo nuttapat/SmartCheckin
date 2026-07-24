@@ -1,0 +1,78 @@
+{
+  "entities": {
+    "users": {
+      "title": "users",
+      "description": "User profiles (teachers and students)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "firstNameTh": { "type": "string" },
+        "lastNameTh": { "type": "string" },
+        "firstNameEn": { "type": "string" },
+        "lastNameEn": { "type": "string" },
+        "universityId": { "type": "string" },
+        "email": { "type": "string" },
+        "password": { "type": "string" },
+        "role": { "type": "string" },
+        "deviceId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "email", "role"]
+    },
+    "courses": {
+      "title": "courses",
+      "description": "Courses created by teachers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "joinCode": { "type": "string" },
+        "studentIds": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "code", "name", "teacherId", "joinCode"]
+    },
+    "sessions": {
+      "title": "sessions",
+      "description": "Attendance check-in sessions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "courseName": { "type": "string" },
+        "sessionName": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "allowLateUntil": { "type": "string" },
+        "qrCodeData": { "type": "string" },
+        "refreshIntervalSec": { "type": "number" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "courseId", "teacherId", "isActive"]
+    },
+    "attendanceLogs": {
+      "title": "attendanceLogs",
+      "description": "Attendance records logged by students",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "universityId": { "type": "string" },
+        "checkInTime": { "type": "string" },
+        "status": { "type": "string" },
+        "deviceId": { "type": "string" },
+        "distanceMeters": { "type": "number" },
+        "method": { "type": "string" }
+      },
+      "required": ["id", "sessionId", "courseId", "studentId", "status"]
+    }
+  }
+}

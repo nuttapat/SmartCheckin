@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check non-empty string
+    function isNonEmptyString(val) {
+      return val is string && val.size() > 0;
+    }
+
+    // User profiles collection
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.email is string
+                           && request.resource.data.role in ['TEACHER', 'STUDENT'];
+      allow delete: if false; // Protect users from accidental deletion
+    }
+
+    // Courses collection
+    match /courses/{courseId} {
+      allow read: if true;
+      allow create, update: if isNonEmptyString(request.resource.data.code)
+                           && isNonEmptyString(request.resource.data.name)
+                           && isNonEmptyString(request.resource.data.teacherId);
+      allow delete: if true;
+    }
+
+    // Course memberships
+    match /courseMembers/{memberId} {
+      allow read: if true;
+      allow create, update: if isNonEmptyString(request.resource.data.courseId)
+                           && isNonEmptyString(request.resource.data.userId);
+      allow delete: if true;
+    }
+
+    // Attendance sessions collection
+    match /sessions/{sessionId} {
+      allow read: if true;
+      allow create, update: if isNonEmptyString(request.resource.data.courseId);
+      allow delete: if true;
+    }
+
+    // Student attendance records collection
+    match /attendanceRecords/{recordId} {
+      allow read: if true;
+      allow create, update: if isNonEmptyString(request.resource.data.sessionId)
+                           && isNonEmptyString(request.resource.data.studentId);
+      allow delete: if false; // Protect attendance audit log from deletion
+    }
+  }
+}
+

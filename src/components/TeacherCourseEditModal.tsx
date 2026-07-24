@@ -1,0 +1,353 @@
+import React, { useState, useEffect } from 'react';
+import { Course, TeachingWeek, Semester } from '../types';
+import { updateCourse } from '../services/api';
+import { X, BookOpen, Plus, Trash2, Calendar, Save, CheckCircle2 } from 'lucide-react';
+
+interface TeacherCourseEditModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  course: Course;
+  onSuccess: (updatedCourse: Course) => void;
+  isDarkMode?: boolean;
+}
+
+export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
+  isOpen,
+  onClose,
+  course,
+  onSuccess,
+  isDarkMode = true,
+}) => {
+  const [courseCode, setCourseCode] = useState<string>(course.courseCode);
+  const [courseName, setCourseName] = useState<string>(course.courseName);
+  const [academicYear, setAcademicYear] = useState<number>(course.academicYear);
+  const [semester, setSemester] = useState<Semester>(course.semester);
+  const [coordinatorName, setCoordinatorName] = useState<string>(course.coordinatorName);
+  const [weeks, setWeeks] = useState<TeachingWeek[]>(course.weeks || []);
+
+  const [loading, setLoading] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string>('');
+  const [successMsg, setSuccessMsg] = useState<string>('');
+
+  useEffect(() => {
+    setCourseCode(course.courseCode);
+    setCourseName(course.courseName);
+    setAcademicYear(course.academicYear);
+    setSemester(course.semester);
+    setCoordinatorName(course.coordinatorName);
+    setWeeks(course.weeks ? [...course.weeks] : []);
+    setErrorMsg('');
+    setSuccessMsg('');
+  }, [course]);
+
+  if (!isOpen) return null;
+
+  const handleAddWeek = () => {
+    const nextWeekNum = weeks.length > 0 ? Math.max(...weeks.map((w) => w.weekNumber)) + 1 : 1;
+    const todayStr = new Date().toISOString().split('T')[0];
+    setWeeks((prev) => [
+      ...prev,
+      {
+        weekNumber: nextWeekNum,
+        topic: `หัวข้อการสอนสัปดาห์ที่ ${nextWeekNum}`,
+        date: todayStr,
+      },
+    ]);
+  };
+
+  const handleRemoveWeek = (weekNumber: number) => {
+    if (weeks.length <= 1) {
+      setErrorMsg('ต้องมีสัปดาห์การสอนอย่างน้อย 1 สัปดาห์');
+      return;
+    }
+    setErrorMsg('');
+    const filtered = weeks.filter((w) => w.weekNumber !== weekNumber);
+    // Re-index week numbers sequentially
+    const reindexed = filtered.map((w, index) => ({
+      ...w,
+      weekNumber: index + 1,
+    }));
+    setWeeks(reindexed);
+  };
+
+  const handleWeekChange = (index: number, field: keyof TeachingWeek, value: string | number) => {
+    setWeeks((prev) => {
+      const updated = [...prev];
+      updated[index] = {
+        ...updated[index],
+        [field]: value,
+      };
+      return updated;
+    });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!courseCode.trim() || !courseName.trim()) {
+      setErrorMsg('กรุณากรอกรหัสวิชาและชื่อวิชาให้ครบถ้วน');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await updateCourse(course.id, {
+        courseCode,
+        courseName,
+        academicYear,
+        semester,
+        coordinatorName,
+        weeks,
+      });
+
+      setSuccessMsg('บันทึกการแก้ไขรายวิชาเรียบร้อยแล้ว!');
+      setTimeout(() => {
+        onSuccess(res.course);
+        onClose();
+      }, 600);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'เกิดข้อผิดพลาดในการอัปเดตวิชา');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 overflow-y-auto">
+      <div
+        className={`border rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden my-8 transition-all ${
+          isDarkMode
+            ? 'bg-slate-900 border-slate-800 text-slate-100'
+            : 'bg-white border-slate-200 text-slate-900'
+        }`}
+      >
+        {/* Header */}
+        <div
+          className={`px-6 py-5 border-b flex items-center justify-between ${
+            isDarkMode ? 'bg-slate-800/60 border-slate-800' : 'bg-sky-50/70 border-sky-100'
+          }`}
+        >
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-2xl bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30 flex items-center justify-center">
+              <BookOpen className="w-5 h-5 stroke-[2.2]" />
+            </div>
+            <div>
+              <h2 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                แก้ไขรายวิชา &amp; จัดการสัปดาห์สอน
+              </h2>
+              <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                แก้ไขข้อมูลวิชา เพิ่ม หรือลดจำนวนสัปดาห์สำหรับการเช็คชื่อ
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className={`p-2 rounded-xl transition ${
+              isDarkMode
+                ? 'text-slate-400 hover:text-white hover:bg-slate-800'
+                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {errorMsg && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-600 dark:text-rose-300 text-xs font-medium">
+              {errorMsg}
+            </div>
+          )}
+
+          {successMsg && (
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center space-x-2">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{successMsg}</span>
+            </div>
+          )}
+
+          {/* Basic Course Details */}
+          <div className="space-y-4">
+            <h3 className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`}>
+              ข้อมูลทั่วไปของรายวิชา (General Information)
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  รหัสวิชา (Course Code)
+                </label>
+                <input
+                  type="text"
+                  value={courseCode}
+                  onChange={(e) => setCourseCode(e.target.value)}
+                  required
+                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 uppercase font-mono font-bold ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  ชื่อรายวิชา (Course Name)
+                </label>
+                <input
+                  type="text"
+                  value={courseName}
+                  onChange={(e) => setCourseName(e.target.value)}
+                  required
+                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  ปีการศึกษา (พ.ศ.)
+                </label>
+                <input
+                  type="number"
+                  value={academicYear}
+                  onChange={(e) => setAcademicYear(parseInt(e.target.value, 10) || 2569)}
+                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  ภาคการศึกษา (Semester)
+                </label>
+                <select
+                  value={semester}
+                  onChange={(e) => setSemester(e.target.value as Semester)}
+                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  <option value={Semester.FIRST}>ภาคเรียนที่ 1</option>
+                  <option value={Semester.SECOND}>ภาคเรียนที่ 2</option>
+                  <option value={Semester.SUMMER}>ภาคฤดูร้อน (Summer)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  อาจารย์ผู้รับผิดชอบวิชา
+                </label>
+                <input
+                  type="text"
+                  value={coordinatorName}
+                  onChange={(e) => setCoordinatorName(e.target.value)}
+                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Teaching Weeks Management */}
+          <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <h3 className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-teal-400' : 'text-teal-600'}`}>
+                กำหนดสัปดาห์การสอน &amp; หัวข้อวิชา ({weeks.length} สัปดาห์)
+              </h3>
+              <button
+                type="button"
+                onClick={handleAddWeek}
+                className="px-3 py-1.5 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 text-teal-600 dark:text-teal-400 border border-teal-500/30 text-xs font-bold flex items-center space-x-1 transition"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ เพิ่มสัปดาห์สอน</span>
+              </button>
+            </div>
+
+            <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+              {weeks.map((week, idx) => (
+                <div
+                  key={idx}
+                  className={`p-3.5 border rounded-2xl flex items-center gap-3 transition ${
+                    isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <div className="shrink-0 w-16 text-center">
+                    <span className="inline-block px-2.5 py-1 rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-300 text-xs font-mono font-bold">
+                      W{week.weekNumber}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="sm:col-span-2">
+                      <input
+                        type="text"
+                        value={week.topic}
+                        onChange={(e) => handleWeekChange(idx, 'topic', e.target.value)}
+                        placeholder="หัวข้อการสอน"
+                        required
+                        className={`w-full border rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-sky-500 ${
+                          isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                        }`}
+                      />
+                    </div>
+                    <div>
+                      <div className="relative flex items-center">
+                        <Calendar className="w-3.5 h-3.5 absolute left-2.5 text-slate-400" />
+                        <input
+                          type="date"
+                          value={week.date}
+                          onChange={(e) => handleWeekChange(idx, 'date', e.target.value)}
+                          className={`w-full border rounded-xl pl-8 pr-2 py-1.5 text-xs focus:outline-none focus:border-sky-500 ${
+                            isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveWeek(week.weekNumber)}
+                    title="ลบสัปดาห์นี้"
+                    className="p-2 rounded-xl text-rose-500 hover:bg-rose-500/10 transition shrink-0"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Modal Actions */}
+          <div className={`flex justify-end space-x-3 pt-4 border-t ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
+            <button
+              type="button"
+              onClick={onClose}
+              className={`px-4 py-2.5 rounded-xl text-xs font-semibold ${
+                isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-400 hover:to-teal-400 text-white shadow-lg shadow-sky-500/20 flex items-center space-x-2 transition active:scale-95 disabled:opacity-50"
+            >
+              <Save className="w-4 h-4" />
+              <span>{loading ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};

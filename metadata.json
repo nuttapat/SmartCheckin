@@ -1,0 +1,11 @@
+{
+  "name": "Smart Student Attendance System",
+  "description": "Smart Student Attendance System with Anti-Proxy Dynamic QR Code, Geofencing, Real-time WebSocket Dashboard, and Course Management.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
