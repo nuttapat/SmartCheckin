@@ -72,17 +72,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Action Buttons & Switcher */}
           <div className="flex items-center space-x-2.5">
-            {/* Student Contextual Actions */}
-            {currentUser && currentUser.role === UserRole.STUDENT && (
-              <button
-                onClick={onOpenJoinCourse}
-                className="flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition shadow-sm active:scale-95"
-              >
-                <Plus className="w-3.5 h-3.5 hidden sm:block" />
-                <span>เข้าร่วมวิชาเรียน</span>
-              </button>
-            )}
-
             {/* User Profile & Settings Menu */}
             <div 
               className="relative"

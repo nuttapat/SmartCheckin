@@ -33,10 +33,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [liveCheckins, setLiveCheckins] = useState<AttendanceRecord[]>([]);
   const [isGpsCheckEnabled, setIsGpsCheckEnabled] = useState<boolean>(true);
   const [qrCountdown, setQrCountdown] = useState<number>(30);
-  const [teacherCoords, setTeacherCoords] = useState<{ lat: number; lng: number }>({
-    lat: 13.7988363,
-    lng: 100.322944,
+  const [teacherCoords, setTeacherCoords] = useState<{ lat: number; lng: number }>(() => {
+    try {
+      const saved = localStorage.getItem(`teacher_saved_coords_${teacher.id}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.lat === 'number' && typeof parsed.lng === 'number') {
+          return parsed;
+        }
+      }
+    } catch (e) {}
+    return {
+      lat: 13.7988363,
+      lng: 100.322944,
+    };
   });
+
+  const updateTeacherCoords = (coords: { lat: number; lng: number }) => {
+    setTeacherCoords(coords);
+    try {
+      localStorage.setItem(`teacher_saved_coords_${teacher.id}`, JSON.stringify(coords));
+    } catch (e) {}
+  };
 
   // Invite modal state
   const [inviteModalCode, setInviteModalCode] = useState<InviteLink | null>(null);
@@ -70,8 +88,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     loadTeacherHistory();
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => setTeacherCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => setTeacherCoords({ lat: 13.7563, lng: 100.5018 })
+        (pos) => updateTeacherCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => {},
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
     }
     setIsTeacherCheckinModalOpen(true);
@@ -130,23 +149,26 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   useEffect(() => {
     loadTeacherCourses();
 
-    // Get current teacher GPS coords
+    // Get current teacher GPS coords if available
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          setTeacherCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          updateTeacherCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         },
         (err) => {
           console.warn('Teacher geolocation warning:', err.message);
-          setTeacherCoords({ lat: 13.7563, lng: 100.5018 });
+          // Do not overwrite saved location on geolocation warning
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
     }
   }, [teacher.id]);
 
   const handleSelectCourse = async (course: Course) => {
     setSelectedCourse(course);
+    if (course.defaultLat && course.defaultLng) {
+      updateTeacherCoords({ lat: course.defaultLat, lng: course.defaultLng });
+    }
     try {
       const details = await fetchCourseDetails(course.id);
       setCourseSessions(details.sessions || []);
@@ -210,7 +232,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           });
           currentLat = position.coords.latitude;
           currentLng = position.coords.longitude;
-          setTeacherCoords({ lat: currentLat, lng: currentLng });
+          updateTeacherCoords({ lat: currentLat, lng: currentLng });
         } catch (e) {
           console.warn('Fast geolocation fetch skipped, using last known teacher coords:', e);
         }
@@ -959,7 +981,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   onClick={() => {
                     if (navigator.geolocation) {
                       navigator.geolocation.getCurrentPosition(
-                        (pos) => setTeacherCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+                        (pos) => updateTeacherCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
                         (err) => alert(`ไม่สามารถดึงพิกัดจากเบราว์เซอร์ได้ (${err.message}) กรุณาตรวจสอบ Location Services หรือเลือกโหมด 'QR Code อย่างเดียว'`),
                         { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
                       );

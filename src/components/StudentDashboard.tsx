@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, AttendanceRecord, Course, Session } from '../types';
 import { fetchStudentStats, submitCheckin, fetchActiveSessions } from '../services/api';
-import { QrCode, Camera, CheckCircle2, AlertTriangle, ShieldX, MapPin, Clock, Award, ChevronRight, RefreshCw, X, ShieldCheck, Navigation, Sparkles, Image } from 'lucide-react';
+import { QrCode, Camera, CheckCircle2, AlertTriangle, ShieldX, MapPin, Clock, Award, ChevronRight, RefreshCw, X, ShieldCheck, Navigation, Sparkles, Image, Plus } from 'lucide-react';
 import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode';
+import { decodeQRCodeFromImage } from '../utils/qrDecoder';
 
 interface StudentDashboardProps {
   student: User;
@@ -47,6 +48,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
 
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const html5QrCodeInstanceRef = useRef<Html5Qrcode | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isImageProcessing, setIsImageProcessing] = useState<boolean>(false);
 
@@ -55,12 +57,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
     if (!file) return;
     setIsImageProcessing(true);
     try {
-      const html5QrCode = new Html5Qrcode('qr-reader-file-temp');
-      const decodedText = await html5QrCode.scanFile(file, true);
+      const decodedText = await decodeQRCodeFromImage(file);
       setScannedResult(decodedText);
       handleProcessCheckin(decodedText, checkinMode);
-    } catch (err) {
-      alert('ไม่พบ QR Code ในรูปภาพที่เลือก กรุณาถ่ายรูปให้เห็น QR Code ชัดเจน แล้วลองอีกครั้ง');
+    } catch (err: any) {
+      alert(err.message || 'ไม่พบ QR Code ในรูปภาพที่เลือก กรุณาถ่ายรูปให้เห็น QR Code ชัดเจน แล้วลองอีกครั้ง');
     } finally {
       setIsImageProcessing(false);
       if (e.target) e.target.value = '';
@@ -113,33 +114,75 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
     updateLocation();
   }, [student.id]);
 
+  const startLiveCameraStream = async () => {
+    try {
+      if (html5QrCodeInstanceRef.current) {
+        try {
+          await html5QrCodeInstanceRef.current.stop();
+        } catch (e) {}
+        html5QrCodeInstanceRef.current = null;
+      }
+
+      const container = document.getElementById('qr-reader');
+      if (!container) return;
+
+      const html5QrCode = new Html5Qrcode('qr-reader');
+      html5QrCodeInstanceRef.current = html5QrCode;
+
+      await html5QrCode.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        (decodedText) => {
+          setScannedResult(decodedText);
+          try {
+            html5QrCode.stop();
+          } catch (e) {}
+          handleProcessCheckin(decodedText, checkinMode);
+        },
+        () => {}
+      );
+    } catch (err) {
+      console.warn('Environment camera failed, trying default camera:', err);
+      try {
+        if (!html5QrCodeInstanceRef.current) {
+          html5QrCodeInstanceRef.current = new Html5Qrcode('qr-reader');
+        }
+        await html5QrCodeInstanceRef.current.start(
+          true,
+          { fps: 10, qrbox: { width: 220, height: 220 } },
+          (decodedText) => {
+            setScannedResult(decodedText);
+            try {
+              html5QrCodeInstanceRef.current?.stop();
+            } catch (e) {}
+            handleProcessCheckin(decodedText, checkinMode);
+          },
+          () => {}
+        );
+      } catch (fallbackErr) {
+        console.error('Camera access failed:', fallbackErr);
+      }
+    }
+  };
+
   // Handle opening live camera QR Scanner when mode requires QR
   useEffect(() => {
     if (isScannerOpen && (checkinMode === 'QR_ONLY' || checkinMode === 'HYBRID')) {
-      setTimeout(() => {
-        const scanner = new Html5QrcodeScanner(
-          'qr-reader',
-          { fps: 10, qrbox: { width: 220, height: 220 } },
-          /* verbose= */ false
-        );
+      const timer = setTimeout(() => {
+        startLiveCameraStream();
+      }, 250);
 
-        scanner.render(
-          (decodedText) => {
-            setScannedResult(decodedText);
-            scanner.clear();
-            handleProcessCheckin(decodedText, checkinMode);
-          },
-          () => {
-            // silent scan frame error
-          }
-        );
-
-        scannerRef.current = scanner;
-      }, 300);
+      return () => {
+        clearTimeout(timer);
+        if (html5QrCodeInstanceRef.current) {
+          html5QrCodeInstanceRef.current.stop().catch(() => {});
+          html5QrCodeInstanceRef.current = null;
+        }
+      };
     } else {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(console.error);
-        scannerRef.current = null;
+      if (html5QrCodeInstanceRef.current) {
+        html5QrCodeInstanceRef.current.stop().catch(() => {});
+        html5QrCodeInstanceRef.current = null;
       }
     }
   }, [isScannerOpen, checkinMode]);
@@ -264,19 +307,34 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
             </p>
           </div>
 
-          {/* Prominent Check-In Button */}
-          <button
-            onClick={() => openCheckinModal('HYBRID')}
-            className="w-full lg:w-auto px-6 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center space-x-3 shadow-lg shadow-emerald-600/25 active:scale-95 transition border border-emerald-400/30"
-          >
-            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
-              <Camera className="w-5 h-5 text-white" />
-            </div>
-            <div className="text-left">
-              <div className="text-sm font-black leading-none">เช็คชื่อเข้าเรียน (Check-in)</div>
-              <div className="text-[10px] opacity-90 font-medium mt-0.5">สแกน QR Code + ตรวจพิกัด GPS (สแกน + GPS เป็นค่าเริ่มต้น)</div>
-            </div>
-          </button>
+          {/* Action Buttons in Welcome Banner */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto shrink-0">
+            <button
+              onClick={onOpenJoinCourse}
+              className="px-5 py-3 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-extrabold text-xs flex items-center justify-center space-x-3 shadow-lg shadow-teal-600/25 active:scale-95 transition border border-teal-400/30 grow sm:grow-0"
+            >
+              <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                <Plus className="w-5 h-5 text-white" />
+              </div>
+              <div className="text-left">
+                <div className="text-sm font-black leading-none">เข้าร่วมวิชาเรียน</div>
+                <div className="text-[10px] opacity-90 font-medium mt-0.5">กรอก Invite Code เพิ่มวิชาใหม่</div>
+              </div>
+            </button>
+
+            <button
+              onClick={() => openCheckinModal('HYBRID')}
+              className="px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center space-x-3 shadow-lg shadow-emerald-600/25 active:scale-95 transition border border-emerald-400/30 grow sm:grow-0"
+            >
+              <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                <Camera className="w-5 h-5 text-white" />
+              </div>
+              <div className="text-left">
+                <div className="text-sm font-black leading-none">เช็คชื่อเข้าเรียน (Check-in)</div>
+                <div className="text-[10px] opacity-90 font-medium mt-0.5">สแกน QR Code + ตรวจพิกัด GPS</div>
+              </div>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -288,16 +346,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
               <Award className="w-5 h-5 text-emerald-500" />
               <span>รายวิชาที่ลงทะเบียน (Enrolled Courses)</span>
             </h2>
-            <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+            <p className={`text-xs pl-7 mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
               เกณฑ์สิทธิ์เข้าสอบ: 🟢 &gt; 85% (ปกติ) | 🟡 80-84% (เฝ้าระวัง) | 🔴 &lt; 80% (หมดสิทธิ์สอบ)
             </p>
           </div>
-          <button
-            onClick={onOpenJoinCourse}
-            className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline font-semibold"
-          >
-            + เข้าร่วมวิชาด้วย Invite Code
-          </button>
         </div>
 
         {loading ? (
@@ -420,8 +472,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
 
       {/* History Modal */}
       {selectedCourseHistory && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4">
-          <div className={`border rounded-2xl w-full max-w-xl shadow-2xl p-6 space-y-4 ${
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto">
+          <div className={`border rounded-2xl w-full max-w-xl shadow-2xl p-4 sm:p-6 space-y-4 my-auto max-h-[88vh] overflow-y-auto ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
           }`}>
             <div className={`flex items-center justify-between border-b pb-3 ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
@@ -487,8 +539,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
 
       {/* CHECK-IN MODAL (GPS / QR CODE / HYBRID OPTIONS) */}
       {isScannerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4">
-          <div className="bg-slate-900 border border-slate-800 text-slate-100 rounded-3xl w-full max-w-lg shadow-2xl p-6 space-y-5 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 text-slate-100 rounded-3xl w-full max-w-lg shadow-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 my-auto max-h-[88vh] overflow-y-auto">
             {/* Header & Close */}
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
@@ -653,24 +705,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
 
                   <button
                     type="button"
-                    onClick={() => {
-                      if (scannerRef.current) {
-                        scannerRef.current.clear().then(() => {
-                          const scanner = new Html5QrcodeScanner(
-                            'qr-reader',
-                            { fps: 10, qrbox: { width: 220, height: 220 } },
-                            false
-                          );
-                          scanner.render((decodedText) => {
-                            setScannedResult(decodedText);
-                            scanner.clear();
-                            handleProcessCheckin(decodedText, checkinMode);
-                          }, () => {});
-                          scannerRef.current = scanner;
-                        });
-                      }
-                    }}
-                    className="w-full py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 border border-slate-700 transition"
+                    onClick={() => startLiveCameraStream()}
+                    className="w-full py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 border border-slate-700 transition cursor-pointer"
                   >
                     <Camera className="w-4 h-4 text-emerald-400" />
                     <span>ขอเปิดกล้องไลฟ์สดอีกครั้ง</span>

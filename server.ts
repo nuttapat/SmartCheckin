@@ -583,13 +583,15 @@ app.get('/api/courses', (req, res) => {
 });
 
 app.post('/api/courses', (req, res) => {
-  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, ownerId } = req.body;
+  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, ownerId, defaultLat, defaultLng } = req.body;
 
   if (!courseCode || !courseName) {
     return res.status(400).json({ error: 'Course code and name are required.' });
   }
 
   const owner = users.get(ownerId) || teacherUser;
+  const lat = parseFloat(defaultLat) || 13.7988363;
+  const lng = parseFloat(defaultLng) || 100.322944;
 
   const newCourse: Course = {
     id: `crs_${Date.now()}`,
@@ -600,6 +602,8 @@ app.post('/api/courses', (req, res) => {
     coordinatorName: coordinatorName || owner.firstNameTh + ' ' + owner.lastNameTh,
     ownerId: owner.id,
     ownerName: `${owner.title} ${owner.firstNameTh} ${owner.lastNameTh}`,
+    defaultLat: lat,
+    defaultLng: lng,
     weeks: weeks || [],
     createdAt: new Date().toISOString(),
   };
@@ -626,8 +630,8 @@ app.post('/api/courses', (req, res) => {
       courseId: newCourse.id,
       weekNumber: w.weekNumber,
       topic: w.topic,
-      teacherLat: 13.7563, // Default latitude (Bangkok campus)
-      teacherLng: 100.5018, // Default longitude
+      teacherLat: lat,
+      teacherLng: lng,
       isActive: false,
       createdAt: new Date().toISOString(),
     };
@@ -667,13 +671,18 @@ app.put('/api/courses/:id', (req, res) => {
     return res.status(404).json({ error: 'Course not found' });
   }
 
-  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks } = req.body;
+  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, defaultLat, defaultLng } = req.body;
 
   if (courseCode) course.courseCode = courseCode;
   if (courseName) course.courseName = courseName;
   if (academicYear) course.academicYear = parseInt(academicYear, 10);
   if (semester) course.semester = semester;
   if (coordinatorName) course.coordinatorName = coordinatorName;
+  if (defaultLat !== undefined) course.defaultLat = parseFloat(defaultLat);
+  if (defaultLng !== undefined) course.defaultLng = parseFloat(defaultLng);
+
+  const courseLat = course.defaultLat || 13.7988363;
+  const courseLng = course.defaultLng || 100.322944;
 
   if (Array.isArray(weeks)) {
     course.weeks = weeks;
@@ -694,6 +703,8 @@ app.put('/api/courses/:id', (req, res) => {
       const existingSession = existingSessions.find((s) => s.weekNumber === w.weekNumber);
       if (existingSession) {
         existingSession.topic = w.topic;
+        existingSession.teacherLat = courseLat;
+        existingSession.teacherLng = courseLng;
         sessions.set(existingSession.id, existingSession);
       } else {
         const newSesId = `ses_${courseId}_w${w.weekNumber}_${Date.now()}`;
@@ -702,8 +713,8 @@ app.put('/api/courses/:id', (req, res) => {
           courseId,
           weekNumber: w.weekNumber,
           topic: w.topic,
-          teacherLat: 13.7563,
-          teacherLng: 100.5018,
+          teacherLat: courseLat,
+          teacherLng: courseLng,
           isActive: false,
           createdAt: new Date().toISOString(),
         });
