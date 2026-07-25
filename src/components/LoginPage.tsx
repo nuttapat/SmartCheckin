@@ -31,6 +31,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [googleEmailInput, setGoogleEmailInput] = useState<string>('');
   const [googleNameInput, setGoogleNameInput] = useState<string>('');
   const [googleRoleSelect, setGoogleRoleSelect] = useState<UserRole>(UserRole.STUDENT);
+  const [googleTitleOption, setGoogleTitleOption] = useState<string>('นาย');
+  const [googleCustomTitle, setGoogleCustomTitle] = useState<string>('');
+  const [googleFirstNameTh, setGoogleFirstNameTh] = useState<string>('');
+  const [googleLastNameTh, setGoogleLastNameTh] = useState<string>('');
+  const [googleFirstNameEn, setGoogleFirstNameEn] = useState<string>('');
+  const [googleLastNameEn, setGoogleLastNameEn] = useState<string>('');
   const [googleStudentIdInput, setGoogleStudentIdInput] = useState<string>('');
 
   // Forgot password state
@@ -54,8 +60,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           fbUser.displayName || fbUser.email.split('@')[0],
           fbUser.photoURL || undefined
         );
-        onLoginSuccess(res.user);
-        return;
+
+        if (res.requiresOnboarding) {
+          // New Google account - open Onboarding Modal with prefilled default name parts
+          setGoogleEmailInput(fbUser.email);
+          const rawName = fbUser.displayName || fbUser.email.split('@')[0];
+          setGoogleNameInput(rawName);
+          const parts = rawName.trim().split(' ');
+          setGoogleFirstNameTh(parts[0] || '');
+          setGoogleLastNameTh(parts.slice(1).join(' ') || '');
+          setGoogleFirstNameEn(parts[0] || '');
+          setGoogleLastNameEn(parts.slice(1).join(' ') || '');
+          setIsGoogleModalOpen(true);
+          return;
+        }
+
+        if (res.user) {
+          onLoginSuccess(res.user);
+          return;
+        }
       }
     } catch (err: any) {
       console.warn('Google popup error, presenting fallback account option:', err);
@@ -68,22 +91,48 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
   const handleCustomGoogleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg('');
+
     if (!googleEmailInput.trim() || !googleEmailInput.includes('@')) {
       setErrorMsg('กรุณากรอก Google Email ที่ถูกต้อง');
       return;
     }
+
+    const finalTitle = googleTitleOption === 'CUSTOM' ? googleCustomTitle.trim() : googleTitleOption;
+    if (!finalTitle) {
+      setErrorMsg('กรุณาระบุคำนำหน้าชื่อ');
+      return;
+    }
+
+    if (!googleFirstNameTh.trim() || !googleLastNameTh.trim()) {
+      setErrorMsg('กรุณากรอกชื่อและนามสกุลภาษาไทย');
+      return;
+    }
+
+    if (googleRoleSelect === UserRole.STUDENT && !googleStudentIdInput.trim()) {
+      setErrorMsg('กรุณากรอกรหัสประจำตัวนักศึกษาที่ถูกต้องก่อนเริ่มต้นใช้งาน');
+      return;
+    }
+
     try {
       setGoogleLoading(true);
       const res = await googleLogin(
         googleEmailInput.trim().toLowerCase(),
-        googleNameInput.trim() || googleEmailInput.split('@')[0],
+        googleNameInput.trim() || `${googleFirstNameTh} ${googleLastNameTh}`.trim() || googleEmailInput.split('@')[0],
         'https://lh3.googleusercontent.com/a/default-user',
         googleRoleSelect,
-        googleRoleSelect === UserRole.TEACHER ? 'อ.ดร.' : 'นาย',
-        googleRoleSelect === UserRole.STUDENT ? googleStudentIdInput.trim() : undefined
+        finalTitle,
+        googleRoleSelect === UserRole.STUDENT ? googleStudentIdInput.trim() : undefined,
+        googleFirstNameTh.trim(),
+        googleLastNameTh.trim(),
+        googleFirstNameEn.trim() || googleFirstNameTh.trim(),
+        googleLastNameEn.trim() || googleLastNameTh.trim()
       );
-      setIsGoogleModalOpen(false);
-      onLoginSuccess(res.user);
+
+      if (res.user) {
+        setIsGoogleModalOpen(false);
+        onLoginSuccess(res.user);
+      }
     } catch (err: any) {
       setErrorMsg(err.message || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบด้วย Google');
     } finally {
@@ -417,76 +466,239 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         <div className={`mt-8 pt-4 border-t text-center space-y-1 ${
           isDarkMode ? 'border-slate-800/60 text-slate-500' : 'border-slate-200/80 text-slate-500'
         }`}>
-          <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+          <p className="text-xs font-extrabold text-slate-900 dark:text-slate-100">
             © 2026 พัฒนาโดย ผศ. ดร. ณัฐภัทร อนุวงศ์เจริญ
           </p>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            Version 1.0 (พัฒนาขึ้นในปี 2026) • อัปเดตล่าสุด: 26 กรกฎาคม 2569
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
+            อัปเดตล่าสุด: 26 กรกฎาคม 2569
           </p>
         </div>
       </div>
 
-      {/* Google Sign-In Dialog / Fallback Modal */}
+      {/* Google Sign-In Dialog / Onboarding Modal */}
       {isGoogleModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className={`w-full max-w-md border rounded-3xl p-6 shadow-2xl relative transition-all ${
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
+          <div className={`w-full max-w-lg border rounded-3xl shadow-2xl relative transition-all my-auto max-h-[92vh] flex flex-col ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
           }`}>
-            <button
-              onClick={() => setIsGoogleModalOpen(false)}
-              className={`absolute top-4 right-4 p-2 rounded-full transition ${
-                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center space-x-3 mb-4">
-              <div className="w-10 h-10 rounded-2xl bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
-                <Sparkles className="w-5 h-5" />
+            {/* Modal Header */}
+            <div className={`p-5 sm:p-6 border-b flex items-center justify-between shrink-0 ${
+              isDarkMode ? 'bg-slate-800/50 border-slate-800' : 'bg-slate-50 border-slate-100'
+            }`}>
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold">ตั้งค่าโปรไฟล์เข้าใช้งานด้วย Google</h3>
+                  <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    เลือกประเภทผู้ใช้งานและระบุข้อมูลประจำตัวให้สอดคล้องกับระบบ
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-bold">ยืนยันการเข้าใช้งานด้วย Google</h3>
-                <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                  กรอกอีเมล Google Account เพื่อเชื่อมต่อเข้าสู่ระบบ
-                </p>
-              </div>
+              <button
+                onClick={() => setIsGoogleModalOpen(false)}
+                className={`p-2 rounded-full transition shrink-0 ${
+                  isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            <form onSubmit={handleCustomGoogleSubmit} className="space-y-4">
+            {/* Modal Form Body */}
+            <form onSubmit={handleCustomGoogleSubmit} className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1">
+              {errorMsg && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-start space-x-2.5 text-rose-600 dark:text-rose-300 text-xs">
+                  <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">{errorMsg}</span>
+                </div>
+              )}
+
+              {/* Role Selection */}
               <div>
-                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  ประเภทผู้ใช้งาน <span className="text-rose-500">*</span>
+                <label className={`block text-xs font-semibold mb-1.5 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  เลือกประเภทบัญชีผู้ใช้ (Account Role) <span className="text-rose-500">*</span>
                 </label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
-                    onClick={() => setGoogleRoleSelect(UserRole.STUDENT)}
-                    className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center transition ${
+                    onClick={() => {
+                      setGoogleRoleSelect(UserRole.STUDENT);
+                      setGoogleTitleOption('นาย');
+                    }}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center space-x-1.5 transition cursor-pointer ${
                       googleRoleSelect === UserRole.STUDENT
-                        ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300 font-bold'
-                        : isDarkMode ? 'border-slate-800 bg-slate-800 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-600'
+                        ? isDarkMode 
+                          ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/50 font-bold'
+                          : 'border-emerald-600 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-500/20 font-bold shadow-sm'
+                        : isDarkMode
+                          ? 'border-slate-800 bg-slate-800/80 text-slate-400 hover:text-white'
+                          : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
-                    นักศึกษา (Student)
+                    <span>🧑‍🎓 นักศึกษา (Student)</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setGoogleRoleSelect(UserRole.TEACHER)}
-                    className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center transition ${
+                    onClick={() => {
+                      setGoogleRoleSelect(UserRole.TEACHER);
+                      setGoogleTitleOption('อ.ดร.');
+                    }}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center space-x-1.5 transition cursor-pointer ${
                       googleRoleSelect === UserRole.TEACHER
-                        ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300 font-bold'
-                        : isDarkMode ? 'border-slate-800 bg-slate-800 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-600'
+                        ? isDarkMode 
+                          ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/50 font-bold'
+                          : 'border-emerald-600 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-500/20 font-bold shadow-sm'
+                        : isDarkMode
+                          ? 'border-slate-800 bg-slate-800/80 text-slate-400 hover:text-white'
+                          : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
-                    อาจารย์ (Teacher)
+                    <span>👨‍🏫 อาจารย์ (Teacher)</span>
                   </button>
                 </div>
               </div>
 
+              {/* Title & Student ID (for Students) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className={googleRoleSelect === UserRole.STUDENT ? 'col-span-1' : 'col-span-1 md:col-span-3'}>
+                  <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    คำนำหน้าชื่อ (Title) <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={googleTitleOption}
+                    onChange={(e) => setGoogleTitleOption(e.target.value)}
+                    className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                    }`}
+                  >
+                    {googleRoleSelect === UserRole.STUDENT ? (
+                      <>
+                        <option value="นาย">นาย (Mr.)</option>
+                        <option value="นางสาว">นางสาว (Ms.)</option>
+                        <option value="นาง">นาง (Mrs.)</option>
+                        <option value="CUSTOM">อื่นๆ (Custom...)</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="อ.ดร.">อ.ดร. (Dr.)</option>
+                        <option value="ผศ.ดร.">ผศ.ดร. (Asst. Prof. Dr.)</option>
+                        <option value="รศ.ดร.">รศ.ดร. (Assoc. Prof. Dr.)</option>
+                        <option value="ศ.ดร.">ศ.ดร. (Prof. Dr.)</option>
+                        <option value="อ.">อ. (Instructor)</option>
+                        <option value="CUSTOM">อื่นๆ (Custom...)</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                {googleTitleOption === 'CUSTOM' && (
+                  <div className="col-span-1 md:col-span-2">
+                    <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      คำนำหน้าชื่อแบบระบุเอง
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="ระบุคำนำหน้าชื่อ..."
+                      value={googleCustomTitle}
+                      onChange={(e) => setGoogleCustomTitle(e.target.value)}
+                      className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                      }`}
+                    />
+                  </div>
+                )}
+
+                {googleRoleSelect === UserRole.STUDENT && (
+                  <div className="col-span-1 md:col-span-2">
+                    <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      รหัสนักศึกษา (Student ID) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="เช่น 66010012"
+                      value={googleStudentIdInput}
+                      onChange={(e) => setGoogleStudentIdInput(e.target.value)}
+                      required
+                      className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                      }`}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Thai Names */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    ชื่อ (ภาษาไทย) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="สมชาย"
+                    value={googleFirstNameTh}
+                    onChange={(e) => setGoogleFirstNameTh(e.target.value)}
+                    required
+                    className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    นามสกุล (ภาษาไทย) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="ใจดี"
+                    value={googleLastNameTh}
+                    onChange={(e) => setGoogleLastNameTh(e.target.value)}
+                    required
+                    className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* English Names */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    First Name (English)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Somchai"
+                    value={googleFirstNameEn}
+                    onChange={(e) => setGoogleFirstNameEn(e.target.value)}
+                    className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    Last Name (English)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Jaidee"
+                    value={googleLastNameEn}
+                    onChange={(e) => setGoogleLastNameEn(e.target.value)}
+                    className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Google Email Account */}
               <div>
                 <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Google Email Account <span className="text-rose-500">*</span>
+                  อีเมล Google (Google Email Account) <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="email"
@@ -494,45 +706,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   value={googleEmailInput}
                   onChange={(e) => setGoogleEmailInput(e.target.value)}
                   required
-                  className={`w-full border rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-emerald-500 ${
-                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
                   }`}
                 />
               </div>
 
-              <div>
-                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  ชื่อ-นามสกุล (Google Name)
-                </label>
-                <input
-                  type="text"
-                  placeholder="เช่น Somchai Jaidee"
-                  value={googleNameInput}
-                  onChange={(e) => setGoogleNameInput(e.target.value)}
-                  className={`w-full border rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-emerald-500 ${
-                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                  }`}
-                />
-              </div>
-
-              {googleRoleSelect === UserRole.STUDENT && (
-                <div>
-                  <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                    รหัสนักศึกษา (Student ID)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="เช่น 66010012"
-                    value={googleStudentIdInput}
-                    onChange={(e) => setGoogleStudentIdInput(e.target.value)}
-                    className={`w-full border rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-emerald-500 ${
-                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                    }`}
-                  />
-                </div>
-              )}
-
-              <div className="flex items-center justify-end space-x-2 pt-2">
+              <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800/40">
                 <button
                   type="button"
                   onClick={() => setIsGoogleModalOpen(false)}
@@ -545,9 +725,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 <button
                   type="submit"
                   disabled={googleLoading}
-                  className="py-2.5 px-5 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  className="py-2.5 px-5 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition shadow-lg shadow-emerald-500/20 cursor-pointer disabled:opacity-50"
                 >
-                  {googleLoading ? 'กำลังบันทึก...' : 'เข้าสู่ระบบด้วย Google'}
+                  {googleLoading ? 'กำลังบันทึกข้อมูล...' : 'บันทึกโปรไฟล์และเข้าสู่ระบบ'}
                 </button>
               </div>
             </form>

@@ -75,16 +75,31 @@ export async function updateUserProfile(
 
 export async function googleLogin(
   email: string,
-  name: string,
+  name?: string,
   picture?: string,
   role?: string,
   title?: string,
-  universityId?: string
-): Promise<{ message: string; user: User }> {
+  universityId?: string,
+  firstNameTh?: string,
+  lastNameTh?: string,
+  firstNameEn?: string,
+  lastNameEn?: string
+): Promise<{ message: string; user?: User; requiresOnboarding?: boolean; email?: string; name?: string; picture?: string }> {
   const res = await fetch(`${API_BASE}/auth/google`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, name, picture, role, title, universityId }),
+    body: JSON.stringify({
+      email,
+      name,
+      picture,
+      role,
+      title,
+      universityId,
+      firstNameTh,
+      lastNameTh,
+      firstNameEn,
+      lastNameEn,
+    }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Google login failed');

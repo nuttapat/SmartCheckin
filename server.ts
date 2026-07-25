@@ -524,23 +524,45 @@ app.put('/api/users/:userId/profile', (req, res) => {
 });
 
 app.post('/api/auth/google', (req, res) => {
-  const { email, name, picture, role, title, universityId } = req.body || {};
+  const { email, name, picture, role, title, universityId, firstNameTh, lastNameTh, firstNameEn, lastNameEn } = req.body || {};
   const userEmail = (email || `user_${Math.floor(1000 + Math.random() * 9000)}@university.ac.th`).toString().trim().toLowerCase();
 
   let user = Array.from(users.values()).find((u) => u.email && u.email.toLowerCase() === userEmail);
 
   if (!user) {
+    // If user does not exist in system yet and no role is explicitly passed, require onboarding setup
+    if (!role) {
+      return res.json({
+        requiresOnboarding: true,
+        email: userEmail,
+        name: name || userEmail.split('@')[0],
+        picture: picture || 'https://lh3.googleusercontent.com/a/default-user',
+        message: 'ผู้ใช้งานใหม่ กรุณาตั้งค่าประเภทบัญชีและระบุข้อมูลประจำตัวเพื่อเริ่มต้นใช้งาน',
+      });
+    }
+
+    const userRole = role === UserRole.TEACHER ? UserRole.TEACHER : UserRole.STUDENT;
+
+    // Validate Student ID if registering as Student
+    if (userRole === UserRole.STUDENT && (!universityId || !universityId.toString().trim())) {
+      return res.status(400).json({ error: 'กรุณาระบุรหัสประจำตัวนักศึกษาที่ถูกต้อง' });
+    }
+
     const parts = (name || 'Google User').toString().trim().split(' ');
-    const userRole = role || UserRole.STUDENT;
+    const fTh = firstNameTh && firstNameTh.toString().trim() ? firstNameTh.toString().trim() : (parts[0] || 'ผู้ใช้งาน');
+    const lTh = lastNameTh && lastNameTh.toString().trim() ? lastNameTh.toString().trim() : (parts.slice(1).join(' ') || 'กูเกิล');
+    const fEn = firstNameEn && firstNameEn.toString().trim() ? firstNameEn.toString().trim() : (parts[0] || 'Google');
+    const lEn = lastNameEn && lastNameEn.toString().trim() ? lastNameEn.toString().trim() : (parts.slice(1).join(' ') || 'User');
+
     user = {
       id: `usr_g_${Date.now()}`,
       role: userRole,
-      title: title || (userRole === UserRole.TEACHER ? 'อ.ดร.' : 'นาย'),
-      firstNameTh: parts[0] || 'ผู้ใช้งาน',
-      lastNameTh: parts[1] || 'กูเกิล',
-      firstNameEn: parts[0] || 'Google',
-      lastNameEn: parts[1] || 'User',
-      universityId: universityId ? universityId.toString().trim() : (userRole === UserRole.TEACHER ? '' : `660${Math.floor(1000 + Math.random() * 9000)}`),
+      title: title ? title.toString().trim() : (userRole === UserRole.TEACHER ? 'อ.ดร.' : 'นาย'),
+      firstNameTh: fTh,
+      lastNameTh: lTh,
+      firstNameEn: fEn,
+      lastNameEn: lEn,
+      universityId: universityId ? universityId.toString().trim() : '',
       email: userEmail,
       avatarUrl: picture || 'https://lh3.googleusercontent.com/a/default-user',
       authProvider: 'google',

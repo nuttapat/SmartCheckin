@@ -114,14 +114,24 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
     updateLocation();
   }, [student.id]);
 
+  const stopLiveCameraStream = async () => {
+    if (html5QrCodeInstanceRef.current) {
+      const instance = html5QrCodeInstanceRef.current;
+      html5QrCodeInstanceRef.current = null;
+      try {
+        if (instance.isScanning) {
+          await instance.stop().catch(() => {});
+        }
+        await instance.clear().catch(() => {});
+      } catch (e) {
+        // Ignore any scanner state error when stopping uninitialized or already stopped camera
+      }
+    }
+  };
+
   const startLiveCameraStream = async () => {
     try {
-      if (html5QrCodeInstanceRef.current) {
-        try {
-          await html5QrCodeInstanceRef.current.stop();
-        } catch (e) {}
-        html5QrCodeInstanceRef.current = null;
-      }
+      await stopLiveCameraStream();
 
       const container = document.getElementById('qr-reader');
       if (!container) return;
@@ -134,9 +144,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
         { fps: 10, qrbox: { width: 220, height: 220 } },
         (decodedText) => {
           setScannedResult(decodedText);
-          try {
-            html5QrCode.stop();
-          } catch (e) {}
+          stopLiveCameraStream();
           handleProcessCheckin(decodedText, checkinMode);
         },
         () => {}
@@ -152,9 +160,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
           { fps: 10, qrbox: { width: 220, height: 220 } },
           (decodedText) => {
             setScannedResult(decodedText);
-            try {
-              html5QrCodeInstanceRef.current?.stop();
-            } catch (e) {}
+            stopLiveCameraStream();
             handleProcessCheckin(decodedText, checkinMode);
           },
           () => {}
@@ -174,16 +180,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
 
       return () => {
         clearTimeout(timer);
-        if (html5QrCodeInstanceRef.current) {
-          html5QrCodeInstanceRef.current.stop().catch(() => {});
-          html5QrCodeInstanceRef.current = null;
-        }
+        stopLiveCameraStream();
       };
     } else {
-      if (html5QrCodeInstanceRef.current) {
-        html5QrCodeInstanceRef.current.stop().catch(() => {});
-        html5QrCodeInstanceRef.current = null;
-      }
+      stopLiveCameraStream();
     }
   }, [isScannerOpen, checkinMode]);
 
