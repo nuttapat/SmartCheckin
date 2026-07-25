@@ -46,13 +46,19 @@ export const Navbar: React.FC<NavbarProps> = ({
       setIsDropdownOpen(false);
     }, 350);
   };
+  const isTeacher = currentUser?.role === UserRole.TEACHER;
+
   return (
     <header className={`${isDarkMode ? 'bg-slate-900/90 border-slate-800 text-white' : 'bg-white/90 border-slate-200/80 text-slate-900'} backdrop-blur-md border-b sticky top-0 z-40 shadow-xs transition-colors duration-200`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Brand Logo & App Name */}
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-500 flex items-center justify-center shadow-md shadow-emerald-500/20">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-md transition-all ${
+              isTeacher
+                ? 'bg-gradient-to-tr from-sky-600 via-sky-500 to-blue-600 shadow-sky-500/20'
+                : 'bg-gradient-to-tr from-sky-600 via-blue-500 to-indigo-600 shadow-blue-500/20'
+            }`}>
               <QrCode className="w-5 h-5 text-white stroke-[2.5]" />
             </div>
             <div>
@@ -60,12 +66,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className={`font-extrabold text-lg tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                   Smart Attendance
                 </span>
-                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-full">
-                  PWA Active
+                <span className={`hidden sm:inline-block px-2.5 py-0.5 text-[10px] font-extrabold border rounded-full transition-all ${
+                  isTeacher
+                    ? isDarkMode
+                      ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                      : 'bg-sky-100 text-sky-950 border-sky-300'
+                    : isDarkMode
+                    ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                    : 'bg-sky-100 text-sky-950 border-sky-300'
+                }`}>
+                  {isTeacher ? '👨‍🏫 อาจารย์' : '🧑‍🎓 นักศึกษา'}
                 </span>
               </div>
               <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} hidden sm:block`}>
-                ระบบเช็คชื่อนักศึกษาอัจฉริยะ (Anti-Proxy & Dynamic QR)
+                ระบบเช็คชื่ออัจฉริยะ (Anti-Proxy & Dynamic QR)
               </p>
             </div>
           </div>

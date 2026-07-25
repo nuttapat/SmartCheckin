@@ -98,7 +98,7 @@ export interface AttendanceRecord {
   scannedLng: number;
   distanceMeters: number;
   deviceId: string;
-  checkinMethod?: 'QR_ONLY' | 'GPS_ONLY' | 'HYBRID';
+  checkinMethod?: 'QR_ONLY' | 'GPS_ONLY' | 'HYBRID' | 'TOKEN';
 }
 
 export interface TeacherAttendanceRecord {
@@ -113,7 +113,7 @@ export interface TeacherAttendanceRecord {
   timestamp: string;
   lat: number;
   lng: number;
-  checkinMethod: 'GPS_ONLY' | 'QR_ONLY' | 'HYBRID';
+  checkinMethod: 'GPS_ONLY' | 'QR_ONLY' | 'HYBRID' | 'TOKEN';
   deviceId: string;
   buildingRoom?: string;
   notes?: string;

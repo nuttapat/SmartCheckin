@@ -47,7 +47,7 @@ export const JoinCourseModal: React.FC<JoinCourseModalProps> = ({
       }`}>
         <div className={`flex items-center justify-between border-b pb-3 ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
           <div className="flex items-center space-x-2">
-            <KeyRound className="w-5 h-5 text-emerald-500" />
+            <KeyRound className="w-5 h-5 text-sky-600 dark:text-sky-400" />
             <h3 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>เข้าร่วมวิชาเรียน (Join Course)</h3>
           </div>
           <button onClick={onClose} className={`p-1 rounded-lg ${isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}>
@@ -72,7 +72,7 @@ export const JoinCourseModal: React.FC<JoinCourseModalProps> = ({
               value={code}
               onChange={(e) => setCode(e.target.value)}
               required
-              className={`w-full border rounded-xl px-4 py-3 text-center text-lg font-mono font-bold tracking-widest text-emerald-600 dark:text-emerald-400 focus:outline-none focus:border-teal-500 uppercase ${
+              className={`w-full border rounded-xl px-4 py-3 text-center text-lg font-mono font-black tracking-widest text-sky-600 dark:text-sky-400 focus:outline-none focus:border-sky-500 uppercase ${
                 isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-300'
               }`}
             />
@@ -89,7 +89,7 @@ export const JoinCourseModal: React.FC<JoinCourseModalProps> = ({
             <button
               type="submit"
               disabled={loading}
-              className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center space-x-1.5 transition shadow-sm disabled:opacity-50"
+              className="px-5 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white flex items-center space-x-1.5 transition shadow-sm disabled:opacity-50 cursor-pointer"
             >
               {loading ? (
                 <span>กำลังตรวจสอบ...</span>

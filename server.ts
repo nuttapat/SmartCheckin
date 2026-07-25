@@ -561,7 +561,10 @@ app.post('/api/auth/google', (req, res) => {
 
 app.get('/api/users/me', (req, res) => {
   const userId = req.headers['x-user-id'] as string;
-  const user = users.get(userId) || teacherUser; // default to teacher if unset
+  const user = users.get(userId);
+  if (!user) {
+    return res.status(401).json({ error: 'User not found' });
+  }
   res.json(user);
 });
 
@@ -570,13 +573,26 @@ app.get('/api/courses', (req, res) => {
   const userId = req.headers['x-user-id'] as string;
   const user = users.get(userId);
 
-  let result = Array.from(courses.values());
+  if (!user) {
+    return res.json([]);
+  }
 
-  if (user && user.role === UserRole.STUDENT) {
+  let result: Course[] = [];
+
+  if (user.role === UserRole.STUDENT) {
     const enrolledCourseIds = courseMembers
       .filter((m) => m.userId === userId && m.role === CourseMemberRole.STUDENT)
       .map((m) => m.courseId);
-    result = result.filter((c) => enrolledCourseIds.includes(c.id));
+    result = Array.from(courses.values()).filter((c) => enrolledCourseIds.includes(c.id));
+  } else if (user.role === UserRole.TEACHER) {
+    const memberCourseIds = courseMembers
+      .filter((m) => m.userId === userId)
+      .map((m) => m.courseId);
+    result = Array.from(courses.values()).filter(
+      (c) => c.ownerId === userId || memberCourseIds.includes(c.id)
+    );
+  } else {
+    result = [];
   }
 
   res.json(result);
@@ -589,7 +605,11 @@ app.post('/api/courses', (req, res) => {
     return res.status(400).json({ error: 'Course code and name are required.' });
   }
 
-  const owner = users.get(ownerId) || teacherUser;
+  const reqUserId = req.headers['x-user-id'] as string;
+  const owner = (ownerId && users.get(ownerId)) || (reqUserId && users.get(reqUserId));
+  if (!owner) {
+    return res.status(400).json({ error: 'ไม่พบอาจารย์ผู้สร้างรายวิชา' });
+  }
   const lat = parseFloat(defaultLat) || 13.7988363;
   const lng = parseFloat(defaultLng) || 100.322944;
 
@@ -752,10 +772,8 @@ app.post('/api/courses/:id/invite', (req, res) => {
 
 app.post('/api/invites/join', (req, res) => {
   const { code, userId } = req.body;
-  const invite = inviteLinks.get(code?.toUpperCase());
-
-  if (!invite) {
-    return res.status(404).json({ error: 'Invalid or expired invite code.' });
+  if (!code || !code.trim()) {
+    return res.status(400).json({ error: 'กรุณาระบุรหัสเชิญชวนหรือรหัสรายวิชา' });
   }
 
   const user = users.get(userId);
@@ -763,24 +781,43 @@ app.post('/api/invites/join', (req, res) => {
     return res.status(404).json({ error: 'User not found.' });
   }
 
+  const cleanCode = code.trim().toUpperCase();
+  let invite = inviteLinks.get(cleanCode);
+
+  let targetCourseId = invite?.courseId;
+  let targetRole = invite?.role || CourseMemberRole.STUDENT;
+
+  if (!invite) {
+    // Fallback: Check if user entered a Course Code (e.g. MTID204) directly
+    const courseMatch = Array.from(courses.values()).find(
+      (c) => c.courseCode.toUpperCase() === cleanCode || c.id.toUpperCase() === cleanCode
+    );
+    if (courseMatch) {
+      targetCourseId = courseMatch.id;
+      targetRole = CourseMemberRole.STUDENT;
+    } else {
+      return res.status(404).json({ error: 'ไม่พบรหัสเชิญชวนหรือรหัสวิชานี้ในระบบ กรุณาตรวจสอบรหัสอีกครั้ง' });
+    }
+  }
+
   // Check if already member
-  const exists = courseMembers.some((m) => m.courseId === invite.courseId && m.userId === userId);
+  const exists = courseMembers.some((m) => m.courseId === targetCourseId && m.userId === userId);
   if (exists) {
-    return res.status(400).json({ error: 'Already enrolled in this course.' });
+    return res.status(400).json({ error: 'คุณเป็นสมาชิกในรายวิชานี้อยู่แล้ว' });
   }
 
   const newMember: CourseMember = {
     id: `cm_${Date.now()}`,
-    courseId: invite.courseId,
+    courseId: targetCourseId!,
     userId,
-    role: invite.role,
+    role: targetRole,
     joinedAt: new Date().toISOString(),
   };
 
   courseMembers.push(newMember);
   saveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMember);
 
-  res.json({ message: 'Successfully joined course!', courseId: invite.courseId });
+  res.json({ message: 'เข้าร่วมรายวิชาสำเร็จเรียบร้อยแล้ว!', courseId: targetCourseId });
 });
 
 // 3. Active Session & Dynamic QR Management
@@ -857,10 +894,10 @@ app.post('/api/checkin', (req, res) => {
 
   const activeQR = activeQRCodes.get(sessionId);
 
-  // Mode validation: QR_ONLY or HYBRID requires valid active QR token
-  if (checkinMode === 'QR_ONLY' || checkinMode === 'HYBRID') {
+  // Mode validation: QR_ONLY, HYBRID, or TOKEN requires valid active token
+  if (checkinMode === 'QR_ONLY' || checkinMode === 'HYBRID' || checkinMode === 'TOKEN') {
     if (!qrToken) {
-      return res.status(400).json({ error: 'QR Token is required for QR code check-in.' });
+      return res.status(400).json({ error: 'กรุณากรอกรหัส Token 6 หลักจากหน้าจออาจารย์' });
     }
     let inputToken = qrToken.trim();
     if (inputToken.includes(':')) {
@@ -869,7 +906,7 @@ app.post('/api/checkin', (req, res) => {
     }
 
     if (!activeQR || (activeQR.token.toUpperCase() !== inputToken.toUpperCase() && activeQR.token !== inputToken)) {
-      return res.status(400).json({ error: 'รหัส Token / QR Code หมดอายุหรือไม่อยู่ในระบบ! กรุณาสแกนหรือกรอกรหัส 6 หลักล่าสุดจากหน้าจอ' });
+      return res.status(400).json({ error: 'รหัส Token / QR Code หมดอายุหรือไม่อยู่ในระบบ! กรุณาสแกนหรือกรอกรหัส 6 หลักล่าสุดจากหน้าจออาจารย์' });
     }
   }
 
@@ -1028,10 +1065,11 @@ app.get('/api/teacher/checkin', (req, res) => {
 // 5. Quick Check-In (Event Mode)
 app.post('/api/quick-events', (req, res) => {
   const { title, teacherId, teacherLat, teacherLng } = req.body;
+  const reqUserId = req.headers['x-user-id'] as string;
   const newEvent: QuickEvent = {
     id: `evt_${Date.now()}`,
     title: title || 'Ad-hoc Quick Attendance Event',
-    teacherId: teacherId || teacherUser.id,
+    teacherId: teacherId || reqUserId || '',
     teacherLat: parseFloat(teacherLat) || 13.7563,
     teacherLng: parseFloat(teacherLng) || 100.5018,
     isActive: true,
@@ -1159,7 +1197,34 @@ app.get('/api/export-csv/:courseId', (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader(
     'Content-Disposition',
-    `attachment; filename="attendance_${course.courseCode}_${Date.now()}.csv"`
+    `attachment; filename="student_attendance_${course.courseCode}_${Date.now()}.csv"`
+  );
+  // Add UTF-8 BOM for Thai character encoding in Excel
+  res.send('\uFEFF' + csv);
+});
+
+// 6.5 Teacher Teaching Attendance CSV Export Endpoint
+app.get('/api/export-teacher-csv', (req, res) => {
+  const teacherId = req.query.teacherId as string | undefined;
+  const courseId = req.query.courseId as string | undefined;
+  let records = [...teacherAttendanceRecords];
+  if (teacherId) {
+    records = records.filter((r) => r.teacherId === teacherId);
+  }
+  if (courseId && courseId !== 'ALL') {
+    records = records.filter((r) => r.courseId === courseId || r.courseCode === courseId);
+  }
+
+  let csv = 'อาจารย์ผู้สอน,รหัสวิชา,ชื่อรายวิชา,ห้องเรียน/อาคาร,หัวข้อคาบเรียน,วิธีเช็คชื่อ,ละติจูด,ลองจิจูด,วันเวลาลงชื่อ,หมายเหตุ\n';
+  records.forEach((r) => {
+    const timeStr = new Date(r.timestamp).toLocaleString('th-TH');
+    csv += `"${r.teacherName || ''}","${r.courseCode || ''}","${r.courseName || ''}","${r.buildingRoom || ''}","${r.sessionTopic || ''}","${r.checkinMethod || ''}",${r.lat},${r.lng},"${timeStr}","${r.notes || ''}"\n`;
+  });
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="teacher_teaching_report_${Date.now()}.csv"`
   );
   // Add UTF-8 BOM for Thai character encoding in Excel
   res.send('\uFEFF' + csv);

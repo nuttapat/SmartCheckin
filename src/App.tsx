@@ -167,12 +167,18 @@ export default function App() {
     );
   }
 
+  const isTeacher = currentUser?.role === UserRole.TEACHER;
+
   // Authenticated Dashboard View
   return (
     <div className={`min-h-screen font-sans transition-colors duration-200 ${
       isDarkMode 
-        ? 'bg-slate-950 text-slate-100 selection:bg-emerald-500 selection:text-slate-950 dark' 
-        : 'bg-slate-50 text-slate-900 selection:bg-emerald-500 selection:text-white'
+        ? isTeacher
+          ? 'bg-slate-950 text-slate-100 selection:bg-blue-500 selection:text-slate-950 dark' 
+          : 'bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-slate-950 dark'
+        : isTeacher
+        ? 'bg-slate-50/70 text-slate-900 selection:bg-blue-600 selection:text-white'
+        : 'bg-slate-50/70 text-slate-900 selection:bg-indigo-500 selection:text-white'
     }`}>
       {/* Top Navbar */}
       <Navbar
@@ -209,6 +215,20 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Footer */}
+      <footer className={`mt-auto py-6 border-t text-center space-y-1 ${
+        isDarkMode 
+          ? 'border-slate-800/80 text-slate-400 bg-slate-950/60' 
+          : 'border-slate-200/80 text-slate-600 bg-slate-100/50'
+      }`}>
+        <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+          © 2026 พัฒนาโดย ผศ. ดร. ณัฐภัทร อนุวงศ์เจริญ
+        </p>
+        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+          Version 1.0 (พัฒนาขึ้นในปี 2026) • อัปเดตล่าสุด: 26 กรกฎาคม 2569
+        </p>
+      </footer>
 
       {/* Modals */}
       <UserSettingsModal

@@ -268,7 +268,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
             }`}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
-                  <MapPin className="w-4 h-4 text-teal-400" />
+                  <MapPin className="w-4 h-4 text-blue-400" />
                   <span className={`text-xs font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                     ตำแหน่ง GPS ประจำห้องเรียนรายวิชานี้
                   </span>
@@ -276,7 +276,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowMapPicker(!showMapPicker)}
-                  className="px-3 py-1.5 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 text-teal-600 dark:text-teal-400 border border-teal-500/30 text-xs font-bold flex items-center space-x-1.5 transition"
+                  className="px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-xs font-bold flex items-center space-x-1.5 transition"
                 >
                   <Globe className="w-3.5 h-3.5" />
                   <span>{showMapPicker ? 'ซ่อนแผนที่' : '📍 เลือกระบุพิกัดบน Maps'}</span>
@@ -285,9 +285,9 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
 
               {/* Current Selected Location Indicator */}
               <div className={`px-3 py-2 rounded-xl text-xs flex items-center space-x-2 border ${
-                isDarkMode ? 'bg-slate-900/90 border-slate-700 text-teal-300' : 'bg-teal-50 border-teal-200 text-teal-900'
+                isDarkMode ? 'bg-slate-900/90 border-slate-700 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-900'
               }`}>
-                <MapPin className="w-4 h-4 text-teal-400 shrink-0 animate-pulse" />
+                <MapPin className="w-4 h-4 text-blue-400 shrink-0 animate-pulse" />
                 <div className="truncate">
                   <span className="font-bold">สถานที่อ้างอิง: </span>
                   <span className="font-semibold">
@@ -326,7 +326,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
                       value={defaultLat}
                       onChange={(e) => setDefaultLat(parseFloat(e.target.value) || 0)}
                       className={`w-full border rounded-xl px-3 py-1.5 text-xs font-mono font-bold ${
-                        isDarkMode ? 'bg-slate-800 border-slate-700 text-teal-400' : 'bg-white border-slate-300 text-teal-700'
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-blue-400' : 'bg-white border-slate-300 text-blue-700'
                       }`}
                     />
                   </div>
@@ -340,7 +340,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
                       value={defaultLng}
                       onChange={(e) => setDefaultLng(parseFloat(e.target.value) || 0)}
                       className={`w-full border rounded-xl px-3 py-1.5 text-xs font-mono font-bold ${
-                        isDarkMode ? 'bg-slate-800 border-slate-700 text-teal-400' : 'bg-white border-slate-300 text-teal-700'
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-blue-400' : 'bg-white border-slate-300 text-blue-700'
                       }`}
                     />
                   </div>
@@ -352,13 +352,13 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
           {/* Teaching Weeks Management */}
           <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
-              <h3 className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-teal-400' : 'text-teal-600'}`}>
+              <h3 className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
                 กำหนดสัปดาห์การสอน &amp; หัวข้อวิชา ({weeks.length} สัปดาห์)
               </h3>
               <button
                 type="button"
                 onClick={handleAddWeek}
-                className="px-3 py-1.5 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 text-teal-600 dark:text-teal-400 border border-teal-500/30 text-xs font-bold flex items-center space-x-1 transition"
+                className="px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-xs font-bold flex items-center space-x-1 transition"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>+ เพิ่มสัปดาห์สอน</span>

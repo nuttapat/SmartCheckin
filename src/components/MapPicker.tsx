@@ -130,13 +130,19 @@ export const MapPicker: React.FC<MapPickerProps> = ({
       </div>
 
       {/* Search Bar */}
-      <form onSubmit={handleSearchLocation} className="flex gap-2">
+      <div className="flex gap-2">
         <div className="relative flex-1">
           <input
             type="text"
             placeholder="ค้นหาชื่ออาคาร, มหาวิทยาลัย หรือสถานที่..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSearchLocation(e as any);
+              }
+            }}
             className={`w-full border rounded-xl pl-9 pr-3 py-2 text-xs focus:outline-none focus:border-teal-500 ${
               isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
             }`}
@@ -144,14 +150,15 @@ export const MapPicker: React.FC<MapPickerProps> = ({
           <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
         </div>
         <button
-          type="submit"
+          type="button"
+          onClick={(e) => handleSearchLocation(e as any)}
           disabled={searching}
           className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold transition flex items-center space-x-1 shrink-0"
         >
           {searching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
           <span>ค้นหา</span>
         </button>
-      </form>
+      </div>
 
       {/* Search Results Dropdown */}
       {searchResults.length > 0 && (

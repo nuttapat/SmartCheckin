@@ -40,6 +40,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [forgotSuccessMsg, setForgotSuccessMsg] = useState<string>('');
   const [forgotLoading, setForgotLoading] = useState<boolean>(false);
 
+  // Hidden dev mode state for demo accounts
+  const [showDemoAccounts, setShowDemoAccounts] = useState<boolean>(false);
+
   const handleGoogleAuth = async () => {
     setErrorMsg('');
     setGoogleLoading(true);
@@ -342,9 +345,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           </div>
         </div>
 
-        {/* Quick Demo Accounts Selection */}
+        {/* Subtle toggle for dev mode demo accounts (Hidden by default) */}
         {allUsers && allUsers.length > 0 && (
-          <div className={`mt-6 border rounded-2xl p-4 ${
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={() => setShowDemoAccounts(!showDemoAccounts)}
+              className={`text-[11px] transition cursor-pointer font-medium ${
+                isDarkMode ? 'text-slate-600 hover:text-slate-400' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              {showDemoAccounts ? '🙈 ซ่อนบัญชีทดสอบระบบ' : '⚡ บัญชีทดสอบระบบ (Dev Mode)'}
+            </button>
+          </div>
+        )}
+
+        {/* Quick Demo Accounts Selection */}
+        {showDemoAccounts && allUsers && allUsers.length > 0 && (
+          <div className={`mt-3 border rounded-2xl p-4 transition-all ${
             isDarkMode ? 'bg-slate-900/60 border-slate-800/80' : 'bg-slate-100/80 border-slate-200'
           }`}>
             <div className="flex items-center justify-between mb-3">
@@ -360,7 +378,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 <button
                   key={u.id}
                   onClick={() => handleQuickLogin(u)}
-                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between text-xs transition ${
+                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between text-xs transition cursor-pointer ${
                     isDarkMode 
                       ? 'bg-slate-800/80 hover:bg-slate-800 border-slate-700 text-slate-200' 
                       : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
@@ -394,6 +412,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </div>
           </div>
         )}
+
+        {/* Footer Credit & Copyright Info */}
+        <div className={`mt-8 pt-4 border-t text-center space-y-1 ${
+          isDarkMode ? 'border-slate-800/60 text-slate-500' : 'border-slate-200/80 text-slate-500'
+        }`}>
+          <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+            © 2026 พัฒนาโดย ผศ. ดร. ณัฐภัทร อนุวงศ์เจริญ
+          </p>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            Version 1.0 (พัฒนาขึ้นในปี 2026) • อัปเดตล่าสุด: 26 กรกฎาคม 2569
+          </p>
+        </div>
       </div>
 
       {/* Google Sign-In Dialog / Fallback Modal */}

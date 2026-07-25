@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { User, Course, Session, AttendanceRecord, TeacherAttendanceRecord, QuickEvent, InviteLink } from '../types';
 import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, createQuickEvent, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords } from '../services/api';
-import { QrCode, Users, Download, Sparkles, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle } from 'lucide-react';
+import { QrCode, Users, Download, Sparkles, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX } from 'lucide-react';
 import QRCode from 'qrcode';
 import { TeacherCourseEditModal } from './TeacherCourseEditModal';
 
@@ -56,13 +56,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     } catch (e) {}
   };
 
+  // Active View Tab State
+  const [dashboardTab, setDashboardTab] = useState<'STUDENT_ATTENDANCE' | 'TEACHER_LOGS'>('STUDENT_ATTENDANCE');
+
   // Invite modal state
   const [inviteModalCode, setInviteModalCode] = useState<InviteLink | null>(null);
   const [quickEventModal, setQuickEventModal] = useState<QuickEvent | null>(null);
 
   // Teacher Attendance Check-In state
   const [isTeacherCheckinModalOpen, setIsTeacherCheckinModalOpen] = useState<boolean>(false);
-  const [teacherCheckinMethod, setTeacherCheckinMethod] = useState<'GPS_ONLY' | 'QR_ONLY' | 'HYBRID'>('GPS_ONLY');
+  const [teacherCheckinMethod, setTeacherCheckinMethod] = useState<'HYBRID' | 'GPS_ONLY' | 'TOKEN' | 'QR_ONLY'>('HYBRID');
+  const [teacherTokenInput, setTeacherTokenInput] = useState<string>('');
   const [teacherCheckinCourseId, setTeacherCheckinCourseId] = useState<string>('');
   const [teacherCheckinSessionId, setTeacherCheckinSessionId] = useState<string>('');
   const [buildingRoom, setBuildingRoom] = useState<string>('');
@@ -70,6 +74,39 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [teacherHistory, setTeacherHistory] = useState<TeacherAttendanceRecord[]>([]);
   const [submittingTeacherCheckin, setSubmittingTeacherCheckin] = useState<boolean>(false);
   const [teacherCheckinResult, setTeacherCheckinResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Teacher Log Dashboard View Mode and Filter State
+  const [teacherLogViewMode, setTeacherLogViewMode] = useState<'OVERALL' | 'BY_COURSE'>('OVERALL');
+  const [teacherLogCourseFilter, setTeacherLogCourseFilter] = useState<string>('ALL');
+
+  // Computed course breakdown statistics for teacher logs
+  const courseBreakdown = useMemo(() => {
+    return courses.map((course) => {
+      const courseLogs = teacherHistory.filter(
+        (r) => r.courseId === course.id || r.courseCode === course.courseCode
+      );
+      return {
+        course,
+        count: courseLogs.length,
+        lastCheckin: courseLogs.length > 0 ? courseLogs[0].timestamp : null,
+      };
+    });
+  }, [courses, teacherHistory]);
+
+  const generalLogsCount = useMemo(() => {
+    return teacherHistory.filter((r) => !r.courseId && !courses.some((c) => c.courseCode === r.courseCode)).length;
+  }, [courses, teacherHistory]);
+
+  const filteredTeacherHistory = useMemo(() => {
+    if (teacherLogCourseFilter === 'ALL') return teacherHistory;
+    if (teacherLogCourseFilter === 'GENERAL') {
+      return teacherHistory.filter((r) => !r.courseId && !courses.some((c) => c.courseCode === r.courseCode));
+    }
+    const selectedCourse = courses.find((c) => c.id === teacherLogCourseFilter);
+    return teacherHistory.filter(
+      (r) => r.courseId === teacherLogCourseFilter || (selectedCourse && r.courseCode === selectedCourse.courseCode)
+    );
+  }, [teacherHistory, teacherLogCourseFilter, courses]);
 
   const loadTeacherHistory = async () => {
     try {
@@ -318,30 +355,30 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       {/* Teacher Welcome Header & Quick Action */}
       <div className={`rounded-3xl p-6 md:p-8 border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all ${
         isDarkMode 
-          ? 'bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border-slate-800 text-white shadow-xl' 
-          : 'bg-gradient-to-r from-sky-50/90 via-teal-50/70 to-emerald-50/80 border-sky-200/80 text-slate-900 shadow-md'
+          ? 'bg-gradient-to-r from-slate-950 via-slate-900 to-sky-950/50 border-sky-900/40 text-white shadow-2xl' 
+          : 'bg-gradient-to-r from-sky-100/80 via-blue-50/70 to-indigo-50/50 border-sky-200/90 text-slate-900 shadow-sm'
       }`}>
         <div className="space-y-1">
           <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-bold border ${
             isDarkMode
-              ? 'bg-sky-500/20 border-sky-500/30 text-sky-300'
-              : 'bg-sky-100/80 border-sky-200 text-sky-800'
+              ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
+              : 'bg-sky-100 border-sky-200/90 text-sky-900'
           }`}>
-            <ShieldCheck className="w-4 h-4" />
+            <ShieldCheck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
             <span>Teacher Console • {teacher.universityId ? `Staff ID: ${teacher.universityId}` : teacher.email}</span>
           </div>
           <h1 className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
             ยินดีต้อนรับ, {teacher.title} {teacher.firstNameTh} {teacher.lastNameTh}
           </h1>
           <p className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-            ระบบจัดการรายวิชาและเปิดสแกน QR Code แบบเรียลไทม์พร้อมระบบป้องกันการฝากเช็คชื่อ
+            ระบบจัดการรายวิชาและเปิดสแกน QR Code แบบเรียลไทม์
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
           <button
             onClick={onOpenCreateCourse}
-            className="flex-1 md:flex-initial px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20 active:scale-95 transition border border-emerald-400/30 cursor-pointer"
+            className="flex-1 md:flex-initial px-4 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-sky-500/20 active:scale-95 transition border border-sky-300/40 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>สร้างรายวิชา</span>
@@ -349,150 +386,190 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
           <button
             onClick={onOpenQuickEvent}
-            className="flex-1 md:flex-initial px-4 py-3 rounded-2xl bg-sky-600 hover:bg-sky-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-lg shadow-sky-600/20 active:scale-95 transition border border-sky-400/30 cursor-pointer"
+            className="flex-1 md:flex-initial px-4 py-3 rounded-2xl bg-sky-200 hover:bg-sky-300 text-sky-950 dark:bg-sky-900/70 dark:text-sky-100 dark:hover:bg-sky-800 font-extrabold text-xs flex items-center justify-center space-x-2 shadow-sm active:scale-95 transition border border-sky-300/80 dark:border-sky-700 cursor-pointer"
           >
-            <Sparkles className="w-4 h-4" />
+            <Sparkles className="w-4 h-4 text-sky-700 dark:text-sky-300" />
             <span>เช็คชื่อด่วน</span>
           </button>
 
           <button
             onClick={handleOpenTeacherCheckin}
-            className="w-full md:w-auto px-4 py-3 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-lg shadow-teal-600/25 active:scale-95 transition border border-teal-400/30 cursor-pointer"
+            className="w-full md:w-auto px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-emerald-600/20 active:scale-95 transition border border-emerald-400/30 cursor-pointer"
           >
             <UserCheck className="w-4 h-4 text-white shrink-0" />
-            <span>เช็คชื่ออาจารย์เข้าสอน</span>
+            <span>ลงชื่อเข้าสอน</span>
           </button>
         </div>
       </div>
 
-      {/* Main Course Management Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Course Selector & Settings */}
-        <div className="space-y-4">
-          <div className={`rounded-2xl p-5 space-y-4 border ${
-            isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
-          }`}>
-            <h2 className={`text-xs font-bold uppercase tracking-wider flex items-center justify-between ${
-              isDarkMode ? 'text-slate-300' : 'text-slate-700'
-            }`}>
-              <span>รายวิชาที่รับผิดชอบ ({courses.length})</span>
-              <button
-                onClick={loadTeacherCourses}
-                className={`p-1 rounded-lg ${isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}
-                title="รีเฟรชข้อมูล"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
-            </h2>
+      {/* System Mode Switcher Tabs */}
+      <div className={`p-1.5 rounded-2xl border flex flex-col sm:flex-row gap-2 ${
+        isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-sky-50/60 border-sky-200/80'
+      }`}>
+        <button
+          type="button"
+          onClick={() => setDashboardTab('STUDENT_ATTENDANCE')}
+          className={`flex-1 py-3 px-4 rounded-xl text-xs font-extrabold transition flex items-center justify-center space-x-2 ${
+            dashboardTab === 'STUDENT_ATTENDANCE'
+              ? isDarkMode
+                ? 'bg-sky-500/25 text-sky-200 border border-sky-400/40 shadow-xs'
+                : 'bg-sky-200/90 text-sky-950 border border-sky-300 shadow-xs font-black'
+              : isDarkMode
+              ? 'text-slate-400 hover:text-white hover:bg-slate-800'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-sky-100/60'
+          }`}
+        >
+          <Users className="w-4 h-4 text-sky-700 dark:text-sky-300" />
+          <span>1. บันทึกการเข้าเรียนของนักศึกษา (Student Attendance)</span>
+        </button>
 
-            {loading ? (
-              <div className="p-4 text-center text-xs text-slate-400">กำลังโหลดวิชา...</div>
-            ) : courses.length === 0 ? (
-              <div className="p-4 text-center text-xs text-slate-400">ยังไม่ได้สร้างวิชาเรียน</div>
-            ) : (
-              <div className="space-y-2">
-                {courses.map((c) => (
+        <button
+          type="button"
+          onClick={() => setDashboardTab('TEACHER_LOGS')}
+          className={`flex-1 py-3 px-4 rounded-xl text-xs font-extrabold transition flex items-center justify-center space-x-2 ${
+            dashboardTab === 'TEACHER_LOGS'
+              ? isDarkMode
+                ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40 shadow-xs'
+                : 'bg-emerald-100/90 text-emerald-950 border border-emerald-300 shadow-xs font-black'
+              : isDarkMode
+              ? 'text-slate-400 hover:text-white hover:bg-slate-800'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-emerald-100/50'
+          }`}
+        >
+          <UserCheck className="w-4 h-4 text-emerald-700 dark:text-emerald-300" />
+          <span>2. บันทึกการเข้าสอนของอาจารย์ (Teacher Attendance)</span>
+        </button>
+      </div>
+
+      {/* VIEW TAB 1: STUDENT ATTENDANCE MANAGEMENT */}
+      {dashboardTab === 'STUDENT_ATTENDANCE' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column: Course Selector & Settings */}
+          <div className="space-y-4">
+            <div className={`rounded-2xl p-5 space-y-4 border ${
+              isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+            }`}>
+              <h2 className={`text-xs font-bold uppercase tracking-wider flex items-center justify-between ${
+                isDarkMode ? 'text-slate-300' : 'text-slate-700'
+              }`}>
+                <span>รายวิชาที่รับผิดชอบ ({courses.length})</span>
+                <button
+                  onClick={loadTeacherCourses}
+                  className={`p-1 rounded-lg ${isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}
+                  title="รีเฟรชข้อมูล"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              </h2>
+
+              {loading ? (
+                <div className="p-4 text-center text-xs text-slate-400">กำลังโหลดวิชา...</div>
+              ) : courses.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-400">ยังไม่ได้สร้างวิชาเรียน</div>
+              ) : (
+                <div className="space-y-2">
+                  {courses.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => handleSelectCourse(c)}
+                      className={`w-full text-left p-3.5 rounded-xl border transition ${
+                        selectedCourse?.id === c.id
+                          ? (isDarkMode ? 'bg-sky-500/15 border-sky-500/50 text-white font-bold' : 'bg-sky-50 border-sky-300 text-sky-950 font-bold')
+                          : (isDarkMode ? 'bg-slate-800/40 border-slate-700/60 text-slate-400 hover:bg-slate-800' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100')
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-xs text-blue-950 dark:text-blue-300 font-extrabold">{c.courseCode}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                          isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          ปี {c.academicYear} / เทอม {c.semester}
+                        </span>
+                      </div>
+                      <div className={`text-xs mt-1 font-semibold line-clamp-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                        {c.courseName}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Quick Invite Generator Card */}
+            {selectedCourse && (
+              <div className={`rounded-2xl p-5 space-y-3 border ${
+                isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+              }`}>
+                <h3 className={`text-xs font-bold uppercase tracking-wider flex items-center space-x-2 ${
+                  isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                }`}>
+                  <Share2 className="w-4 h-4 text-blue-500" />
+                  <span>ลิงก์เชิญผู้ใช้งาน (Course Invitations)</span>
+                </h3>
+                <p className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  ส่งรหัสเชิญให้นักศึกษาเพื่อเข้าเรียน หรือส่งให้อาจารย์ผู้ร่วมสอน (Co-teacher)
+                </p>
+                <div className="grid grid-cols-2 gap-2 pt-1">
                   <button
-                    key={c.id}
-                    onClick={() => handleSelectCourse(c)}
-                    className={`w-full text-left p-3.5 rounded-xl border transition ${
-                      selectedCourse?.id === c.id
-                        ? (isDarkMode ? 'bg-sky-500/15 border-sky-500/50 text-white font-bold' : 'bg-sky-50 border-sky-300 text-sky-950 font-bold')
-                        : (isDarkMode ? 'bg-slate-800/40 border-slate-700/60 text-slate-400 hover:bg-slate-800' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100')
-                    }`}
+                    onClick={() => handleGenerateInvite('STUDENT')}
+                    className="py-2 px-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-xs font-bold transition"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-xs text-sky-600 dark:text-sky-400 font-bold">{c.courseCode}</span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                        isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-200 text-slate-700'
-                      }`}>
-                        ปี {c.academicYear} / เทอม {c.semester}
-                      </span>
-                    </div>
-                    <div className={`text-xs mt-1 font-semibold line-clamp-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
-                      {c.courseName}
-                    </div>
+                    เชิญนักศึกษา (Student)
                   </button>
-                ))}
+                  <button
+                    onClick={() => handleGenerateInvite('CO_TEACHER')}
+                    className="py-2 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold transition"
+                  >
+                    เชิญอาจารย์ผู้สอนร่วม
+                  </button>
+                </div>
               </div>
             )}
           </div>
 
-          {/* Quick Invite Generator Card */}
-          {selectedCourse && (
-            <div className={`rounded-2xl p-5 space-y-3 border ${
-              isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
-            }`}>
-              <h3 className={`text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5 ${
-                isDarkMode ? 'text-slate-300' : 'text-slate-700'
+          {/* Right Column: Active Sessions & Dynamic QR Screen */}
+          <div className="lg:col-span-2 space-y-4">
+            {selectedCourse ? (
+              <div className={`rounded-2xl p-6 space-y-5 border ${
+                isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
               }`}>
-                <Share2 className="w-4 h-4 text-emerald-500" />
-                <span>ลิงก์เชิญผู้ใช้งาน (Course Invitations)</span>
-              </h3>
-              <p className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                ส่งรหัสเชิญให้นักศึกษาเพื่อเข้าเรียน หรือส่งให้อาจารย์ผู้ร่วมสอน (Co-teacher)
-              </p>
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  onClick={() => handleGenerateInvite('STUDENT')}
-                  className="py-2 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold transition"
-                >
-                  เชิญนักศึกษา (Student)
-                </button>
-                <button
-                  onClick={() => handleGenerateInvite('CO_TEACHER')}
-                  className="py-2 px-3 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/30 text-xs font-bold transition"
-                >
-                  เชิญอาจารย์ผู้สอนร่วม
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Right Column: Active Session Sessions & Dynamic QR Screen */}
-        <div className="lg:col-span-2 space-y-4">
-          {selectedCourse ? (
-            <div className={`rounded-2xl p-6 space-y-5 border ${
-              isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
-            }`}>
-              <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4 ${
-                isDarkMode ? 'border-slate-800' : 'border-slate-100'
-              }`}>
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <span className="font-mono text-sm font-bold text-sky-600 dark:text-sky-400">{selectedCourse.courseCode}</span>
-                    <span className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>({selectedCourse.courseName})</span>
+                <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4 ${
+                  isDarkMode ? 'border-slate-800' : 'border-slate-100'
+                }`}>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <span className="font-mono text-sm font-bold text-blue-600 dark:text-blue-400">{selectedCourse.courseCode}</span>
+                      <span className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>({selectedCourse.courseName})</span>
+                    </div>
+                    <h2 className={`text-lg font-bold mt-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                      รายการสัปดาห์สอน &amp; เปิดเช็คชื่อนักเรียน
+                    </h2>
                   </div>
-                  <h2 className={`text-lg font-bold mt-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                    รายการสัปดาห์สอน &amp; เปิดเช็คชื่อ (Teaching Sessions)
-                  </h2>
-                </div>
 
-                <div className="flex flex-wrap items-center justify-end gap-2 sm:ml-auto">
-                  <button
-                    onClick={() => setIsEditModalOpen(true)}
-                    className="px-3.5 py-2 rounded-xl text-xs font-bold bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/30 flex items-center space-x-1.5 transition active:scale-95"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    <span>แก้ไขวิชา / เพิ่มลดสัปดาห์สอน</span>
-                  </button>
+                  <div className="flex flex-wrap items-center justify-end gap-2 sm:ml-auto">
+                    <button
+                      onClick={() => setIsEditModalOpen(true)}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 flex items-center space-x-1.5 transition active:scale-95"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>แก้ไขวิชา / เพิ่มลดสัปดาห์</span>
+                    </button>
 
-                  {/* Export CSV Button */}
-                  <a
-                    href={`/api/export-csv/${selectedCourse.id}`}
-                    download
-                    className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition border ${
-                      isDarkMode 
-                        ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700' 
-                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200 shadow-sm'
-                    }`}
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>ส่งออก CSV</span>
-                  </a>
+                    {/* Export Student Attendance CSV Button */}
+                    <a
+                      href={`/api/export-csv/${selectedCourse.id}`}
+                      download
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition border ${
+                        isDarkMode 
+                          ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700' 
+                          : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200 shadow-sm'
+                      }`}
+                    >
+                      <Download className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Export รายงานนักเรียน (CSV)</span>
+                    </a>
+                  </div>
                 </div>
-              </div>
 
               {/* Sessions List */}
               <div className="space-y-3">
@@ -507,7 +584,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   >
                     <div className="space-y-1">
                       <div className="flex items-center space-x-2">
-                        <span className="px-2.5 py-0.5 rounded-md bg-teal-500/15 text-teal-600 dark:text-teal-300 text-xs font-mono font-bold">
+                        <span className="px-2.5 py-0.5 rounded-md bg-sky-100 dark:bg-sky-950/80 text-blue-950 dark:text-sky-200 border border-sky-300/80 dark:border-sky-800 text-xs font-mono font-black">
                           สัปดาห์ที่ {session.weekNumber}
                         </span>
                         <span className={`text-xs font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{session.topic}</span>
@@ -539,6 +616,343 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           )}
         </div>
       </div>
+      )}
+
+      {/* VIEW TAB 2: TEACHER TEACHING LOGS & REPORT */}
+      {dashboardTab === 'TEACHER_LOGS' && (
+        <div className="space-y-6">
+          <div className={`rounded-3xl p-6 border space-y-6 ${
+            isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+          }`}>
+            {/* Header & Main Actions */}
+            <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4 ${
+              isDarkMode ? 'border-slate-800' : 'border-slate-100'
+            }`}>
+              <div className="space-y-1">
+                <div className="flex items-center space-x-2">
+                  <span className="px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold text-xs border border-blue-500/20">
+                    Teacher Attendance System
+                  </span>
+                </div>
+                <h2 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                  รายงานและประวัติการลงเวลาเข้าสอนของอาจารย์ (Teacher Teaching Log)
+                </h2>
+                <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  สถิติประวัติการเข้าสอนแยกต่างหากสำหรับอาจารย์ สามารถเลือกดูแบบรวมทั้งหมดหรือแยกรายวิชาได้
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleOpenTeacherCheckin}
+                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-2 shadow-md shadow-emerald-600/20 active:scale-95 transition cursor-pointer"
+                >
+                  <UserCheck className="w-4 h-4" />
+                  <span>ลงชื่อเข้าสอน</span>
+                </button>
+
+                {/* Export Teacher Attendance CSV Button */}
+                <a
+                  href={`/api/export-teacher-csv?teacherId=${teacher.id}&courseId=${teacherLogCourseFilter}`}
+                  download
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-2 transition border ${
+                    isDarkMode 
+                      ? 'bg-slate-800 hover:bg-slate-700 text-blue-400 border-slate-700' 
+                      : 'bg-blue-50 hover:bg-blue-100 text-blue-900 border-blue-200 shadow-sm'
+                  }`}
+                >
+                  <Download className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <span>
+                    Export CSV ({teacherLogCourseFilter === 'ALL' ? 'รวมทุกวิชา' : 'เฉพาะวิชานี้'})
+                  </span>
+                </a>
+              </div>
+            </div>
+
+            {/* View Mode Toggle: Overall vs By Course */}
+            <div className={`p-1 rounded-2xl border flex flex-col sm:flex-row gap-1.5 ${
+              isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200'
+            }`}>
+              <button
+                type="button"
+                onClick={() => {
+                  setTeacherLogViewMode('OVERALL');
+                  setTeacherLogCourseFilter('ALL');
+                }}
+                className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 ${
+                  teacherLogViewMode === 'OVERALL'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : isDarkMode
+                    ? 'text-slate-400 hover:text-white'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>📊 แสดงจำนวนครั้งการเข้าสอนรวมทั้งหมด ({teacherHistory.length} ครั้ง)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setTeacherLogViewMode('BY_COURSE');
+                  if (teacherLogCourseFilter === 'ALL' && courses.length > 0) {
+                    setTeacherLogCourseFilter(courses[0].id);
+                  }
+                }}
+                className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 ${
+                  teacherLogViewMode === 'BY_COURSE'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : isDarkMode
+                    ? 'text-slate-400 hover:text-white'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>📚 แบบแยกรายวิชา (Course Breakdown)</span>
+              </button>
+            </div>
+
+            {/* Course Selector Filter Buttons (Visible in BY_COURSE mode or when filter is used) */}
+            {teacherLogViewMode === 'BY_COURSE' && (
+              <div className="space-y-2 pt-1">
+                <div className={`text-xs font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  เลือกระบุวิชาเพื่อดูรายงานการเข้าสอน:
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTeacherLogCourseFilter('ALL')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
+                      teacherLogCourseFilter === 'ALL'
+                        ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                        : isDarkMode
+                        ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                        : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                    }`}
+                  >
+                    ทุกวิชา ({teacherHistory.length})
+                  </button>
+
+                  {courseBreakdown.map(({ course, count }) => (
+                    <button
+                      key={course.id}
+                      type="button"
+                      onClick={() => setTeacherLogCourseFilter(course.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center space-x-1.5 ${
+                        teacherLogCourseFilter === course.id
+                          ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                          : isDarkMode
+                          ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                          : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                      }`}
+                    >
+                      <span>{course.courseCode}</span>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                        teacherLogCourseFilter === course.id
+                          ? 'bg-white/20 text-white'
+                          : isDarkMode
+                          ? 'bg-slate-900 text-blue-400'
+                          : 'bg-slate-200 text-blue-700'
+                      }`}>
+                        {count} ครั้ง
+                      </span>
+                    </button>
+                  ))}
+
+                  {generalLogsCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setTeacherLogCourseFilter('GENERAL')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center space-x-1.5 ${
+                        teacherLogCourseFilter === 'GENERAL'
+                          ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                          : isDarkMode
+                          ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                          : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                      }`}
+                    >
+                      <span>ทั่วไป / อื่นๆ</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900 text-blue-400">
+                        {generalLogsCount} ครั้ง
+                      </span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Quick Stats Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className={`p-4 rounded-2xl border ${
+                isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-blue-50/50 border-blue-100'
+              }`}>
+                <div className="text-[11px] font-bold text-blue-600 dark:text-blue-400 uppercase">
+                  {teacherLogCourseFilter === 'ALL'
+                    ? 'จำนวนครั้งการลงเวลาสอนรวมทั้งหมด'
+                    : `จำนวนครั้งที่เข้าสอนวิชา ${
+                        courses.find((c) => c.id === teacherLogCourseFilter)?.courseCode || 'ทั่วไป'
+                      }`}
+                </div>
+                <div className="text-2xl font-black mt-1 text-slate-900 dark:text-white font-mono">
+                  {filteredTeacherHistory.length} <span className="text-xs font-semibold">ครั้ง</span>
+                </div>
+              </div>
+
+              <div className={`p-4 rounded-2xl border ${
+                isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-sky-50/50 border-sky-100'
+              }`}>
+                <div className="text-[11px] font-bold text-sky-600 dark:text-sky-400 uppercase">
+                  {teacherLogCourseFilter === 'ALL' ? 'วิชาที่มีประวัติบันทึกสอน' : 'ชื่อรายวิชาที่เลือก'}
+                </div>
+                <div className="text-xs font-bold mt-1 text-slate-800 dark:text-slate-200 truncate">
+                  {teacherLogCourseFilter === 'ALL'
+                    ? `${courseBreakdown.filter((c) => c.count > 0).length} รายวิชา (จากทั้งหมด ${courses.length})`
+                    : courses.find((c) => c.id === teacherLogCourseFilter)?.courseName || 'การลงเวลาสอนทั่วไป'}
+                </div>
+              </div>
+
+              <div className={`p-4 rounded-2xl border ${
+                isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-emerald-50/50 border-emerald-100'
+              }`}>
+                <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">
+                  บันทึกล่าสุดเมื่อ
+                </div>
+                <div className="text-xs font-bold mt-1 text-slate-800 dark:text-slate-200">
+                  {filteredTeacherHistory.length > 0
+                    ? new Date(filteredTeacherHistory[0].timestamp).toLocaleString('th-TH')
+                    : 'ยังไม่มีประวัติ'}
+                </div>
+              </div>
+            </div>
+
+            {/* OVERALL MODE: Course Summary Breakdown Cards */}
+            {teacherLogViewMode === 'OVERALL' && courses.length > 0 && (
+              <div className="space-y-3 pt-2">
+                <h3 className={`text-xs font-extrabold uppercase tracking-wider ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  สรุปจำนวนครั้งการเข้าสอนแยกตามรายวิชา (Course Breakdown)
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {courseBreakdown.map(({ course, count, lastCheckin }) => (
+                    <div
+                      key={course.id}
+                      onClick={() => {
+                        setTeacherLogViewMode('BY_COURSE');
+                        setTeacherLogCourseFilter(course.id);
+                      }}
+                      className={`p-4 rounded-2xl border cursor-pointer transition hover:scale-[1.01] ${
+                        isDarkMode
+                          ? 'bg-slate-950/60 border-slate-800 hover:border-blue-500/50 hover:bg-slate-950'
+                          : 'bg-slate-50 border-slate-200 hover:border-blue-400 hover:bg-white shadow-xs'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-xs font-extrabold text-blue-600 dark:text-blue-400">
+                          {course.courseCode}
+                        </span>
+                        <span className="px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-extrabold text-xs border border-blue-500/20">
+                          {count} ครั้ง
+                        </span>
+                      </div>
+                      <div className={`text-xs font-bold mt-1.5 line-clamp-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                        {course.courseName}
+                      </div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-2 flex items-center justify-between border-t border-slate-200 dark:border-slate-800/80 pt-2">
+                        <span>บันทึกล่าสุด:</span>
+                        <span className="font-semibold">{lastCheckin ? new Date(lastCheckin).toLocaleDateString('th-TH') : 'ยังไม่มี'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Detailed Table / History Log */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <h3 className={`text-xs font-extrabold uppercase tracking-wider ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  ตารางประวัติการลงเวลาเข้าสอนอาจารย์ {teacherLogCourseFilter !== 'ALL' && `(${courses.find((c) => c.id === teacherLogCourseFilter)?.courseCode || 'วิชาที่เลือก'})`}
+                </h3>
+                <button
+                  type="button"
+                  onClick={loadTeacherHistory}
+                  className={`text-xs font-semibold flex items-center space-x-1 ${
+                    isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>รีเฟรชตาราง</span>
+                </button>
+              </div>
+
+              {filteredTeacherHistory.length === 0 ? (
+                <div className={`p-8 rounded-2xl text-center text-xs space-y-3 ${
+                  isDarkMode ? 'bg-slate-950 border border-slate-800 text-slate-400' : 'bg-slate-50 border border-slate-200 text-slate-500 shadow-sm'
+                }`}>
+                  <UserCheck className="w-8 h-8 mx-auto text-emerald-500 opacity-60" />
+                  <p>
+                    {teacherLogCourseFilter === 'ALL'
+                      ? 'ยังไม่มีประวัติการเช็คชื่อเข้าสอนของอาจารย์ในระบบ'
+                      : 'ยังไม่มีประวัติการเช็คชื่อเข้าสอนสำหรับรายวิชานี้'}
+                  </p>
+                  <button
+                    onClick={handleOpenTeacherCheckin}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs transition cursor-pointer"
+                  >
+                    กดลงชื่อเข้าสอน
+                  </button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto border rounded-2xl border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left text-xs">
+                    <thead className={`border-b text-[11px] uppercase font-bold ${
+                      isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-600'
+                    }`}>
+                      <tr>
+                        <th className="p-3">วัน-เวลา</th>
+                        <th className="p-3">วิชา / คาบเรียน</th>
+                        <th className="p-3">อาคาร / ห้องเรียน</th>
+                        <th className="p-3">วิธีเช็คชื่อ</th>
+                        <th className="p-3">พิกัด GPS</th>
+                        <th className="p-3">หมายเหตุ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {filteredTeacherHistory.map((rec) => (
+                        <tr key={rec.id} className={isDarkMode ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'}>
+                          <td className="p-3 font-mono font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                            {new Date(rec.timestamp).toLocaleString('th-TH')}
+                          </td>
+                          <td className="p-3 font-bold">
+                            {rec.courseCode ? `[${rec.courseCode}] ${rec.courseName}` : 'การสอนทั่วไป'}
+                            {rec.sessionTopic && <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">{rec.sessionTopic}</div>}
+                          </td>
+                          <td className="p-3 whitespace-nowrap">
+                            {rec.buildingRoom ? (
+                              <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-semibold">
+                                📍 {rec.buildingRoom}
+                              </span>
+                            ) : '-'}
+                          </td>
+                          <td className="p-3 whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold text-[10px]">
+                              {rec.checkinMethod}
+                            </span>
+                          </td>
+                          <td className="p-3 font-mono text-[10px] whitespace-nowrap text-slate-500">
+                            {rec.lat.toFixed(4)}, {rec.lng.toFixed(4)}
+                          </td>
+                          <td className="p-3 text-slate-500 dark:text-slate-400">
+                            {rec.notes || '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* DYNAMIC QR DISPLAY MODAL / SCREEN (Active QR Session or Quick Event) */}
       {(activeSession || quickEventModal) && (
@@ -594,7 +1008,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
                 {/* 6-Character Token Display */}
                 <div className="w-full bg-slate-900 border border-slate-700/80 rounded-2xl p-3 text-center space-y-1">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-teal-400">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-sky-400">
                     🔑 รหัส Token 6 ตัวอักษร (สำหรับป้อนด้วยตนเอง):
                   </div>
                   <div className="flex items-center justify-center space-x-3">
@@ -620,14 +1034,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 <div className="w-full space-y-1">
                   <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
                     <span className="flex items-center space-x-1">
-                      <Clock className="w-3.5 h-3.5 text-teal-400 animate-spin" />
+                      <Clock className="w-3.5 h-3.5 text-blue-400 animate-spin" />
                       <span>รีเฟรชรหัสถัดไปในอีก:</span>
                     </span>
                     <span className="font-mono text-emerald-400 font-bold">{qrCountdown} วินาที</span>
                   </div>
                   <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-teal-500 transition-all duration-1000 ease-linear"
+                      className="h-full bg-blue-500 transition-all duration-1000 ease-linear"
                       style={{ width: `${(qrCountdown / 30) * 100}%` }}
                     ></div>
                   </div>
@@ -640,16 +1054,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     onClick={() => setIsGpsCheckEnabled(!isGpsCheckEnabled)}
                     className={`w-full py-2.5 px-3 rounded-2xl border text-xs font-bold flex items-center justify-between transition ${
                       isGpsCheckEnabled
-                        ? 'bg-teal-500/15 border-teal-500/40 text-teal-300'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
                         : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
                     }`}
                   >
                     <div className="flex items-center space-x-2">
-                      <ShieldCheck className={`w-4 h-4 ${isGpsCheckEnabled ? 'text-teal-400' : 'text-rose-400'}`} />
+                      <ShieldCheck className={`w-4 h-4 ${isGpsCheckEnabled ? 'text-emerald-400' : 'text-rose-400'}`} />
                       <span>ตรวจสอบพิกัด GPS</span>
                     </div>
                     <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase ${
-                      isGpsCheckEnabled ? 'bg-teal-500 text-slate-950' : 'bg-rose-500 text-white'
+                      isGpsCheckEnabled ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500 text-white'
                     }`}>
                       {isGpsCheckEnabled ? '🟢 เปิดตรวจ GPS (Geofence 50m)' : '🔴 ปิดตรวจ GPS (QR อย่างเดียว)'}
                     </span>
@@ -716,8 +1130,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200 shadow-sm'
                     }`}
                   >
-                    <Download className="w-4 h-4" />
-                    <span>ดาวน์โหลดไฟล์รายงาน CSV ทันที</span>
+                    <Download className="w-4 h-4 text-emerald-500" />
+                    <span>Export รายงานการเข้าเรียนนักเรียน (CSV)</span>
                   </a>
                 </div>
               </div>
@@ -786,7 +1200,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             {/* Modal Header */}
             <div className={`flex items-center justify-between border-b pb-4 ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
               <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-2xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-500">
+                <div className="w-10 h-10 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500">
                   <UserCheck className="w-5 h-5" />
                 </div>
                 <div>
@@ -802,61 +1216,75 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 onClick={() => setIsTeacherCheckinModalOpen(false)}
                 className={`p-2 rounded-xl transition ${isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}
               >
-                ✕
+                <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Check-In Form */}
             <div className="space-y-4">
-              {/* Method Selection */}
+              {/* Method Selection Tabs (Matching Student Checkin Order & Styling) */}
               <div>
                 <label className={`block text-xs font-bold mb-1.5 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                   วิธีการบันทึกการสอน:
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className={`grid grid-cols-3 gap-1.5 p-1.5 rounded-2xl border ${
+                  isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200'
+                }`}>
+                  {/* Position 1 (Far Left / Default): QR + GPS */}
                   <button
                     type="button"
-                    onClick={() => setTeacherCheckinMethod('GPS_ONLY')}
-                    className={`p-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 border ${
-                      teacherCheckinMethod === 'GPS_ONLY'
-                        ? 'bg-teal-600 text-white border-teal-500 shadow-md'
-                        : isDarkMode
-                        ? 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
-                        : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-                    }`}
-                  >
-                    <Navigation className="w-3.5 h-3.5" />
-                    <span>GPS พิกัดตำแหน่ง</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setTeacherCheckinMethod('QR_ONLY')}
-                    className={`p-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 border ${
-                      teacherCheckinMethod === 'QR_ONLY'
-                        ? 'bg-teal-600 text-white border-teal-500 shadow-md'
-                        : isDarkMode
-                        ? 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
-                        : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-                    }`}
-                  >
-                    <QrCode className="w-3.5 h-3.5" />
-                    <span>QR Code ชั้นเรียน</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setTeacherCheckinMethod('HYBRID')}
-                    className={`p-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 border ${
+                    onClick={() => {
+                      setTeacherCheckinResult(null);
+                      setTeacherCheckinMethod('HYBRID');
+                    }}
+                    className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition flex flex-col sm:flex-row items-center justify-center space-x-1 ${
                       teacherCheckinMethod === 'HYBRID'
-                        ? 'bg-teal-600 text-white border-teal-500 shadow-md'
+                        ? 'bg-blue-600 text-white shadow-md'
                         : isDarkMode
-                        ? 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
-                        : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                        ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
                     }`}
                   >
                     <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>GPS + QR Code</span>
+                    <span>QR Code + GPS</span>
+                  </button>
+
+                  {/* Position 2 (Middle): GPS อย่างเดียว */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTeacherCheckinResult(null);
+                      setTeacherCheckinMethod('GPS_ONLY');
+                    }}
+                    className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition flex flex-col sm:flex-row items-center justify-center space-x-1 ${
+                      teacherCheckinMethod === 'GPS_ONLY'
+                        ? 'bg-sky-600 text-white shadow-md'
+                        : isDarkMode
+                        ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Navigation className="w-3.5 h-3.5" />
+                    <span>GPS อย่างเดียว</span>
+                  </button>
+
+                  {/* Position 3 (Far Right): รหัสเข้าชั้นเรียน (Token) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTeacherCheckinResult(null);
+                      setTeacherCheckinMethod('TOKEN');
+                    }}
+                    className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition flex flex-col sm:flex-row items-center justify-center space-x-1 ${
+                      teacherCheckinMethod === 'TOKEN'
+                        ? 'bg-amber-600 text-white shadow-md'
+                        : isDarkMode
+                        ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                    }`}
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>รหัสเข้าชั้นเรียน</span>
                   </button>
                 </div>
               </div>
@@ -880,8 +1308,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     }}
                     className={`w-full text-xs font-medium rounded-xl p-2.5 border focus:outline-none ${
                       isDarkMode
-                        ? 'bg-slate-800 border-slate-700 text-white focus:border-teal-500'
-                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-teal-500'
+                        ? 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'
+                        : 'bg-white border-slate-300 text-slate-900 focus:border-blue-600 shadow-sm'
                     }`}
                   >
                     <option value="">-- การสอนทั่วไป / นอกเหนือตารางวิชา --</option>
@@ -902,8 +1330,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     onChange={(e) => setTeacherCheckinSessionId(e.target.value)}
                     className={`w-full text-xs font-medium rounded-xl p-2.5 border focus:outline-none ${
                       isDarkMode
-                        ? 'bg-slate-800 border-slate-700 text-white focus:border-teal-500'
-                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-teal-500'
+                        ? 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'
+                        : 'bg-white border-slate-300 text-slate-900 focus:border-blue-600 shadow-sm'
                     }`}
                   >
                     <option value="">-- ไม่ระบุคาบเรียน (Ad-hoc Lecture) --</option>
@@ -933,8 +1361,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       onChange={(e) => setBuildingRoom(e.target.value)}
                       className={`w-full text-xs font-medium rounded-xl pl-9 pr-3 py-2.5 border focus:outline-none ${
                         isDarkMode
-                          ? 'bg-slate-800 border-slate-700 text-white focus:border-teal-500'
-                          : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-teal-500'
+                          ? 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'
+                          : 'bg-white border-slate-300 text-slate-900 focus:border-blue-600 shadow-sm'
                       }`}
                     />
                   </div>
@@ -953,13 +1381,33 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       onChange={(e) => setTeachingNotes(e.target.value)}
                       className={`w-full text-xs font-medium rounded-xl pl-9 pr-3 py-2.5 border focus:outline-none ${
                         isDarkMode
-                          ? 'bg-slate-800 border-slate-700 text-white focus:border-teal-500'
-                          : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-teal-500'
+                          ? 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'
+                          : 'bg-white border-slate-300 text-slate-900 focus:border-blue-600 shadow-sm'
                       }`}
                     />
                   </div>
                 </div>
               </div>
+
+              {/* TOKEN MODE INPUT FIELD */}
+              {teacherCheckinMethod === 'TOKEN' && (
+                <div className="space-y-1.5">
+                  <label className={`block text-xs font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    ป้อนรหัส Token หรือตัวเลข 6 หลักสำหรับเข้าสอน:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="ป้อนรหัส Token เช่น 842910 หรือ Token string"
+                    value={teacherTokenInput}
+                    onChange={(e) => setTeacherTokenInput(e.target.value)}
+                    className={`w-full border rounded-xl px-3.5 py-2.5 text-sm font-mono tracking-wider focus:outline-none ${
+                      isDarkMode
+                        ? 'bg-slate-800 border-slate-700 text-amber-400 focus:border-amber-500 placeholder-slate-500'
+                        : 'bg-white border-slate-300 text-slate-900 focus:border-amber-600 shadow-sm placeholder-slate-400'
+                    }`}
+                  />
+                </div>
+              )}
 
               {/* GPS Info Banner */}
               <div className={`p-3 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-2 ${
@@ -969,10 +1417,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   <span className={`text-[10px] font-semibold flex items-center space-x-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     <span>พิกัด GPS ปัจจุบันของผู้สอน:</span>
                     {Math.abs(teacherCoords.lat - 13.7988363) < 0.0001 && (
-                      <span className="text-teal-400 text-[10px] font-bold">(คณะเทคนิคการแพทย์ ม.มหิดล ศาลายา)</span>
+                      <span className="text-blue-500 text-[10px] font-bold">(คณะเทคนิคการแพทย์ ม.มหิดล ศาลายา)</span>
                     )}
                   </span>
-                  <div className="font-mono font-bold text-teal-600 dark:text-teal-400">
+                  <div className="font-mono font-bold text-blue-600 dark:text-blue-400">
                     {teacherCoords.lat.toFixed(5)}, {teacherCoords.lng.toFixed(5)}
                   </div>
                 </div>
@@ -982,12 +1430,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     if (navigator.geolocation) {
                       navigator.geolocation.getCurrentPosition(
                         (pos) => updateTeacherCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                        (err) => alert(`ไม่สามารถดึงพิกัดจากเบราว์เซอร์ได้ (${err.message}) กรุณาตรวจสอบ Location Services หรือเลือกโหมด 'QR Code อย่างเดียว'`),
+                        (err) => alert(`ไม่สามารถดึงพิกัดจากเบราว์เซอร์ได้ (${err.message}) กรุณาตรวจสอบ Location Services`),
                         { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
                       );
                     }
                   }}
-                  className="px-3 py-1.5 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20 text-[11px] font-bold transition flex items-center justify-center space-x-1 shrink-0"
+                  className="px-3 py-1.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 text-[11px] font-bold transition flex items-center justify-center space-x-1 shrink-0"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   <span>ดึงพิกัด GPS ปัจจุบัน</span>
@@ -999,10 +1447,30 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 type="button"
                 onClick={handleTeacherCheckinSubmit}
                 disabled={submittingTeacherCheckin}
-                className="w-full py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 transition shadow-lg shadow-teal-600/25 disabled:opacity-50 active:scale-98"
+                className={`w-full py-3.5 rounded-2xl text-white font-extrabold text-xs flex items-center justify-center space-x-2 transition shadow-lg disabled:opacity-50 active:scale-98 ${
+                  teacherCheckinMethod === 'GPS_ONLY'
+                    ? 'bg-sky-600 hover:bg-sky-500 shadow-sky-600/25'
+                    : teacherCheckinMethod === 'TOKEN'
+                    ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/25'
+                    : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/25'
+                }`}
               >
-                <UserCheck className="w-4 h-4" />
-                <span>{submittingTeacherCheckin ? 'กำลังบันทึกข้อมูล...' : 'ยืนยันเช็คชื่อเข้าสอนทันที'}</span>
+                {teacherCheckinMethod === 'GPS_ONLY' ? (
+                  <Navigation className="w-4 h-4" />
+                ) : teacherCheckinMethod === 'TOKEN' ? (
+                  <KeyRound className="w-4 h-4" />
+                ) : (
+                  <ShieldCheck className="w-4 h-4" />
+                )}
+                <span>
+                  {submittingTeacherCheckin
+                    ? 'กำลังบันทึกข้อมูล...'
+                    : teacherCheckinMethod === 'GPS_ONLY'
+                    ? 'กดเช็คชื่อเข้าสอนด้วย GPS ทันที'
+                    : teacherCheckinMethod === 'TOKEN'
+                    ? 'ส่งเช็คชื่อเข้าสอนด้วยรหัส Token'
+                    : 'กดเช็คชื่อเข้าสอนด้วย QR Code + GPS'}
+                </span>
               </button>
 
               {/* Result Notification */}
@@ -1024,7 +1492,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 isDarkMode ? 'text-slate-300' : 'text-slate-700'
               }`}>
                 <span>ประวัติการลงเวลาเข้าสอนของคุณอาจารย์</span>
-                <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold">
+                <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold">
                   {teacherHistory.length} รายการ
                 </span>
               </h4>
@@ -1046,7 +1514,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     >
                       <div className="space-y-0.5">
                         <div className="flex items-center space-x-2">
-                          <span className="font-extrabold text-teal-600 dark:text-teal-400">
+                          <span className="font-extrabold text-blue-600 dark:text-blue-400">
                             {rec.courseCode ? `[${rec.courseCode}] ${rec.courseName}` : 'การสอนทั่วไป / Ad-hoc'}
                           </span>
                           {rec.buildingRoom && (
@@ -1065,7 +1533,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       </div>
                       <div className="text-right shrink-0 font-mono text-[11px] opacity-75">
                         <div>{new Date(rec.timestamp).toLocaleDateString('th-TH')}</div>
-                        <div className="font-bold text-teal-500">{new Date(rec.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</div>
+                        <div className="font-bold text-emerald-500">{new Date(rec.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</div>
                       </div>
                     </div>
                   ))}

@@ -13,6 +13,30 @@ interface TeacherCourseCreationModalProps {
   isDarkMode?: boolean;
 }
 
+// Helper function to calculate default current Academic Year (BE)
+// Thai Academic Year starts Aug 1 (Month 8) to Jul 31 of next year
+const getCurrentAcademicYear = (): number => {
+  const now = new Date();
+  const beYear = now.getFullYear() + 543;
+  const month = now.getMonth() + 1; // 1 - 12
+  return month >= 8 ? beYear : beYear - 1;
+};
+
+// Helper function to calculate default current Semester
+// ภาคเรียนที่ 1: 1 ส.ค. - 31 ธ.ค. (8 - 12)
+// ภาคเรียนที่ 2: 1 ม.ค. - 31 พ.ค. (1 - 5)
+// ภาคฤดูร้อน: 1 มิ.ย. - 31 ก.ค. (6 - 7)
+const getCurrentSemester = (): Semester => {
+  const month = new Date().getMonth() + 1;
+  if (month >= 8 && month <= 12) {
+    return Semester.FIRST;
+  } else if (month >= 1 && month <= 5) {
+    return Semester.SECOND;
+  } else {
+    return Semester.SUMMER;
+  }
+};
+
 export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProps> = ({
   isOpen,
   onClose,
@@ -23,8 +47,8 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
 }) => {
   const [courseCode, setCourseCode] = useState<string>('');
   const [courseName, setCourseName] = useState<string>('');
-  const [academicYear, setAcademicYear] = useState<number>(2569);
-  const [semester, setSemester] = useState<Semester>(Semester.FIRST);
+  const [academicYear, setAcademicYear] = useState<number>(getCurrentAcademicYear());
+  const [semester, setSemester] = useState<Semester>(getCurrentSemester());
   const [coordinatorName, setCoordinatorName] = useState<string>(coordinatorDefault || '');
 
   // Course GPS default coordinates
@@ -32,12 +56,9 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
   const [defaultLng, setDefaultLng] = useState<number>(100.322944);
   const [showMapPicker, setShowMapPicker] = useState<boolean>(false);
 
-  // Dynamic Teaching Weeks state
+  // Dynamic Teaching Weeks state - default 1 week only with empty topic so placeholder shows
   const [weeks, setWeeks] = useState<TeachingWeek[]>([
-    { weekNumber: 1, topic: 'สัปดาห์ที่ 1: ปฐมนิเทศ และภาพรวมรายวิชา', date: '2026-08-01' },
-    { weekNumber: 2, topic: 'สัปดาห์ที่ 2: สถาปัตยกรรมซอฟต์แวร์และการออกแบบ API', date: '2026-08-08' },
-    { weekNumber: 3, topic: 'สัปดาห์ที่ 3: ระบบเช็คชื่อแบบเรียลไทม์ และ Dynamic QR Code', date: '2026-08-15' },
-    { weekNumber: 4, topic: 'สัปดาห์ที่ 4: การป้องกันการทุจริตและการตรวจสอบพิกัด Geofence', date: '2026-08-22' },
+    { weekNumber: 1, topic: '', date: new Date().toISOString().split('T')[0] },
   ]);
 
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -51,7 +72,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
       ...weeks,
       {
         weekNumber: nextNum,
-        topic: `สัปดาห์ที่ ${nextNum}: หัวข้อการเรียนรู้`,
+        topic: '',
         date: new Date(Date.now() + nextNum * 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       },
     ]);
@@ -153,7 +174,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
                 value={courseCode}
                 onChange={(e) => setCourseCode(e.target.value)}
                 required
-                className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 uppercase font-mono ${
+                className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 uppercase ${
                   isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
                 }`}
               />
@@ -164,7 +185,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
               </label>
               <input
                 type="text"
-                placeholder="เช่น Software Architecture & System Design"
+                placeholder="เช่น Basic Data Management with Computer"
                 value={courseName}
                 onChange={(e) => setCourseName(e.target.value)}
                 required
@@ -226,7 +247,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
           }`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <MapPin className="w-4 h-4 text-teal-400" />
+                <MapPin className="w-4 h-4 text-blue-400" />
                 <span className={`text-xs font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                   ตำแหน่ง GPS ประจำห้องเรียนรายวิชานี้
                 </span>
@@ -234,7 +255,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
               <button
                 type="button"
                 onClick={() => setShowMapPicker(!showMapPicker)}
-                className="px-3 py-1.5 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 text-teal-600 dark:text-teal-400 border border-teal-500/30 text-xs font-bold flex items-center space-x-1.5 transition"
+                className="px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-xs font-bold flex items-center space-x-1.5 transition"
               >
                 <Globe className="w-3.5 h-3.5" />
                 <span>{showMapPicker ? 'ซ่อนแผนที่' : '📍 เลือกระบุพิกัดบน Maps'}</span>
@@ -243,9 +264,9 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
 
             {/* Current Selected Location Indicator */}
             <div className={`px-3 py-2 rounded-xl text-xs flex items-center space-x-2 border ${
-              isDarkMode ? 'bg-slate-900/90 border-slate-700 text-teal-300' : 'bg-teal-50 border-teal-200 text-teal-900'
+              isDarkMode ? 'bg-slate-900/90 border-slate-700 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-900'
             }`}>
-              <MapPin className="w-4 h-4 text-teal-400 shrink-0 animate-pulse" />
+              <MapPin className="w-4 h-4 text-blue-400 shrink-0 animate-pulse" />
               <div className="truncate">
                 <span className="font-bold">สถานที่อ้างอิง: </span>
                 <span className="font-semibold">
@@ -284,7 +305,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
                     value={defaultLat}
                     onChange={(e) => setDefaultLat(parseFloat(e.target.value) || 0)}
                     className={`w-full border rounded-xl px-3 py-1.5 text-xs font-mono font-bold ${
-                      isDarkMode ? 'bg-slate-800 border-slate-700 text-teal-400' : 'bg-white border-slate-300 text-teal-700'
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-blue-400' : 'bg-white border-slate-300 text-blue-700'
                     }`}
                   />
                 </div>
@@ -298,7 +319,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
                     value={defaultLng}
                     onChange={(e) => setDefaultLng(parseFloat(e.target.value) || 0)}
                     className={`w-full border rounded-xl px-3 py-1.5 text-xs font-mono font-bold ${
-                      isDarkMode ? 'bg-slate-800 border-slate-700 text-teal-400' : 'bg-white border-slate-300 text-teal-700'
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-blue-400' : 'bg-white border-slate-300 text-blue-700'
                     }`}
                   />
                 </div>
@@ -338,14 +359,14 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
                     isDarkMode ? 'bg-slate-800/80 border-slate-700/80' : 'bg-slate-50 border-slate-200'
                   }`}
                 >
-                  <span className="w-16 text-center text-xs font-bold text-teal-600 dark:text-teal-300 bg-teal-500/10 py-1 rounded-lg border border-teal-500/20 shrink-0 font-mono">
+                  <span className="w-16 text-center text-xs font-bold text-blue-600 dark:text-blue-300 bg-blue-500/10 py-1 rounded-lg border border-blue-500/20 shrink-0 font-mono">
                     สัปดาห์ {w.weekNumber}
                   </span>
                   <input
                     type="text"
                     value={w.topic}
                     onChange={(e) => handleWeekTopicChange(index, e.target.value)}
-                    placeholder="หัวข้อการเรียนการสอน..."
+                    placeholder="เช่น Course orientation"
                     className={`flex-grow border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-sky-500 ${
                       isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
                     }`}

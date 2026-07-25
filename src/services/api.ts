@@ -208,7 +208,7 @@ export async function submitTeacherCheckin(params: {
   lat: number;
   lng: number;
   deviceId: string;
-  checkinMethod?: 'GPS_ONLY' | 'QR_ONLY' | 'HYBRID';
+  checkinMethod?: 'GPS_ONLY' | 'QR_ONLY' | 'HYBRID' | 'TOKEN';
   buildingRoom?: string;
   notes?: string;
 }) {
