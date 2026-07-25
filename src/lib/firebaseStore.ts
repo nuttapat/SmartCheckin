@@ -1,4 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import {
   getFirestore,
   collection,
@@ -16,6 +17,13 @@ import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
+export const auth = getAuth(app);
+export const googleProvider = new GoogleAuthProvider();
+
+export async function signInWithGooglePopup() {
+  const result = await signInWithPopup(auth, googleProvider);
+  return result.user;
+}
 
 // Firestore Collection Names
 export const COLLECTIONS = {

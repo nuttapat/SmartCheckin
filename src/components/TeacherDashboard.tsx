@@ -31,9 +31,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [qrToken, setQrToken] = useState<string>('');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [liveCheckins, setLiveCheckins] = useState<AttendanceRecord[]>([]);
+  const [isGpsCheckEnabled, setIsGpsCheckEnabled] = useState<boolean>(true);
+  const [qrCountdown, setQrCountdown] = useState<number>(30);
   const [teacherCoords, setTeacherCoords] = useState<{ lat: number; lng: number }>({
-    lat: 13.7563,
-    lng: 100.5018,
+    lat: 13.7988363,
+    lng: 100.322944,
   });
 
   // Invite modal state
@@ -134,9 +136,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         (pos) => {
           setTeacherCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         },
-        () => {
+        (err) => {
+          console.warn('Teacher geolocation warning:', err.message);
           setTeacherCoords({ lat: 13.7563, lng: 100.5018 });
-        }
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     }
   }, [teacher.id]);
@@ -168,6 +172,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         if (payload.type === 'QR_REFRESH') {
           const newToken = payload.data.token;
           setQrToken(newToken);
+          setQrCountdown(30);
 
           // Generate QR Code Data URL image
           const qrText = isEvent ? `EVT:${targetId}:${newToken}` : `SES:${targetId}:${newToken}`;
@@ -190,7 +195,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     try {
       setActiveSession(session);
       setLiveCheckins([]);
-      const res = await activateSession(session.id, teacherCoords.lat, teacherCoords.lng);
+
+      let currentLat = teacherCoords.lat;
+      let currentLng = teacherCoords.lng;
+
+      if (navigator.geolocation) {
+        try {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 3000,
+              maximumAge: 0,
+            });
+          });
+          currentLat = position.coords.latitude;
+          currentLng = position.coords.longitude;
+          setTeacherCoords({ lat: currentLat, lng: currentLng });
+        } catch (e) {
+          console.warn('Fast geolocation fetch skipped, using last known teacher coords:', e);
+        }
+      }
+
+      const res = await activateSession(session.id, currentLat, currentLng);
 
       // Render initial QR
       const initialText = `SES:${session.id}:${res.qrToken || 'active'}`;
@@ -243,6 +269,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
   }, [quickEventTrigger]);
 
+  // 30-second Countdown Timer Effect for Dynamic QR Code
+  useEffect(() => {
+    if (!activeSession && !quickEventModal) return;
+
+    const timer = setInterval(() => {
+      setQrCountdown((prev) => (prev > 0 ? prev - 1 : 30));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [activeSession, quickEventModal]);
+
   // Generate Invite Link
   const handleGenerateInvite = async (role: 'STUDENT' | 'CO_TEACHER') => {
     if (!selectedCourse) return;
@@ -279,18 +316,29 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center space-x-3 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+          <button
+            onClick={onOpenCreateCourse}
+            className="flex-1 md:flex-initial px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20 active:scale-95 transition border border-emerald-400/30 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>สร้างรายวิชา</span>
+          </button>
+
+          <button
+            onClick={onOpenQuickEvent}
+            className="flex-1 md:flex-initial px-4 py-3 rounded-2xl bg-sky-600 hover:bg-sky-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-lg shadow-sky-600/20 active:scale-95 transition border border-sky-400/30 cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>เช็คชื่อด่วน</span>
+          </button>
+
           <button
             onClick={handleOpenTeacherCheckin}
-            className="w-full md:w-auto px-5 py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-extrabold text-xs flex items-center justify-center space-x-3 shadow-lg shadow-teal-600/25 active:scale-95 transition border border-teal-400/30"
+            className="w-full md:w-auto px-4 py-3 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-lg shadow-teal-600/25 active:scale-95 transition border border-teal-400/30 cursor-pointer"
           >
-            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
-              <UserCheck className="w-5 h-5 text-white" />
-            </div>
-            <div className="text-left">
-              <div className="text-sm font-black leading-none">เช็คชื่ออาจารย์เข้าสอน</div>
-              <div className="text-[10px] opacity-90 font-medium mt-0.5">ระบบลงเวลาเข้าสอนสำหรับผู้สอน</div>
-            </div>
+            <UserCheck className="w-4 h-4 text-white shrink-0" />
+            <span>เช็คชื่ออาจารย์เข้าสอน</span>
           </button>
         </div>
       </div>
@@ -450,10 +498,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
                     <button
                       onClick={() => handleStartSessionQR(session)}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5 transition shadow-sm active:scale-95"
+                      className="px-3 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5 transition shadow-sm active:scale-95 shrink-0"
+                      title="เปิด Dynamic QR Code"
                     >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>เปิด Dynamic QR Code</span>
+                      <QrCode className="w-4 h-4 shrink-0" />
+                      <span className="hidden sm:inline">เปิด Dynamic QR Code</span>
                     </button>
                   </div>
                 ))}
@@ -488,7 +537,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       : `กำลังเปิดสแกน: ${selectedCourse?.courseCode} - สัปดาห์ที่ ${activeSession?.weekNumber}`}
                   </h3>
                   <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Dynamic QR Code เปลี่ยนรหัสอัตโนมัติทุก 5 วินาที • ป้องกันการถ่ายรูปส่งให้เพื่อน
+                    Dynamic QR Code เปลี่ยนรหัสอัตโนมัติทุก 30 วินาที • ป้องกันการถ่ายรูปส่งให้เพื่อน
                   </p>
                 </div>
               </div>
@@ -510,30 +559,79 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               }`}>
                 <div className="relative p-4 bg-white rounded-2xl shadow-xl border border-slate-100">
                   {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="Dynamic Attendance QR" className="w-64 h-64 object-contain" />
+                    <img src={qrDataUrl} alt="Dynamic Attendance QR" className="w-60 h-60 object-contain" />
                   ) : (
-                    <div className="w-64 h-64 flex items-center justify-center text-slate-500">
+                    <div className="w-60 h-60 flex items-center justify-center text-slate-500">
                       กำลังสร้าง QR Code...
                     </div>
                   )}
-                  <div className="absolute top-2 right-2 px-2 py-0.5 bg-emerald-500 text-slate-950 font-black text-[10px] rounded-full uppercase tracking-wider">
-                    Dynamic Live
+                  <div className="absolute top-2 right-2 px-2.5 py-0.5 bg-emerald-500 text-slate-950 font-black text-[10px] rounded-full uppercase tracking-wider">
+                    Dynamic 30s
                   </div>
                 </div>
 
-                <div className="text-center space-y-1">
-                  <div className={`text-xs font-mono flex items-center justify-center space-x-1 ${
-                    isDarkMode ? 'text-slate-400' : 'text-slate-600'
-                  }`}>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-500" />
-                    <span>Token: {qrToken.slice(0, 18)}... (Refreshes every 5s)</span>
+                {/* 6-Character Token Display */}
+                <div className="w-full bg-slate-900 border border-slate-700/80 rounded-2xl p-3 text-center space-y-1">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-teal-400">
+                    🔑 รหัส Token 6 ตัวอักษร (สำหรับป้อนด้วยตนเอง):
                   </div>
-                  <div className={`text-[11px] flex items-center justify-center space-x-1 ${
-                    isDarkMode ? 'text-slate-500' : 'text-slate-500'
-                  }`}>
-                    <MapPin className="w-3 h-3 text-indigo-500" />
-                    <span>พิกัดห้องเรียน: {teacherCoords.lat.toFixed(4)}, {teacherCoords.lng.toFixed(4)} (Geofence 50m)</span>
+                  <div className="flex items-center justify-center space-x-3">
+                    <span className="font-mono text-2xl font-black tracking-widest text-emerald-400">
+                      {qrToken || '------'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(qrToken);
+                        alert(`คัดลอกรหัส ${qrToken} เรียบร้อยแล้ว!`);
+                      }}
+                      className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 flex items-center space-x-1"
+                      title="คัดลอกรหัส 6 หลัก"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>คัดลอก</span>
+                    </button>
                   </div>
+                </div>
+
+                {/* Countdown Timer Bar */}
+                <div className="w-full space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
+                    <span className="flex items-center space-x-1">
+                      <Clock className="w-3.5 h-3.5 text-teal-400 animate-spin" />
+                      <span>รีเฟรชรหัสถัดไปในอีก:</span>
+                    </span>
+                    <span className="font-mono text-emerald-400 font-bold">{qrCountdown} วินาที</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-teal-500 transition-all duration-1000 ease-linear"
+                      style={{ width: `${(qrCountdown / 30) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* GPS Toggle Switch */}
+                <div className="w-full pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setIsGpsCheckEnabled(!isGpsCheckEnabled)}
+                    className={`w-full py-2.5 px-3 rounded-2xl border text-xs font-bold flex items-center justify-between transition ${
+                      isGpsCheckEnabled
+                        ? 'bg-teal-500/15 border-teal-500/40 text-teal-300'
+                        : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <ShieldCheck className={`w-4 h-4 ${isGpsCheckEnabled ? 'text-teal-400' : 'text-rose-400'}`} />
+                      <span>ตรวจสอบพิกัด GPS</span>
+                    </div>
+                    <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase ${
+                      isGpsCheckEnabled ? 'bg-teal-500 text-slate-950' : 'bg-rose-500 text-white'
+                    }`}>
+                      {isGpsCheckEnabled ? '🟢 เปิดตรวจ GPS (Geofence 50m)' : '🔴 ปิดตรวจ GPS (QR อย่างเดียว)'}
+                    </span>
+                  </button>
                 </div>
               </div>
 
@@ -659,8 +757,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
       {/* TEACHER CHECK-IN MODAL */}
       {isTeacherCheckinModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto">
-          <div className={`border rounded-3xl w-full max-w-2xl p-6 space-y-5 shadow-2xl my-8 ${
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
+          <div className={`border rounded-3xl w-full max-w-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 shadow-2xl my-auto max-h-[92vh] flex flex-col overflow-y-auto ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
           }`}>
             {/* Modal Header */}
@@ -842,12 +940,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               </div>
 
               {/* GPS Info Banner */}
-              <div className={`p-3 rounded-2xl border flex items-center justify-between text-xs ${
+              <div className={`p-3 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-2 ${
                 isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
               }`}>
                 <div className="space-y-0.5">
-                  <span className={`text-[10px] font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    พิกัด GPS ปัจจุบันของผู้สอน:
+                  <span className={`text-[10px] font-semibold flex items-center space-x-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <span>พิกัด GPS ปัจจุบันของผู้สอน:</span>
+                    {Math.abs(teacherCoords.lat - 13.7988363) < 0.0001 && (
+                      <span className="text-teal-400 text-[10px] font-bold">(คณะเทคนิคการแพทย์ ม.มหิดล ศาลายา)</span>
+                    )}
                   </span>
                   <div className="font-mono font-bold text-teal-600 dark:text-teal-400">
                     {teacherCoords.lat.toFixed(5)}, {teacherCoords.lng.toFixed(5)}
@@ -859,14 +960,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     if (navigator.geolocation) {
                       navigator.geolocation.getCurrentPosition(
                         (pos) => setTeacherCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                        () => {}
+                        (err) => alert(`ไม่สามารถดึงพิกัดจากเบราว์เซอร์ได้ (${err.message}) กรุณาตรวจสอบ Location Services หรือเลือกโหมด 'QR Code อย่างเดียว'`),
+                        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
                       );
                     }
                   }}
-                  className="px-2.5 py-1 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20 text-[11px] font-bold transition flex items-center space-x-1"
+                  className="px-3 py-1.5 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20 text-[11px] font-bold transition flex items-center justify-center space-x-1 shrink-0"
                 >
-                  <RefreshCw className="w-3 h-3" />
-                  <span>อัปเดต GPS</span>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>ดึงพิกัด GPS ปัจจุบัน</span>
                 </button>
               </div>
 

@@ -36,6 +36,7 @@ export interface User {
   email: string;
   password?: string;
   avatarUrl?: string;
+  authProvider?: 'google' | 'email';
   deviceId?: string; // Device fingerprint/UUID for anti-proxy
   createdAt: string;
 }
@@ -55,6 +56,8 @@ export interface Course {
   coordinatorName: string;
   ownerId: string;
   ownerName?: string;
+  defaultLat?: number;
+  defaultLng?: number;
   weeks: TeachingWeek[];
   createdAt: string;
 }

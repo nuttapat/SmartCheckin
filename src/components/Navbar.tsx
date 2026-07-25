@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { User, UserRole } from '../types';
-import { QrCode, User as UserIcon, Plus, Sparkles, Sun, Moon, LogOut, Settings, KeyRound, ChevronDown } from 'lucide-react';
+import { QrCode, User as UserIcon, Plus, Sparkles, Sun, Moon, LogOut, Settings, KeyRound, ChevronDown, MapPin } from 'lucide-react';
 
 interface NavbarProps {
   currentUser: User | null;
@@ -10,7 +10,7 @@ interface NavbarProps {
   onOpenCreateCourse: () => void;
   onOpenJoinCourse: () => void;
   onOpenQuickEvent: () => void;
-  onOpenUserSettings: () => void;
+  onOpenUserSettings: (tab?: 'profile' | 'password' | 'device' | 'gps') => void;
   onLogout?: () => void;
   isDarkMode?: boolean;
   onToggleTheme?: () => void;
@@ -29,6 +29,23 @@ export const Navbar: React.FC<NavbarProps> = ({
   isDarkMode = true,
   onToggleTheme,
 }) => {
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleMouseEnter = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setIsDropdownOpen(true);
+  };
+
+  const handleMouseLeave = () => {
+    // Graceful 350ms delay before closing dropdown menu
+    hoverTimeoutRef.current = setTimeout(() => {
+      setIsDropdownOpen(false);
+    }, 350);
+  };
   return (
     <header className={`${isDarkMode ? 'bg-slate-900/90 border-slate-800 text-white' : 'bg-white/90 border-slate-200/80 text-slate-900'} backdrop-blur-md border-b sticky top-0 z-40 shadow-xs transition-colors duration-200`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -43,7 +60,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className={`font-extrabold text-lg tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                   Smart Attendance
                 </span>
-                <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-full">
+                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-full">
                   PWA Active
                 </span>
               </div>
@@ -55,40 +72,25 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Action Buttons & Switcher */}
           <div className="flex items-center space-x-2.5">
-            {/* Contextual Quick Actions */}
-            {currentUser && currentUser.role === UserRole.TEACHER && (
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={onOpenCreateCourse}
-                  className="hidden md:flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition shadow-sm active:scale-95"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>สร้างวิชาเรียน</span>
-                </button>
-                <button
-                  onClick={onOpenQuickEvent}
-                  className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition shadow-sm active:scale-95"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>เช็คชื่อด่วน</span>
-                </button>
-              </div>
-            )}
-
+            {/* Student Contextual Actions */}
             {currentUser && currentUser.role === UserRole.STUDENT && (
               <button
                 onClick={onOpenJoinCourse}
-                className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition shadow-sm active:scale-95"
+                className="flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition shadow-sm active:scale-95"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5 hidden sm:block" />
                 <span>เข้าร่วมวิชาเรียน</span>
               </button>
             )}
 
             {/* User Profile & Settings Menu */}
-            <div className="relative group">
+            <div 
+              className="relative"
+              onMouseEnter={handleMouseEnter}
+              onMouseLeave={handleMouseLeave}
+            >
               <button
-                onClick={onOpenUserSettings}
+                onClick={() => onOpenUserSettings('profile')}
                 className={`flex items-center space-x-2 text-xs px-3 py-1.5 rounded-xl border cursor-pointer transition ${
                   isDarkMode 
                     ? 'bg-slate-800 hover:bg-slate-700/80 text-slate-200 border-slate-700' 
@@ -112,56 +114,71 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <ChevronDown className="w-3.5 h-3.5 opacity-60 ml-1 hidden sm:block" />
               </button>
 
-              {/* User Settings Dropdown Menu */}
-              <div className={`absolute right-0 top-full mt-1.5 w-60 border rounded-2xl shadow-xl py-2 hidden group-hover:block z-50 transition-all ${
-                isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-800'
-              }`}>
-                <div className={`px-3 py-1.5 border-b text-[11px] font-bold uppercase tracking-wider ${
-                  isDarkMode ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'
+              {/* User Profile Dropdown Menu (with Hover Delay) */}
+              {isDropdownOpen && (
+                <div className={`absolute right-0 top-full mt-1.5 w-64 border rounded-2xl shadow-2xl py-2 z-50 transition-all animate-in fade-in duration-150 ${
+                  isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-800'
                 }`}>
-                  จัดการบัญชีผู้ใช้ (User Settings)
-                </div>
+                  <div className={`px-3 py-1.5 border-b text-[11px] font-bold uppercase tracking-wider ${
+                    isDarkMode ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'
+                  }`}>
+                    เมนูผู้ใช้งาน (User Profile Menu)
+                  </div>
 
-                <div className="p-1 space-y-0.5">
-                  <button
-                    onClick={onOpenUserSettings}
-                    className={`w-full text-left px-3 py-2 text-xs rounded-xl flex items-center space-x-2.5 transition font-medium ${
-                      isDarkMode ? 'hover:bg-slate-700/80 text-slate-200' : 'hover:bg-slate-100 text-slate-700'
-                    }`}
-                  >
-                    <Settings className="w-4 h-4 text-emerald-500 shrink-0" />
-                    <div>
-                      <p className="font-semibold">ตั้งค่าข้อมูลส่วนตัว</p>
-                      <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>แก้ไขชื่อ คำนำหน้า และข้อมูล</p>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={onOpenUserSettings}
-                    className={`w-full text-left px-3 py-2 text-xs rounded-xl flex items-center space-x-2.5 transition font-medium ${
-                      isDarkMode ? 'hover:bg-slate-700/80 text-slate-200' : 'hover:bg-slate-100 text-slate-700'
-                    }`}
-                  >
-                    <KeyRound className="w-4 h-4 text-sky-500 shrink-0" />
-                    <div>
-                      <p className="font-semibold">เปลี่ยนรหัสผ่าน</p>
-                      <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>อัปเดตรหัสผ่านเข้าสู่ระบบ</p>
-                    </div>
-                  </button>
-                </div>
-
-                {onLogout && (
-                  <div className={`border-t mt-1 pt-1 px-1 ${isDarkMode ? 'border-slate-700' : 'border-slate-100'}`}>
+                  <div className="p-1 space-y-0.5">
                     <button
-                      onClick={onLogout}
-                      className="w-full text-left px-3 py-2 text-xs text-rose-500 hover:bg-rose-500/10 rounded-xl flex items-center space-x-2 font-semibold transition"
+                      onClick={() => { setIsDropdownOpen(false); onOpenUserSettings('profile'); }}
+                      className={`w-full text-left px-3 py-2 text-xs rounded-xl flex items-center space-x-2.5 transition font-medium ${
+                        isDarkMode ? 'hover:bg-slate-700/80 text-slate-200' : 'hover:bg-slate-100 text-slate-700'
+                      }`}
                     >
-                      <LogOut className="w-4 h-4" />
-                      <span>ออกจากระบบ (Logout)</span>
+                      <Settings className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <div>
+                        <p className="font-semibold">ตั้งค่าข้อมูลส่วนตัว</p>
+                        <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>แก้ไขชื่อ คำนำหน้า และข้อมูล</p>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { setIsDropdownOpen(false); onOpenUserSettings('gps'); }}
+                      className={`w-full text-left px-3 py-2 text-xs rounded-xl flex items-center space-x-2.5 transition font-medium ${
+                        isDarkMode ? 'hover:bg-slate-700/80 text-teal-300' : 'hover:bg-teal-50 text-teal-800'
+                      }`}
+                    >
+                      <MapPin className="w-4 h-4 text-teal-400 shrink-0" />
+                      <div>
+                        <p className="font-semibold text-teal-400 dark:text-teal-300">📍 ตำแหน่ง GPS & แผนที่</p>
+                        <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>ระบุและตั้งพิกัด GPS บนแผนที่</p>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { setIsDropdownOpen(false); onOpenUserSettings('password'); }}
+                      className={`w-full text-left px-3 py-2 text-xs rounded-xl flex items-center space-x-2.5 transition font-medium ${
+                        isDarkMode ? 'hover:bg-slate-700/80 text-slate-200' : 'hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <KeyRound className="w-4 h-4 text-sky-500 shrink-0" />
+                      <div>
+                        <p className="font-semibold">เปลี่ยนรหัสผ่าน</p>
+                        <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>อัปเดตรหัสผ่านเข้าสู่ระบบ</p>
+                      </div>
                     </button>
                   </div>
-                )}
-              </div>
+
+                  {onLogout && (
+                    <div className={`border-t mt-1 pt-1 px-1 ${isDarkMode ? 'border-slate-700' : 'border-slate-100'}`}>
+                      <button
+                        onClick={() => { setIsDropdownOpen(false); onLogout(); }}
+                        className="w-full text-left px-3 py-2 text-xs text-rose-500 hover:bg-rose-500/10 rounded-xl flex items-center space-x-2 font-semibold transition"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        <span>ออกจากระบบ (Logout)</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Theme Switcher Button */}

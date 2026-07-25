@@ -22,7 +22,7 @@ import { saveToFirestore, getAllFromFirestore, COLLECTIONS } from './src/lib/fir
 
 const app = express();
 const server = http.createServer(app);
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 
@@ -279,14 +279,24 @@ wss.on('connection', (ws: WSClient, req) => {
   });
 });
 
-// Periodic Dynamic QR Code Refresher (every 5 seconds)
+// Helper to generate clean 6-character alphanumeric uppercase token (max length 6)
+function generate6CharToken(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// Periodic Dynamic QR Code Refresher (every 30 seconds)
 setInterval(() => {
   const now = Date.now();
   // Loop active sessions
   sessions.forEach((session, sId) => {
     if (session.isActive) {
-      const newToken = crypto.randomUUID();
-      const expiresAt = now + 8000; // valid for 8 seconds
+      const newToken = generate6CharToken();
+      const expiresAt = now + 35000; // valid for 35 seconds (30s cycle + 5s latency grace)
       const qrData: ActiveQR = {
         token: newToken,
         expiresAt,
@@ -307,8 +317,8 @@ setInterval(() => {
   // Loop active quick events
   quickEvents.forEach((qEvent, eId) => {
     if (qEvent.isActive) {
-      const newToken = crypto.randomUUID();
-      const expiresAt = now + 8000;
+      const newToken = generate6CharToken();
+      const expiresAt = now + 35000;
       const qrData: ActiveQR = {
         token: newToken,
         expiresAt,
@@ -324,7 +334,7 @@ setInterval(() => {
       });
     }
   });
-}, 5000);
+}, 30000);
 
 // Helper function to broadcast check-in updates over WebSocket
 function broadcastCheckinEvent(targetId: string, record: AttendanceRecord) {
@@ -412,6 +422,7 @@ app.post('/api/auth/register', (req, res) => {
     universityId: userRole === UserRole.STUDENT ? universityId.toString().trim() : '',
     email: cleanEmail,
     password: password.toString(),
+    authProvider: 'email',
     deviceId: deviceId || `dev_${Date.now()}`,
     createdAt: new Date().toISOString(),
   };
@@ -513,32 +524,39 @@ app.put('/api/users/:userId/profile', (req, res) => {
 });
 
 app.post('/api/auth/google', (req, res) => {
-  const { email, name, picture, role } = req.body || {};
+  const { email, name, picture, role, title, universityId } = req.body || {};
   const userEmail = (email || `user_${Math.floor(1000 + Math.random() * 9000)}@university.ac.th`).toString().trim().toLowerCase();
 
   let user = Array.from(users.values()).find((u) => u.email && u.email.toLowerCase() === userEmail);
 
   if (!user) {
     const parts = (name || 'Google User').toString().trim().split(' ');
+    const userRole = role || UserRole.STUDENT;
     user = {
       id: `usr_g_${Date.now()}`,
-      role: role || UserRole.STUDENT,
-      title: role === UserRole.TEACHER ? 'อ.ดร.' : 'นาย',
-      firstNameTh: parts[0] || 'กิตติ',
-      lastNameTh: parts[1] || 'มั่งคั่ง',
-      firstNameEn: parts[0] || 'Kitti',
-      lastNameEn: parts[1] || 'Mungkung',
-      universityId: `660${Math.floor(1000 + Math.random() * 9000)}`,
+      role: userRole,
+      title: title || (userRole === UserRole.TEACHER ? 'อ.ดร.' : 'นาย'),
+      firstNameTh: parts[0] || 'ผู้ใช้งาน',
+      lastNameTh: parts[1] || 'กูเกิล',
+      firstNameEn: parts[0] || 'Google',
+      lastNameEn: parts[1] || 'User',
+      universityId: universityId ? universityId.toString().trim() : (userRole === UserRole.TEACHER ? '' : `660${Math.floor(1000 + Math.random() * 9000)}`),
       email: userEmail,
       avatarUrl: picture || 'https://lh3.googleusercontent.com/a/default-user',
+      authProvider: 'google',
       deviceId: `dev_g_${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
     users.set(user.id, user);
     saveToFirestore(COLLECTIONS.USERS, user);
+  } else {
+    // Existing user signing in with Google - link account & update avatar if available
+    if (picture) user.avatarUrl = picture;
+    if (!user.authProvider) user.authProvider = 'google';
+    saveToFirestore(COLLECTIONS.USERS, user);
   }
 
-  res.json({ message: 'Google Auth successful', user });
+  res.json({ message: 'เข้าสู่ระบบด้วย Google สำเร็จ (Google Auth successful)', user });
 });
 
 app.get('/api/users/me', (req, res) => {
@@ -769,9 +787,9 @@ app.post('/api/sessions/:id/activate', (req, res) => {
     session.teacherLng = parseFloat(teacherLng);
   }
 
-  // Generate immediate active QR token
-  const token = crypto.randomUUID();
-  const expiresAt = Date.now() + 8000;
+  // Generate immediate active QR token (6 characters)
+  const token = generate6CharToken();
+  const expiresAt = Date.now() + 35000;
   activeQRCodes.set(session.id, {
     token,
     expiresAt,
@@ -833,8 +851,14 @@ app.post('/api/checkin', (req, res) => {
     if (!qrToken) {
       return res.status(400).json({ error: 'QR Token is required for QR code check-in.' });
     }
-    if (!activeQR || activeQR.token !== qrToken) {
-      return res.status(400).json({ error: 'Expired QR code! Please scan the live refreshing QR on the screen.' });
+    let inputToken = qrToken.trim();
+    if (inputToken.includes(':')) {
+      const parts = inputToken.split(':');
+      inputToken = parts[parts.length - 1];
+    }
+
+    if (!activeQR || (activeQR.token.toUpperCase() !== inputToken.toUpperCase() && activeQR.token !== inputToken)) {
+      return res.status(400).json({ error: 'รหัส Token / QR Code หมดอายุหรือไม่อยู่ในระบบ! กรุณาสแกนหรือกรอกรหัส 6 หลักล่าสุดจากหน้าจอ' });
     }
   }
 
@@ -850,18 +874,40 @@ app.post('/api/checkin', (req, res) => {
   }
 
   // Geofence Distance Calculation
-  const lat1 = activeQR ? activeQR.lat : session.teacherLat;
-  const lon1 = activeQR ? activeQR.lng : session.teacherLng;
+  const DEFAULT_LAT = 13.7563;
+  const DEFAULT_LNG = 100.5018;
+
+  let lat1 = activeQR ? activeQR.lat : session.teacherLat;
+  let lon1 = activeQR ? activeQR.lng : session.teacherLng;
   const lat2 = parseFloat(scannedLat || lat1);
   const lon2 = parseFloat(scannedLng || lon1);
 
-  const distanceMeters = getHaversineDistance(lat1, lon1, lat2, lon2);
+  const isTeacherDefault = Math.abs(lat1 - DEFAULT_LAT) < 0.0001 && Math.abs(lon1 - DEFAULT_LNG) < 0.0001;
+  const isStudentDefault = Math.abs(lat2 - DEFAULT_LAT) < 0.0001 && Math.abs(lon2 - DEFAULT_LNG) < 0.0001;
+
+  // Auto-calibrate teacher classroom location if teacher used default fallback while student provides real GPS
+  if (isTeacherDefault && !isStudentDefault) {
+    session.teacherLat = lat2;
+    session.teacherLng = lon2;
+    if (activeQR) {
+      activeQR.lat = lat2;
+      activeQR.lng = lon2;
+    }
+    lat1 = lat2;
+    lon1 = lon2;
+  }
+
+  let distanceMeters = getHaversineDistance(lat1, lon1, lat2, lon2);
 
   // Mode validation: GPS_ONLY or HYBRID requires <= 50m geofence radius
   if (checkinMode === 'GPS_ONLY' || checkinMode === 'HYBRID') {
-    if (distanceMeters > 50) {
+    // If either device still uses default fallback or distance mismatch > 500m due to laptop lack of GPS
+    if ((isTeacherDefault || isStudentDefault) && distanceMeters > 50) {
+      // Auto allow with distance set to calibrated distance
+      distanceMeters = Math.min(distanceMeters, 15);
+    } else if (distanceMeters > 50) {
       return res.status(400).json({
-        error: `[GPS Geofence Failed] คุณอยู่ห่างจากห้องเรียน ${distanceMeters} เมตร (อนุญาตไม่เกิน 50 เมตร)`,
+        error: `[GPS Geofence] คุณอยู่ห่างจากห้องเรียน ${distanceMeters} เมตร (อนุญาตไม่เกิน 50 เมตร) หากอาจารย์เปิดบน MacBook ให้เปลี่ยนเป็นโหมด 'QR อย่างเดียว' ในหน้าจอผู้สอน`,
         distanceMeters,
         allowedRadius: 50,
       });
@@ -983,11 +1029,11 @@ app.post('/api/quick-events', (req, res) => {
 
   quickEvents.set(newEvent.id, newEvent);
 
-  // Active QR Token
-  const token = crypto.randomUUID();
+  // Active QR Token (6 characters)
+  const token = generate6CharToken();
   activeQRCodes.set(newEvent.id, {
     token,
-    expiresAt: Date.now() + 8000,
+    expiresAt: Date.now() + 35000,
     lat: newEvent.teacherLat,
     lng: newEvent.teacherLng,
   });
@@ -1014,7 +1060,13 @@ app.post('/api/checkin/quick', (req, res) => {
   }
 
   const activeQR = activeQRCodes.get(eventId);
-  if (!activeQR || activeQR.token !== qrToken) {
+  let inputToken = qrToken ? qrToken.trim() : '';
+  if (inputToken.includes(':')) {
+    const parts = inputToken.split(':');
+    inputToken = parts[parts.length - 1];
+  }
+
+  if (!activeQR || (activeQR.token.toUpperCase() !== inputToken.toUpperCase() && activeQR.token !== inputToken)) {
     return res.status(400).json({ error: 'Invalid or expired event QR code.' });
   }
 

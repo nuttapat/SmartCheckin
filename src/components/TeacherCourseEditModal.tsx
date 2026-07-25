@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Course, TeachingWeek, Semester } from '../types';
 import { updateCourse } from '../services/api';
-import { X, BookOpen, Plus, Trash2, Calendar, Save, CheckCircle2 } from 'lucide-react';
+import { X, BookOpen, Plus, Trash2, Calendar, Save, CheckCircle2, MapPin, Globe } from 'lucide-react';
+import { MapPicker } from './MapPicker';
 
 interface TeacherCourseEditModalProps {
   isOpen: boolean;
@@ -23,6 +24,9 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   const [academicYear, setAcademicYear] = useState<number>(course.academicYear);
   const [semester, setSemester] = useState<Semester>(course.semester);
   const [coordinatorName, setCoordinatorName] = useState<string>(course.coordinatorName);
+  const [defaultLat, setDefaultLat] = useState<number>(course.defaultLat || 13.7988363);
+  const [defaultLng, setDefaultLng] = useState<number>(course.defaultLng || 100.322944);
+  const [showMapPicker, setShowMapPicker] = useState<boolean>(false);
   const [weeks, setWeeks] = useState<TeachingWeek[]>(course.weeks || []);
 
   const [loading, setLoading] = useState<boolean>(false);
@@ -35,6 +39,8 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
     setAcademicYear(course.academicYear);
     setSemester(course.semester);
     setCoordinatorName(course.coordinatorName);
+    setDefaultLat(course.defaultLat || 13.7988363);
+    setDefaultLng(course.defaultLng || 100.322944);
     setWeeks(course.weeks ? [...course.weeks] : []);
     setErrorMsg('');
     setSuccessMsg('');
@@ -99,6 +105,8 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
         academicYear,
         semester,
         coordinatorName,
+        defaultLat,
+        defaultLng,
         weeks,
       });
 
@@ -115,9 +123,9 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
       <div
-        className={`border rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden my-8 transition-all ${
+        className={`border rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col transition-all ${
           isDarkMode
             ? 'bg-slate-900 border-slate-800 text-slate-100'
             : 'bg-white border-slate-200 text-slate-900'
@@ -125,16 +133,16 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
       >
         {/* Header */}
         <div
-          className={`px-6 py-5 border-b flex items-center justify-between ${
+          className={`px-5 sm:px-6 py-4 sm:py-5 border-b flex items-center justify-between shrink-0 ${
             isDarkMode ? 'bg-slate-800/60 border-slate-800' : 'bg-sky-50/70 border-sky-100'
           }`}
         >
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-2xl bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30 flex items-center justify-center shrink-0">
               <BookOpen className="w-5 h-5 stroke-[2.2]" />
             </div>
             <div>
-              <h2 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+              <h2 className={`text-base sm:text-lg font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                 แก้ไขรายวิชา &amp; จัดการสัปดาห์สอน
               </h2>
               <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -144,7 +152,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className={`p-2 rounded-xl transition ${
+            className={`p-2 rounded-xl transition shrink-0 ${
               isDarkMode
                 ? 'text-slate-400 hover:text-white hover:bg-slate-800'
                 : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
@@ -155,7 +163,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 sm:space-y-6 overflow-y-auto flex-1">
           {errorMsg && (
             <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-600 dark:text-rose-300 text-xs font-medium">
               {errorMsg}
@@ -252,6 +260,92 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
                   }`}
                 />
               </div>
+            </div>
+
+            {/* Course GPS Default Location */}
+            <div className={`p-4 rounded-2xl border space-y-3 ${
+              isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <MapPin className="w-4 h-4 text-teal-400" />
+                  <span className={`text-xs font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                    ตำแหน่ง GPS ประจำห้องเรียนรายวิชานี้
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMapPicker(!showMapPicker)}
+                  className="px-3 py-1.5 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 text-teal-600 dark:text-teal-400 border border-teal-500/30 text-xs font-bold flex items-center space-x-1.5 transition"
+                >
+                  <Globe className="w-3.5 h-3.5" />
+                  <span>{showMapPicker ? 'ซ่อนแผนที่' : '📍 เลือกระบุพิกัดบน Maps'}</span>
+                </button>
+              </div>
+
+              {/* Current Selected Location Indicator */}
+              <div className={`px-3 py-2 rounded-xl text-xs flex items-center space-x-2 border ${
+                isDarkMode ? 'bg-slate-900/90 border-slate-700 text-teal-300' : 'bg-teal-50 border-teal-200 text-teal-900'
+              }`}>
+                <MapPin className="w-4 h-4 text-teal-400 shrink-0 animate-pulse" />
+                <div className="truncate">
+                  <span className="font-bold">สถานที่อ้างอิง: </span>
+                  <span className="font-semibold">
+                    {Math.abs(defaultLat - 13.7988363) < 0.0001 && Math.abs(defaultLng - 100.322944) < 0.0001
+                      ? '📍 คณะเทคนิคการแพทย์ มหาวิทยาลัยมหิดล (ศาลายา)'
+                      : Math.abs(defaultLat - 13.7578523) < 0.0001 && Math.abs(defaultLng - 100.4861744) < 0.0001
+                      ? '📍 คณะเทคนิคการแพทย์ มหาวิทยาลัยมหิดล (ศิริราช)'
+                      : `พิกัดระบุเอง (${defaultLat.toFixed(5)}, ${defaultLng.toFixed(5)})`}
+                  </span>
+                </div>
+              </div>
+
+              {showMapPicker ? (
+                <div className="pt-2 border-t border-slate-700/60">
+                  <MapPicker
+                    initialLat={defaultLat}
+                    initialLng={defaultLng}
+                    isDarkMode={isDarkMode}
+                    onSelectLocation={(l1, l2) => {
+                      setDefaultLat(l1);
+                      setDefaultLng(l2);
+                      setShowMapPicker(false);
+                    }}
+                    onClose={() => setShowMapPicker(false)}
+                  />
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                      Latitude (ละติจูด)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      value={defaultLat}
+                      onChange={(e) => setDefaultLat(parseFloat(e.target.value) || 0)}
+                      className={`w-full border rounded-xl px-3 py-1.5 text-xs font-mono font-bold ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-teal-400' : 'bg-white border-slate-300 text-teal-700'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                      Longitude (ลองจิจูด)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      value={defaultLng}
+                      onChange={(e) => setDefaultLng(parseFloat(e.target.value) || 0)}
+                      className={`w-full border rounded-xl px-3 py-1.5 text-xs font-mono font-bold ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-teal-400' : 'bg-white border-slate-300 text-teal-700'
+                      }`}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

@@ -41,8 +41,8 @@ export const JoinCourseModal: React.FC<JoinCourseModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4">
-      <div className={`border rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4 ${
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
+      <div className={`border rounded-2xl w-full max-w-md shadow-2xl p-5 sm:p-6 space-y-4 my-auto max-h-[92vh] flex flex-col overflow-y-auto ${
         isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
       }`}>
         <div className={`flex items-center justify-between border-b pb-3 ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>

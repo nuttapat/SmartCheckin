@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, AttendanceRecord, Course, Session } from '../types';
 import { fetchStudentStats, submitCheckin, fetchActiveSessions } from '../services/api';
-import { QrCode, Camera, CheckCircle2, AlertTriangle, ShieldX, MapPin, Clock, Award, ChevronRight, RefreshCw, X, ShieldCheck, Navigation, Sparkles } from 'lucide-react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { QrCode, Camera, CheckCircle2, AlertTriangle, ShieldX, MapPin, Clock, Award, ChevronRight, RefreshCw, X, ShieldCheck, Navigation, Sparkles, Image } from 'lucide-react';
+import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode';
 
 interface StudentDashboardProps {
   student: User;
@@ -47,6 +47,25 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
 
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isImageProcessing, setIsImageProcessing] = useState<boolean>(false);
+
+  const handleFileUploadScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsImageProcessing(true);
+    try {
+      const html5QrCode = new Html5Qrcode('qr-reader-file-temp');
+      const decodedText = await html5QrCode.scanFile(file, true);
+      setScannedResult(decodedText);
+      handleProcessCheckin(decodedText, checkinMode);
+    } catch (err) {
+      alert('ไม่พบ QR Code ในรูปภาพที่เลือก กรุณาถ่ายรูปให้เห็น QR Code ชัดเจน แล้วลองอีกครั้ง');
+    } finally {
+      setIsImageProcessing(false);
+      if (e.target) e.target.value = '';
+    }
+  };
 
   const loadActiveSessions = async () => {
     try {
@@ -66,9 +85,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
         (pos) => {
           setCurrentCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         },
-        () => {
+        (err) => {
+          console.warn('Geolocation warning:', err.message);
           setCurrentCoords({ lat: 13.7563, lng: 100.5018 });
-        }
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     } else {
       setCurrentCoords({ lat: 13.7563, lng: 100.5018 });
@@ -162,8 +183,25 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
         sessionId = 'ses_3';
       }
 
-      const lat = currentCoords?.lat || 13.7563;
-      const lng = currentCoords?.lng || 100.5018;
+      let lat = currentCoords?.lat || 13.7563;
+      let lng = currentCoords?.lng || 100.5018;
+
+      if (navigator.geolocation) {
+        try {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 4000,
+              maximumAge: 0,
+            });
+          });
+          lat = position.coords.latitude;
+          lng = position.coords.longitude;
+          setCurrentCoords({ lat, lng });
+        } catch (err) {
+          console.warn('Fast student location lookup skipped, using currentCoords:', err);
+        }
+      }
 
       const res = await submitCheckin({
         sessionId,
@@ -587,14 +625,71 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
             {(checkinMode === 'QR_ONLY' || checkinMode === 'HYBRID') && (
               <div className="space-y-4">
                 {/* Live Camera Scanner Viewport */}
-                <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 min-h-[240px]">
+                <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 min-h-[200px]">
                   <div id="qr-reader" className="w-full"></div>
+                  <div id="qr-reader-file-temp" className="hidden"></div>
+                </div>
+
+                {/* Native Mobile Camera Photo Upload Fallback */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handleFileUploadScan}
+                />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isImageProcessing}
+                    className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-2 shadow-md transition"
+                  >
+                    <Image className="w-4 h-4" />
+                    <span>{isImageProcessing ? 'กำลังประมวลผลรูป...' : '📷 ถ่ายรูป / อัปโหลด QR Code'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (scannerRef.current) {
+                        scannerRef.current.clear().then(() => {
+                          const scanner = new Html5QrcodeScanner(
+                            'qr-reader',
+                            { fps: 10, qrbox: { width: 220, height: 220 } },
+                            false
+                          );
+                          scanner.render((decodedText) => {
+                            setScannedResult(decodedText);
+                            scanner.clear();
+                            handleProcessCheckin(decodedText, checkinMode);
+                          }, () => {});
+                          scannerRef.current = scanner;
+                        });
+                      }
+                    }}
+                    className="w-full py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 border border-slate-700 transition"
+                  >
+                    <Camera className="w-4 h-4 text-emerald-400" />
+                    <span>ขอเปิดกล้องไลฟ์สดอีกครั้ง</span>
+                  </button>
+                </div>
+
+                <div className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800/80 text-[11px] text-slate-400 space-y-1">
+                  <p className="font-bold text-slate-300">💡 หากเบราว์เซอร์ไม่แสดง Pop-up ขออนุญาตเข้าถึงกล้อง:</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-[10px]">
+                    <li><b>iOS Safari:</b> ไปที่ Setting -&gt; Safari -&gt; Camera -&gt; เลือก "Allow"</li>
+                    <li><b>Android Chrome:</b> กดไอคอนกุญแจ/การตั้งค่ามุมซ้ายบนแถบ URL -&gt; Permissions -&gt; Allow Camera</li>
+                    <li>หรือกดปุ่ม <b>"ถ่ายรูป / อัปโหลด QR Code"</b> ด้านบนเพื่อใช้แอปกล้องของเครื่องสแกนได้ทันที</li>
+                  </ul>
                 </div>
 
                 {/* Fallback Simulation Scanner Input */}
                 <div className="space-y-2 pt-2 border-t border-slate-800">
                   <p className="text-xs text-slate-400 font-semibold">
-                    หรือ ป้อนรหัส Token ล่าสุดจากหน้าจออาจารย์ (Test Simulation Input):
+                    หรือ ป้อนรหัส Token ล่าสุดจากหน้าจออาจารย์ (Manual Token Input):
                   </p>
                   <div className="flex space-x-2">
                     <input
@@ -607,7 +702,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
                     <button
                       onClick={() => handleProcessCheckin(manualInput || 'SES:ses_3:active_token', checkinMode)}
                       disabled={submitting}
-                      className="px-4 py-2 bg-emerald-500 text-slate-950 text-xs font-bold rounded-xl hover:bg-emerald-400 disabled:opacity-50"
+                      className="px-4 py-2 bg-emerald-500 text-slate-950 text-xs font-bold rounded-xl hover:bg-emerald-400 disabled:opacity-50 shrink-0"
                     >
                       {submitting ? 'กำลังตรวจ...' : 'ส่งเช็คชื่อ'}
                     </button>

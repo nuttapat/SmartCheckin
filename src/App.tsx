@@ -87,10 +87,16 @@ export default function App() {
   // Modals
   const [isRegisterOpen, setIsRegisterOpen] = useState<boolean>(false);
   const [isUserSettingsOpen, setIsUserSettingsOpen] = useState<boolean>(false);
+  const [userSettingsTab, setUserSettingsTab] = useState<'profile' | 'password' | 'device' | 'gps'>('profile');
   const [isCreateCourseOpen, setIsCreateCourseOpen] = useState<boolean>(false);
   const [isJoinCourseOpen, setIsJoinCourseOpen] = useState<boolean>(false);
   const [refreshKey, setRefreshKey] = useState<number>(0);
   const [quickEventTrigger, setQuickEventTrigger] = useState<number>(0);
+
+  const handleOpenUserSettings = (tab: 'profile' | 'password' | 'device' | 'gps' = 'profile') => {
+    setUserSettingsTab(tab);
+    setIsUserSettingsOpen(true);
+  };
 
   const handleUserUpdated = (updatedUser: User) => {
     setCurrentUser(updatedUser);
@@ -177,7 +183,7 @@ export default function App() {
         onOpenCreateCourse={() => setIsCreateCourseOpen(true)}
         onOpenJoinCourse={() => setIsJoinCourseOpen(true)}
         onOpenQuickEvent={handleOpenQuickEvent}
-        onOpenUserSettings={() => setIsUserSettingsOpen(true)}
+        onOpenUserSettings={handleOpenUserSettings}
         onLogout={handleLogout}
         isDarkMode={isDarkMode}
         onToggleTheme={() => setIsDarkMode(!isDarkMode)}
@@ -211,6 +217,7 @@ export default function App() {
         currentUser={currentUser}
         onUpdateUser={handleUserUpdated}
         isDarkMode={isDarkMode}
+        initialTab={userSettingsTab}
       />
 
       <RegisterModal
