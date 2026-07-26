@@ -248,3 +248,9 @@ export async function fetchStudentStats(studentId: string) {
   if (!res.ok) throw new Error('Failed to fetch student stats');
   return res.json();
 }
+
+export async function fetchTeacherCoursesOverview(teacherId: string) {
+  const res = await fetch(`${API_BASE}/teacher/courses-overview?teacherId=${teacherId}`);
+  if (!res.ok) throw new Error('Failed to fetch teacher courses overview');
+  return res.json();
+}

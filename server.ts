@@ -18,7 +18,7 @@ import {
   Semester,
   AttendanceStatus,
 } from './src/types.js';
-import { saveToFirestore, getAllFromFirestore, COLLECTIONS } from './src/lib/firebaseStore.js';
+import { saveToFirestore, getAllFromFirestore, deleteFromFirestore, COLLECTIONS } from './src/lib/firebaseStore.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -131,10 +131,10 @@ users.set(coTeacherUser.id, coTeacherUser);
 users.set(studentUser1.id, studentUser1);
 users.set(studentUser2.id, studentUser2);
 
-// Seed Initial Course: MTID204
+// Seed Initial Course: TEST101
 const sampleCourse: Course = {
-  id: 'crs_mtid204',
-  courseCode: 'MTID204',
+  id: 'crs_test101',
+  courseCode: 'TEST101',
   courseName: 'Software Architecture & System Design',
   academicYear: 2569,
   semester: Semester.FIRST,
@@ -810,7 +810,7 @@ app.post('/api/invites/join', (req, res) => {
   let targetRole = invite?.role || CourseMemberRole.STUDENT;
 
   if (!invite) {
-    // Fallback: Check if user entered a Course Code (e.g. MTID204) directly
+    // Fallback: Check if user entered a Course Code (e.g. TEST101) directly
     const courseMatch = Array.from(courses.values()).find(
       (c) => c.courseCode.toUpperCase() === cleanCode || c.id.toUpperCase() === cleanCode
     );
@@ -1295,12 +1295,236 @@ app.get('/api/student/:studentId/stats', (req, res) => {
   res.json(courseStats);
 });
 
+// Teacher Course Overview Dashboard API
+app.get('/api/teacher/courses-overview', (req, res) => {
+  const teacherId = (req.query.teacherId as string) || (req.headers['x-user-id'] as string);
+  const teacher = users.get(teacherId);
+
+  if (!teacher) {
+    return res.status(401).json({ error: 'ไม่พบข้อมูลอาจารย์ผู้ใช้งาน' });
+  }
+
+  const memberCourseIds = courseMembers
+    .filter((m) => m.userId === teacherId)
+    .map((m) => m.courseId);
+
+  const teacherCourses = Array.from(courses.values()).filter(
+    (c) => c.ownerId === teacherId || memberCourseIds.includes(c.id)
+  );
+
+  const overviewList = teacherCourses.map((course) => {
+    const membersInCourse = courseMembers.filter((m) => m.courseId === course.id);
+    const studentMembers = membersInCourse.filter((m) => m.role === CourseMemberRole.STUDENT);
+    const coTeacherMembers = membersInCourse.filter((m) => m.role === CourseMemberRole.CO_TEACHER);
+
+    const cSessions = Array.from(sessions.values()).filter((s) => s.courseId === course.id);
+    const cSessionIds = new Set(cSessions.map((s) => s.id));
+
+    const studentList = studentMembers.map((m) => {
+      const studentUser = users.get(m.userId);
+      const studentName = studentUser
+        ? `${studentUser.title || ''} ${studentUser.firstNameTh || ''} ${studentUser.lastNameTh || ''}`.trim() || studentUser.email
+        : 'นักศึกษา';
+      const studentIdNum = studentUser?.universityId || '-';
+
+      const studentCheckins = attendanceRecords.filter(
+        (r) => cSessionIds.has(r.sessionId) && r.studentId === m.userId
+      );
+
+      const totalSessionsCount = cSessions.length || 1;
+      const attendedCount = studentCheckins.length;
+      const attendancePercent = Math.round((attendedCount / totalSessionsCount) * 100);
+
+      const checkinTimes = studentCheckins.map((r) => new Date(r.timestamp));
+      const lastCheckinTime = studentCheckins.length > 0 ? studentCheckins[studentCheckins.length - 1].timestamp : null;
+      const lastCheckinMethod = studentCheckins.length > 0 ? studentCheckins[studentCheckins.length - 1].checkinMethod : null;
+
+      let avgTimeStr = '-';
+      if (checkinTimes.length > 0) {
+        const totalMinutes = checkinTimes.reduce((acc, dt) => acc + (dt.getHours() * 60 + dt.getMinutes()), 0);
+        const avgMin = Math.round(totalMinutes / checkinTimes.length);
+        const hrs = Math.floor(avgMin / 60).toString().padStart(2, '0');
+        const mins = (avgMin % 60).toString().padStart(2, '0');
+        avgTimeStr = `${hrs}:${mins} น.`;
+      }
+
+      return {
+        userId: m.userId,
+        studentName,
+        studentIdNum,
+        email: studentUser?.email || '',
+        avatarUrl: studentUser?.avatarUrl || '',
+        joinedAt: m.joinedAt,
+        attendedCount,
+        totalSessionsCount,
+        attendancePercent,
+        avgTimeStr,
+        lastCheckinTime,
+        lastCheckinMethod,
+      };
+    });
+
+    const courseSessionsList = Array.from(sessions.values()).filter((s) => s.courseId === course.id);
+    const sessionDetailsList = courseSessionsList.map((s) => {
+      const recordsForSession = attendanceRecords.filter((r) => r.sessionId === s.id);
+      const checkinCount = recordsForSession.length;
+
+      let firstCheckinTimeStr = '-';
+      let lastCheckinTimeStr = '-';
+
+      if (recordsForSession.length > 0) {
+        const sorted = [...recordsForSession].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        firstCheckinTimeStr = new Date(sorted[0].timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+        lastCheckinTimeStr = new Date(sorted[sorted.length - 1].timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+      }
+
+      const checkedInStudentIds = new Set(recordsForSession.map((r) => r.studentId));
+
+      const attendedStudents = studentMembers
+        .filter((m) => checkedInStudentIds.has(m.userId))
+        .map((m) => {
+          const studentUser = users.get(m.userId);
+          const studentName = studentUser
+            ? `${studentUser.title || ''} ${studentUser.firstNameTh || ''} ${studentUser.lastNameTh || ''}`.trim() || studentUser.email
+            : 'นักศึกษา';
+          const studentIdNum = studentUser?.universityId || '-';
+          const rec = recordsForSession.find((r) => r.studentId === m.userId);
+          return {
+            userId: m.userId,
+            studentName,
+            studentIdNum,
+            email: studentUser?.email || '',
+            avatarUrl: studentUser?.avatarUrl || '',
+            checkinTime: rec ? new Date(rec.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.' : '-',
+            checkinMethod: rec?.checkinMethod || 'สแกน QR',
+          };
+        });
+
+      const absentStudents = studentMembers
+        .filter((m) => !checkedInStudentIds.has(m.userId))
+        .map((m) => {
+          const studentUser = users.get(m.userId);
+          const studentName = studentUser
+            ? `${studentUser.title || ''} ${studentUser.firstNameTh || ''} ${studentUser.lastNameTh || ''}`.trim() || studentUser.email
+            : 'นักศึกษา';
+          const studentIdNum = studentUser?.universityId || '-';
+          return {
+            userId: m.userId,
+            studentName,
+            studentIdNum,
+            email: studentUser?.email || '',
+            avatarUrl: studentUser?.avatarUrl || '',
+          };
+        });
+
+      return {
+        sessionId: s.id,
+        weekNumber: s.weekNumber,
+        topic: s.topic,
+        isActive: s.isActive,
+        createdAt: s.createdAt,
+        checkinCount,
+        registeredCount: studentMembers.length,
+        attendancePercentage: studentMembers.length > 0 ? Math.round((checkinCount / studentMembers.length) * 100) : 0,
+        firstCheckinTimeStr,
+        lastCheckinTimeStr,
+        attendedStudents,
+        absentStudents,
+      };
+    });
+
+    const totalRegisteredCount = studentMembers.length;
+    const totalCoTeachersCount = coTeacherMembers.length + 1;
+    const totalSessions = courseSessionsList.length;
+
+    const totalPossibleCheckins = totalRegisteredCount * (totalSessions || 1);
+    const totalActualCheckins = attendanceRecords.filter((r) =>
+      cSessionIds.has(r.sessionId)
+    ).length;
+    const courseAvgAttendanceRate = totalPossibleCheckins > 0 ? Math.round((totalActualCheckins / totalPossibleCheckins) * 100) : 0;
+
+    return {
+      course,
+      totalRegisteredCount,
+      totalCoTeachersCount,
+      totalSessions,
+      totalActualCheckins,
+      courseAvgAttendanceRate,
+      studentList,
+      sessionDetailsList,
+    };
+  });
+
+  res.json({
+    teacherName: `${teacher.title} ${teacher.firstNameTh} ${teacher.lastNameTh}`,
+    totalCourses: teacherCourses.length,
+    overviewList,
+  });
+});
+
+// Demo User IDs whitelist
+const DEMO_USER_IDS = new Set(['usr_teacher_1', 'usr_teacher_2', 'usr_student_1', 'usr_student_2']);
+
+// Purge all non-demo users from both Firestore and in-memory Map
+async function purgeNonDemoUsers(): Promise<{ deletedCount: number; remainingUsers: string[] }> {
+  let deletedCount = 0;
+  
+  try {
+    const fsUsers = await getAllFromFirestore<User>(COLLECTIONS.USERS);
+    for (const u of fsUsers) {
+      if (u && u.id && !DEMO_USER_IDS.has(u.id)) {
+        await deleteFromFirestore(COLLECTIONS.USERS, u.id);
+        deletedCount++;
+      }
+    }
+  } catch (err) {
+    console.error('[Purge Users Warning] Firestore purge error:', err);
+  }
+
+  for (const [id] of Array.from(users.entries())) {
+    if (!DEMO_USER_IDS.has(id)) {
+      users.delete(id);
+      deletedCount++;
+    }
+  }
+
+  const remainingUsers = Array.from(users.values()).map((u) => `${u.id} (${u.email})`);
+  console.log(`[Purge Users] Cleaned up non-demo users. Remaining users:`, remainingUsers);
+  return { deletedCount, remainingUsers };
+}
+
+// Endpoint to manually reset/delete non-demo users from database
+app.post('/api/admin/reset-users', async (req, res) => {
+  try {
+    const result = await purgeNonDemoUsers();
+    res.json({
+      message: 'ลบข้อมูลผู้ใช้งานทั้งหมดในระบบสำเร็จเรียบร้อยแล้ว (คงเหลือเฉพาะ Demo Accounts)',
+      ...result,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการลบข้อมูล' });
+  }
+});
+
 // Firestore Database Sync Handler
 async function syncFromFirestore() {
   try {
     const fsUsers = await getAllFromFirestore<User>(COLLECTIONS.USERS);
     if (fsUsers && fsUsers.length > 0) {
-      fsUsers.forEach((u) => users.set(u.id, u));
+      for (const u of fsUsers) {
+        if (!DEMO_USER_IDS.has(u.id)) {
+          console.log(`[Firestore Sync Cleanup] Removing non-demo user doc ${u.id} (${u.email})`);
+          await deleteFromFirestore(COLLECTIONS.USERS, u.id);
+        } else {
+          users.set(u.id, u);
+        }
+      }
+      // Remove any non-demo users from in-memory Map
+      for (const id of Array.from(users.keys())) {
+        if (!DEMO_USER_IDS.has(id)) {
+          users.delete(id);
+        }
+      }
     } else {
       for (const u of users.values()) {
         await saveToFirestore(COLLECTIONS.USERS, u);
@@ -1309,7 +1533,22 @@ async function syncFromFirestore() {
 
     const fsCourses = await getAllFromFirestore<Course>(COLLECTIONS.COURSES);
     if (fsCourses && fsCourses.length > 0) {
-      fsCourses.forEach((c) => courses.set(c.id, c));
+      for (const c of fsCourses) {
+        if (c.courseCode === 'MTID204' || c.id === 'crs_mtid204') {
+          console.log(`[Firestore Migration] Migrating course ${c.id} (${c.courseCode}) -> TEST101`);
+          await deleteFromFirestore(COLLECTIONS.COURSES, c.id);
+          const updatedCourse: Course = {
+            ...c,
+            id: 'crs_test101',
+            courseCode: 'TEST101',
+          };
+          courses.set(updatedCourse.id, updatedCourse);
+          await saveToFirestore(COLLECTIONS.COURSES, updatedCourse);
+        } else {
+          courses.set(c.id, c);
+        }
+      }
+      courses.delete('crs_mtid204');
     } else {
       for (const c of courses.values()) {
         await saveToFirestore(COLLECTIONS.COURSES, c);
@@ -1319,7 +1558,13 @@ async function syncFromFirestore() {
     const fsMembers = await getAllFromFirestore<CourseMember>(COLLECTIONS.COURSE_MEMBERS);
     if (fsMembers && fsMembers.length > 0) {
       courseMembers.length = 0;
-      courseMembers.push(...fsMembers);
+      for (const cm of fsMembers) {
+        if (cm.courseId === 'crs_mtid204') {
+          cm.courseId = 'crs_test101';
+          await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, cm);
+        }
+        courseMembers.push(cm);
+      }
     } else {
       for (const cm of courseMembers) {
         await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, cm);
@@ -1328,7 +1573,13 @@ async function syncFromFirestore() {
 
     const fsSessions = await getAllFromFirestore<Session>(COLLECTIONS.SESSIONS);
     if (fsSessions && fsSessions.length > 0) {
-      fsSessions.forEach((s) => sessions.set(s.id, s));
+      for (const s of fsSessions) {
+        if (s.courseId === 'crs_mtid204') {
+          s.courseId = 'crs_test101';
+          await saveToFirestore(COLLECTIONS.SESSIONS, s);
+        }
+        sessions.set(s.id, s);
+      }
     } else {
       for (const s of sessions.values()) {
         await saveToFirestore(COLLECTIONS.SESSIONS, s);

@@ -315,7 +315,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               <div className="relative">
                 <input
                   type="email"
-                  placeholder="เช่น somchai@university.ac.th"
+                  placeholder="เช่น mahidol.mt@student.mahidol.ac.th"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -795,7 +795,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   <div className="relative">
                     <input
                       type="email"
-                      placeholder="เช่น somchai@university.ac.th"
+                      placeholder="เช่น mahidol.mt@studemt.mahidol.ac.th"
                       value={forgotEmail}
                       onChange={(e) => setForgotEmail(e.target.value)}
                       required

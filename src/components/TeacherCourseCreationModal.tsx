@@ -170,7 +170,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
               </label>
               <input
                 type="text"
-                placeholder="เช่น MTID204"
+                placeholder="เช่น TEST101"
                 value={courseCode}
                 onChange={(e) => setCourseCode(e.target.value)}
                 required

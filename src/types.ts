@@ -49,7 +49,7 @@ export interface TeachingWeek {
 
 export interface Course {
   id: string;
-  courseCode: string; // e.g., MTID204
+  courseCode: string; // e.g., TEST101
   courseName: string;
   academicYear: number; // e.g., 2569
   semester: Semester;
