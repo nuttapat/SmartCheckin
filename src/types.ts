@@ -5,11 +5,15 @@
 export enum UserRole {
   STUDENT = 'STUDENT',
   TEACHER = 'TEACHER',
+  ADMIN = 'ADMIN',
 }
 
 export enum CourseMemberRole {
   STUDENT = 'STUDENT',
   CO_TEACHER = 'CO_TEACHER',
+  COORDINATOR = 'COORDINATOR', // ผู้รับผิดชอบรายวิชา (Course Coordinator)
+  CO_COORDINATOR = 'CO_COORDINATOR', // ผู้ร่วมรับผิดชอบรายวิชา (Co-coordinator)
+  INSTRUCTOR = 'INSTRUCTOR', // อาจารย์ผู้สอน (Instructor)
 }
 
 export enum Semester {
@@ -22,6 +26,51 @@ export enum AttendanceStatus {
   PRESENT = 'PRESENT',
   LATE = 'LATE',
   ABSENT = 'ABSENT',
+}
+
+export enum LeaveType {
+  SICK = 'SICK', // ลาป่วย
+  PERSONAL = 'PERSONAL', // ลากิจ
+  OTHER = 'OTHER', // อื่นๆ
+}
+
+export enum LeaveStatus {
+  PENDING = 'PENDING', // รอพิจารณา / รออนุมัติ
+  APPROVED = 'APPROVED', // อนุมัติแล้ว
+  REJECTED = 'REJECTED', // ไม่อนุมัติ / ปฏิเสธ
+}
+
+export interface LeaveRequest {
+  id: string;
+  studentId: string;
+  studentNameTh: string;
+  studentNameEn?: string;
+  studentUniversityId: string;
+  courseId: string;
+  courseCode: string;
+  courseName: string;
+  weekNumber?: number; // สัปดาห์ที่ขอลาเรียน (ถ้ามี)
+  leaveType: LeaveType;
+  leaveDate: string; // YYYY-MM-DD หรือระบุวันที่ลา
+  reason: string; // เหตุผลการลา
+  attachmentUrl?: string; // เอกสารประกอบ / ใบรับรองแพทย์ / รูปภาพ (Data URL)
+  attachmentName?: string;
+  status: LeaveStatus;
+  teacherComment?: string; // ข้อความ/เหตุผลจากอาจารย์
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface UserDevice {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  deviceType?: 'MOBILE' | 'TABLET' | 'DESKTOP' | 'OTHER';
+  browser?: string;
+  os?: string;
+  boundAt: string;
+  lastUsedAt: string;
+  isPrimary?: boolean;
 }
 
 export interface User {
@@ -37,7 +86,8 @@ export interface User {
   password?: string;
   avatarUrl?: string;
   authProvider?: 'google' | 'email';
-  deviceId?: string; // Device fingerprint/UUID for anti-proxy
+  deviceId?: string; // Legacy primary device fingerprint/UUID
+  devices?: UserDevice[]; // List of bound devices
   createdAt: string;
 }
 

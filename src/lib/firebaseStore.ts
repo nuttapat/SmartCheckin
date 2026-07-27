@@ -33,6 +33,7 @@ export const COLLECTIONS = {
   ATTENDANCE: 'attendanceRecords',
   QUICK_EVENTS: 'quickEvents',
   COURSE_MEMBERS: 'courseMembers',
+  LEAVE_REQUESTS: 'leaveRequests',
 };
 
 /**

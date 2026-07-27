@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { User, UserRole } from '../types';
-import { QrCode, User as UserIcon, Plus, Sparkles, Sun, Moon, LogOut, Settings, KeyRound, ChevronDown, MapPin } from 'lucide-react';
+import { QrCode, User as UserIcon, Plus, Sparkles, Sun, Moon, LogOut, Settings, KeyRound, ChevronDown, MapPin, Bot } from 'lucide-react';
 
 interface NavbarProps {
   currentUser: User | null;
@@ -11,6 +11,7 @@ interface NavbarProps {
   onOpenJoinCourse: () => void;
   onOpenQuickEvent: () => void;
   onOpenUserSettings: (tab?: 'profile' | 'password' | 'device' | 'gps') => void;
+  onOpenTestingAgent?: () => void;
   onLogout?: () => void;
   isDarkMode?: boolean;
   onToggleTheme?: () => void;
@@ -25,6 +26,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenJoinCourse,
   onOpenQuickEvent,
   onOpenUserSettings,
+  onOpenTestingAgent,
   onLogout,
   isDarkMode = true,
   onToggleTheme,
@@ -47,6 +49,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     }, 350);
   };
   const isTeacher = currentUser?.role === UserRole.TEACHER;
+  const isAdmin = currentUser?.role === UserRole.ADMIN;
 
   return (
     <header className={`${isDarkMode ? 'bg-slate-900/90 border-slate-800 text-white' : 'bg-white/90 border-slate-200/80 text-slate-900'} backdrop-blur-md border-b sticky top-0 z-40 shadow-xs transition-colors duration-200`}>
@@ -55,7 +58,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Brand Logo & App Name */}
           <div className="flex items-center space-x-3">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-md transition-all ${
-              isTeacher
+              isAdmin
+                ? 'bg-gradient-to-tr from-purple-600 via-indigo-600 to-purple-800 shadow-purple-500/20'
+                : isTeacher
                 ? 'bg-gradient-to-tr from-sky-600 via-sky-500 to-blue-600 shadow-sky-500/20'
                 : 'bg-gradient-to-tr from-sky-600 via-blue-500 to-indigo-600 shadow-blue-500/20'
             }`}>
@@ -67,7 +72,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                   Smart Attendance
                 </span>
                 <span className={`hidden sm:inline-block px-2.5 py-0.5 text-[10px] font-extrabold border rounded-full transition-all ${
-                  isTeacher
+                  isAdmin
+                    ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                    : isTeacher
                     ? isDarkMode
                       ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
                       : 'bg-sky-100 text-sky-950 border-sky-300'
@@ -75,7 +82,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
                     : 'bg-sky-100 text-sky-950 border-sky-300'
                 }`}>
-                  {isTeacher ? '👨‍🏫 อาจารย์' : '🧑‍🎓 นักศึกษา'}
+                  {isAdmin ? '🛠️ ผู้ดูแลระบบ' : isTeacher ? '👨‍🏫 อาจารย์' : '🧑‍🎓 นักศึกษา'}
                 </span>
               </div>
               <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} hidden sm:block`}>
@@ -110,9 +117,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <p className="font-semibold">
                     {currentUser ? `${currentUser.title} ${currentUser.firstNameTh}` : 'โปรไฟล์ผู้ใช้'}
                   </p>
-                  <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    {currentUser?.role === UserRole.TEACHER ? '👨‍🏫 อาจารย์ (Teacher)' : '🧑‍🎓 นักศึกษา (Student)'}
-                  </p>
+                  {!isAdmin && (
+                    <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {currentUser?.role === UserRole.TEACHER ? '👨‍🏫 อาจารย์ (Teacher)' : '🧑‍🎓 นักศึกษา (Student)'}
+                    </p>
+                  )}
                 </div>
                 <ChevronDown className="w-3.5 h-3.5 opacity-60 ml-1 hidden sm:block" />
               </button>

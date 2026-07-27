@@ -54,7 +54,12 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
           fbUser.photoURL || undefined,
           role,
           finalTitle || (role === UserRole.TEACHER ? 'อ.ดร.' : 'นาย'),
-          role === UserRole.STUDENT ? universityId.trim() : undefined
+          role === UserRole.STUDENT ? universityId.trim() : undefined,
+          firstNameTh.trim() || undefined,
+          lastNameTh.trim() || undefined,
+          firstNameEn.trim() || undefined,
+          lastNameEn.trim() || undefined,
+          password.trim() || undefined
         );
         onSuccess(res.user);
         onClose();

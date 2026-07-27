@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { User, UserRole } from '../types';
-import { updateUserProfile } from '../services/api';
-import { X, User as UserIcon, Lock, Shield, CheckCircle2, ShieldAlert, Eye, EyeOff, KeyRound, Smartphone, Mail, MapPin, Globe } from 'lucide-react';
+import { User, UserRole, UserDevice } from '../types';
+import { updateUserProfile, getUserDevices, bindUserDeviceApi, deleteUserDeviceApi, resetUserDevice } from '../services/api';
+import { getDeviceInfo, DeviceInfo } from '../utils/deviceHelper';
+import { X, User as UserIcon, Lock, Shield, CheckCircle2, ShieldAlert, Eye, EyeOff, KeyRound, Smartphone, Mail, MapPin, Globe, Tablet, Monitor, Trash2, Plus, RefreshCw, AlertCircle, Check, Info } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 
 interface UserSettingsModalProps {
@@ -51,13 +52,48 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   const [showNewPassword, setShowNewPassword] = useState<boolean>(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
 
+  // Device Management State
+  const [boundDevices, setBoundDevices] = useState<UserDevice[]>(currentUser.devices || []);
+  const [maxDevicesLimit, setMaxDevicesLimit] = useState<number | null>(currentUser.role === UserRole.STUDENT ? 3 : null);
+  const [fetchingDevices, setFetchingDevices] = useState<boolean>(false);
+  const [deviceActionLoading, setDeviceActionLoading] = useState<boolean>(false);
+  const [currentDevInfo, setCurrentDevInfo] = useState<DeviceInfo>(getDeviceInfo());
+
   // Status
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [successMsg, setSuccessMsg] = useState<string>('');
 
+  const isTeacherOrAdmin = currentUser.role === UserRole.TEACHER || currentUser.role === UserRole.ADMIN;
+
+  const loadDevices = async () => {
+    try {
+      setFetchingDevices(true);
+      const data = await getUserDevices(currentUser.id);
+      setBoundDevices(data.devices || []);
+      setMaxDevicesLimit(data.maxDevices);
+    } catch (err) {
+      console.error('Failed to load user devices', err);
+    } finally {
+      setFetchingDevices(false);
+    }
+  };
+
+  const prevIsOpenRef = React.useRef<boolean>(false);
+
   useEffect(() => {
-    if (currentUser) {
+    if (isOpen && !prevIsOpenRef.current) {
+      // Modal was just opened: reset error and success messages
+      setErrorMsg('');
+      setSuccessMsg('');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+    }
+    prevIsOpenRef.current = isOpen;
+
+    if (isOpen && currentUser) {
+      setCurrentDevInfo(getDeviceInfo());
       const knownTitles = currentUser.role === UserRole.STUDENT 
         ? ['นาย', 'นางสาว', 'นาง'] 
         : ['อ.', 'ดร.', 'ผศ.', 'ผศ.ดร.', 'รศ.', 'รศ.ดร.', 'ศ.', 'ศ.ดร.', 'นาย', 'นางสาว'];
@@ -75,11 +111,8 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
       setFirstNameEn(currentUser.firstNameEn || '');
       setLastNameEn(currentUser.lastNameEn || '');
       setUniversityId(currentUser.universityId || '');
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmNewPassword('');
-      setErrorMsg('');
-      setSuccessMsg('');
+
+      loadDevices();
     }
   }, [currentUser, isOpen]);
 
@@ -155,15 +188,74 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
       });
 
       onUpdateUser(res.user);
-      setSuccessMsg('เปลี่ยนรหัสผ่านเรียบร้อยแล้ว');
+      setSuccessMsg('เปลี่ยนรหัสผ่านสำเร็จ');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
-      setTimeout(() => setSuccessMsg(''), 4000);
+      setTimeout(() => setSuccessMsg(''), 6000);
     } catch (err: any) {
       setErrorMsg(err.message || 'เปลี่ยนรหัสผ่านไม่สำเร็จ กรุณาตรวจสอบรหัสผ่านปัจจุบัน');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBindCurrentDevice = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      setDeviceActionLoading(true);
+      const res = await bindUserDeviceApi(currentUser.id, {
+        deviceId: currentDevInfo.deviceId,
+        deviceName: currentDevInfo.deviceName,
+        deviceType: currentDevInfo.deviceType,
+        browser: currentDevInfo.browser,
+        os: currentDevInfo.os,
+      });
+      setBoundDevices(res.devices || []);
+      if (res.user) onUpdateUser(res.user);
+      setSuccessMsg('ผูกอุปกรณ์ปัจจุบันเข้ากับบัญชีเรียบร้อยแล้ว');
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'ไม่สามารถผูกอุปกรณ์ได้');
+    } finally {
+      setDeviceActionLoading(false);
+    }
+  };
+
+  const handleDeleteDevice = async (devId: string, deviceName: string) => {
+    if (!window.confirm(`คุณต้องการยกเลิกการผูกอุปกรณ์ "${deviceName}" ใช่หรือไม่?`)) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      setDeviceActionLoading(true);
+      const res = await deleteUserDeviceApi(currentUser.id, devId);
+      setBoundDevices(res.devices || []);
+      if (res.user) onUpdateUser(res.user);
+      setSuccessMsg('ยกเลิกการผูกอุปกรณ์เรียบร้อยแล้ว');
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'ไม่สามารถยกเลิกการผูกอุปกรณ์ได้');
+    } finally {
+      setDeviceActionLoading(false);
+    }
+  };
+
+  const handleResetAllDevices = async () => {
+    if (!window.confirm('คุณต้องการปลดล็อกและรีเซ็ตอุปกรณ์ทั้งหมดใช่หรือไม่? (รายการผูกเครื่องเดิมจะถูกลบออก)')) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      setDeviceActionLoading(true);
+      const res = await resetUserDevice(currentUser.id);
+      setBoundDevices([]);
+      if (res.user) onUpdateUser(res.user);
+      setSuccessMsg('รีเซ็ตการผูกอุปกรณ์ทั้งหมดเรียบร้อยแล้ว');
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'ไม่สามารถรีเซ็ตอุปกรณ์ได้');
+    } finally {
+      setDeviceActionLoading(false);
     }
   };
 
@@ -253,9 +345,11 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
           )}
 
           {successMsg && (
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center space-x-2.5 text-emerald-600 dark:text-emerald-300 text-xs font-bold">
-              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
-              <span>{successMsg}</span>
+            <div className="p-3.5 bg-emerald-500/20 border border-emerald-500/50 rounded-2xl flex items-center space-x-3 text-emerald-400 dark:text-emerald-300 text-xs font-bold animate-in fade-in duration-200 shadow-md">
+              <div className="w-7 h-7 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              </div>
+              <span className="text-sm">{successMsg}</span>
             </div>
           )}
 
@@ -580,37 +674,223 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
           {/* Tab 3: Device & Security */}
           {activeTab === 'device' && (
             <div className="space-y-4 text-xs">
-              <div className={`p-4 border rounded-2xl space-y-2 ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                <div className="flex items-center space-x-2 font-bold text-emerald-500">
-                  <Shield className="w-4 h-4" />
-                  <span>สถานะสิทธิ์และประเภทบัญชี</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <span className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>ประเภทบทบาท: </span>
-                    <span className="font-semibold">{currentUser.role === UserRole.TEACHER ? '👨‍🏫 อาจารย์ (Teacher)' : '🧑‍🎓 นักศึกษา (Student)'}</span>
+              {/* Role & Device Limit Status Header */}
+              <div className={`p-4 border rounded-2xl space-y-3 ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 font-bold text-emerald-500">
+                    <Shield className="w-4 h-4" />
+                    <span>สิทธิ์และการผูกอุปกรณ์ (Device Binding Policy)</span>
                   </div>
-                  <div>
-                    <span className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>รหัสประจำตัว: </span>
-                    <span className="font-semibold">{currentUser.universityId || '-'}</span>
+                  <button
+                    onClick={loadDevices}
+                    disabled={fetchingDevices}
+                    className={`p-1.5 rounded-lg text-xs flex items-center space-x-1 transition ${
+                      isDarkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-200 text-slate-700'
+                    }`}
+                    title="รีเฟรชข้อมูลอุปกรณ์"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${fetchingDevices ? 'animate-spin' : ''}`} />
+                    <span>รีเฟรช</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div className={`p-3 rounded-xl border ${isDarkMode ? 'bg-slate-900/60 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
+                    <span className={`block text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>บทบาทบัญชีผู้ใช้</span>
+                    <span className="font-bold text-sm">
+                      {currentUser.role === UserRole.TEACHER ? '👨‍🏫 อาจารย์ (Teacher)' : currentUser.role === UserRole.ADMIN ? '🛡️ ผู้ดูแลระบบ (Admin)' : '🧑‍🎓 นักศึกษา (Student)'}
+                    </span>
+                  </div>
+
+                  <div className={`p-3 rounded-xl border ${isDarkMode ? 'bg-slate-900/60 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
+                    <span className={`block text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>โควตานโยบายผูกอุปกรณ์</span>
+                    {isTeacherOrAdmin ? (
+                      <div className="flex items-center space-x-1.5 text-emerald-400 font-bold text-xs mt-0.5">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>ไม่จำกัดจำนวนอุปกรณ์ (Unlimited)</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between mt-0.5">
+                        <span className="font-bold text-xs text-amber-400">
+                          สูงสุด 3 เครื่อง ({boundDevices.length}/3)
+                        </span>
+                        <div className="w-20 bg-slate-700 h-2 rounded-full overflow-hidden ml-2">
+                          <div
+                            className={`h-full ${boundDevices.length >= 3 ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                            style={{ width: `${Math.min(100, (boundDevices.length / 3) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
+
+                <p className={`text-[11px] leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                  {isTeacherOrAdmin ? (
+                    '💡 สำหรับอาจารย์และผู้ดูแลระบบ สามารถผูกและสลับใช้งานอุปกรณ์ได้ไม่จำกัดจำนวน (เช่น โน้ตบุ๊กสอน, ไอแพด, โทรศัพท์มือถือ) เพื่อความสะดวกในการจัดการการสอน'
+                  ) : (
+                    '🔒 สำหรับนักศึกษา สามารถผูกอุปกรณ์ประจำตัวได้สูงสุด 3 เครื่อง (เช่น มือถือประจำตัว, แท็บเล็ต, คอมพิวเตอร์) เพื่อป้องกันการส่งรหัสให้ผู้อื่นเช็คชื่อแทน'
+                  )}
+                </p>
               </div>
 
-              <div className={`p-4 border rounded-2xl space-y-2 ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                <div className="flex items-center space-x-2 font-bold text-sky-500">
-                  <Smartphone className="w-4 h-4" />
-                  <span>การผูกอุปกรณ์ประจำตัว (Device Fingerprint)</span>
+              {/* Current Device Box */}
+              <div className={`p-4 border rounded-2xl space-y-3 ${
+                isDarkMode ? 'bg-slate-800/40 border-slate-700' : 'bg-white border-slate-200 shadow-sm'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 font-bold text-sky-400">
+                    <Smartphone className="w-4 h-4" />
+                    <span>อุปกรณ์ที่คุณกำลังใช้งานขณะนี้ (This Current Device)</span>
+                  </div>
+                  {boundDevices.some((d) => d.deviceId === currentDevInfo.deviceId) ? (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center space-x-1">
+                      <Check className="w-3 h-3" />
+                      <span>ผูกอยู่ในระบบแล้ว</span>
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center space-x-1">
+                      <AlertCircle className="w-3 h-3" />
+                      <span>ยังไม่ได้ผูกเครื่องนี้</span>
+                    </span>
+                  )}
                 </div>
-                <p className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>
-                  ระบบ Anti-Proxy Check-in ใช้ Device ID เพื่อยืนยันว่าไม่มีการเช็คชื่อแทนกันจากอุปกรณ์อื่น
-                </p>
-                <div className={`p-2.5 rounded-xl font-mono text-[11px] break-all border ${
-                  isDarkMode ? 'bg-slate-900 border-slate-700/80 text-emerald-400' : 'bg-white border-slate-200 text-slate-800'
+
+                <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                  isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-slate-50 border-slate-200'
                 }`}>
-                  Device UUID: {currentUser.deviceId || 'dev_bound_device'}
+                  <div className="flex items-center space-x-3">
+                    <div className="w-9 h-9 rounded-xl bg-sky-500/10 text-sky-400 flex items-center justify-center font-bold">
+                      {currentDevInfo.deviceType === 'TABLET' ? (
+                        <Tablet className="w-4 h-4" />
+                      ) : currentDevInfo.deviceType === 'MOBILE' ? (
+                        <Smartphone className="w-4 h-4" />
+                      ) : (
+                        <Monitor className="w-4 h-4" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-bold text-xs">{currentDevInfo.deviceName}</div>
+                      <div className={`font-mono text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        ID: {currentDevInfo.deviceId.slice(0, 16)}...
+                      </div>
+                    </div>
+                  </div>
+
+                  {!boundDevices.some((d) => d.deviceId === currentDevInfo.deviceId) && (
+                    <button
+                      onClick={handleBindCurrentDevice}
+                      disabled={deviceActionLoading || (!isTeacherOrAdmin && boundDevices.length >= 3)}
+                      className="py-1.5 px-3 rounded-lg text-xs font-bold bg-sky-500 hover:bg-sky-400 text-slate-950 transition disabled:opacity-50 flex items-center space-x-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>ผูกอุปกรณ์นี้</span>
+                    </button>
+                  )}
                 </div>
+
+                {!isTeacherOrAdmin && boundDevices.length >= 3 && !boundDevices.some((d) => d.deviceId === currentDevInfo.deviceId) && (
+                  <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[11px] flex items-center space-x-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>คุณผูกอุปกรณ์ครบ 3 เครื่องแล้ว หากต้องการใช้เครื่องนี้ กรุณายกเลิกการผูกอุปกรณ์เดิม 1 เครื่องก่อน</span>
+                  </div>
+                )}
               </div>
+
+              {/* Bound Devices List */}
+              <div className="space-y-2">
+                <h4 className="font-bold text-xs flex items-center justify-between px-1">
+                  <span>รายการอุปกรณ์ที่ผูกอยู่ในระบบ ({boundDevices.length} เครื่อง)</span>
+                </h4>
+
+                {boundDevices.length === 0 ? (
+                  <div className={`p-6 text-center rounded-2xl border ${
+                    isDarkMode ? 'bg-slate-800/30 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'
+                  }`}>
+                    <Smartphone className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-400" />
+                    <p className="font-semibold text-xs">ยังไม่มีการผูกอุปกรณ์ในระบบ</p>
+                    <p className="text-[11px] mt-0.5">อุปกรณ์จะถูกผูกโดยอัตโนมัติเมื่อท่านลงชื่อเข้าใช้หรือเช็คชื่อเข้าเรียนครั้งแรก</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    {boundDevices.map((dev) => {
+                      const isCurrent = dev.deviceId === currentDevInfo.deviceId;
+                      return (
+                        <div
+                          key={dev.id}
+                          className={`p-3 rounded-xl border flex items-center justify-between transition ${
+                            isCurrent
+                              ? isDarkMode
+                                ? 'bg-emerald-950/20 border-emerald-500/40'
+                                : 'bg-emerald-50/50 border-emerald-300'
+                              : isDarkMode
+                              ? 'bg-slate-800/60 border-slate-700'
+                              : 'bg-white border-slate-200 shadow-sm'
+                          }`}
+                        >
+                          <div className="flex items-center space-x-3">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold ${
+                              isCurrent ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700/40 text-slate-300'
+                            }`}>
+                              {dev.deviceType === 'TABLET' ? (
+                                <Tablet className="w-4 h-4" />
+                              ) : dev.deviceType === 'MOBILE' ? (
+                                <Smartphone className="w-4 h-4" />
+                              ) : (
+                                <Monitor className="w-4 h-4" />
+                              )}
+                            </div>
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className="font-bold text-xs">{dev.deviceName || 'อุปกรณ์ผูกประจำตัว'}</span>
+                                {isCurrent && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                    เครื่องปัจจุบัน
+                                  </span>
+                                )}
+                                {dev.isPrimary && !isCurrent && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-sky-500/20 text-sky-400 border border-sky-500/30">
+                                    เครื่องหลัก
+                                  </span>
+                                )}
+                              </div>
+                              <div className={`font-mono text-[10px] mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                UUID: {dev.deviceId.slice(0, 18)}...
+                              </div>
+                              <div className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                ผูกเมื่อ: {new Date(dev.boundAt).toLocaleDateString('th-TH')} | ใช้งานล่าสุด: {new Date(dev.lastUsedAt).toLocaleDateString('th-TH')}
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => handleDeleteDevice(dev.id, dev.deviceName)}
+                            disabled={deviceActionLoading}
+                            className="p-2 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition disabled:opacity-50 cursor-pointer"
+                            title="ยกเลิกการผูกอุปกรณ์นี้"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Reset All Action */}
+              {boundDevices.length > 0 && (
+                <div className="pt-2 flex justify-end">
+                  <button
+                    onClick={handleResetAllDevices}
+                    disabled={deviceActionLoading}
+                    className="py-2 px-3 rounded-xl text-[11px] font-semibold text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 transition disabled:opacity-50 cursor-pointer flex items-center space-x-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>ยกเลิกผูกอุปกรณ์ทั้งหมด (Reset Devices)</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

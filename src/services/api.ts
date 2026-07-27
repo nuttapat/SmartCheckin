@@ -5,6 +5,9 @@ import {
   AttendanceRecord,
   QuickEvent,
   InviteLink,
+  LeaveRequest,
+  LeaveType,
+  LeaveStatus,
 } from '../types';
 
 export const API_BASE = '/api';
@@ -83,7 +86,8 @@ export async function googleLogin(
   firstNameTh?: string,
   lastNameTh?: string,
   firstNameEn?: string,
-  lastNameEn?: string
+  lastNameEn?: string,
+  password?: string
 ): Promise<{ message: string; user?: User; requiresOnboarding?: boolean; email?: string; name?: string; picture?: string }> {
   const res = await fetch(`${API_BASE}/auth/google`, {
     method: 'POST',
@@ -99,6 +103,7 @@ export async function googleLogin(
       lastNameTh,
       firstNameEn,
       lastNameEn,
+      password,
     }),
   });
   const data = await res.json();
@@ -133,6 +138,17 @@ export async function updateCourse(courseId: string, courseData: Partial<Course>
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to update course');
+  return data;
+}
+
+export async function deleteCourseApi(courseId: string, teacherId: string, password?: string): Promise<{ message: string; courseId: string }> {
+  const res = await fetch(`${API_BASE}/courses/${courseId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ teacherId, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to delete course');
   return data;
 }
 
@@ -172,6 +188,10 @@ export async function submitCheckin(params: {
   scannedLat: number;
   scannedLng: number;
   deviceId: string;
+  deviceName?: string;
+  deviceType?: 'MOBILE' | 'TABLET' | 'DESKTOP' | 'OTHER';
+  browser?: string;
+  os?: string;
   checkinMode?: 'QR_ONLY' | 'GPS_ONLY' | 'HYBRID';
 }) {
   const url = params.eventId ? `${API_BASE}/checkin/quick` : `${API_BASE}/checkin`;
@@ -194,6 +214,43 @@ export async function createQuickEvent(title: string, lat: number, lng: number, 
     body: JSON.stringify({ title, teacherLat: lat, teacherLng: lng, teacherId }),
   });
   return res.json();
+}
+
+export async function fetchTeachers(): Promise<User[]> {
+  const res = await fetch(`${API_BASE}/teachers`);
+  if (!res.ok) throw new Error('Failed to fetch teachers list');
+  return res.json();
+}
+
+export async function inviteTeacherToCourse(courseId: string, teacherUserId: string, role: string) {
+  const res = await fetch(`${API_BASE}/courses/${courseId}/members/invite-teacher`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ teacherUserId, role }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to invite teacher');
+  return data;
+}
+
+export async function updateCourseMemberRole(courseId: string, memberId: string, role: string) {
+  const res = await fetch(`${API_BASE}/courses/${courseId}/members/${memberId}/role`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to update member role');
+  return data;
+}
+
+export async function removeCourseMember(courseId: string, memberId: string) {
+  const res = await fetch(`${API_BASE}/courses/${courseId}/members/${memberId}`, {
+    method: 'DELETE',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to remove course member');
+  return data;
 }
 
 export async function generateInviteLink(courseId: string, role: string): Promise<InviteLink> {
@@ -254,3 +311,167 @@ export async function fetchTeacherCoursesOverview(teacherId: string) {
   if (!res.ok) throw new Error('Failed to fetch teacher courses overview');
   return res.json();
 }
+
+export async function submitLeaveRequest(params: {
+  studentId: string;
+  courseId: string;
+  weekNumber?: number;
+  leaveType: LeaveType;
+  leaveDate: string;
+  reason: string;
+  attachmentUrl?: string;
+  attachmentName?: string;
+}): Promise<{ message: string; leaveRequest: LeaveRequest }> {
+  const res = await fetch(`${API_BASE}/leave-requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to submit leave request');
+  return data;
+}
+
+export async function fetchStudentLeaveRequests(studentId: string): Promise<LeaveRequest[]> {
+  const res = await fetch(`${API_BASE}/leave-requests/student/${studentId}`);
+  if (!res.ok) throw new Error('Failed to fetch student leave requests');
+  return res.json();
+}
+
+export async function fetchTeacherLeaveRequests(teacherId: string): Promise<LeaveRequest[]> {
+  const res = await fetch(`${API_BASE}/leave-requests/teacher/${teacherId}`);
+  if (!res.ok) throw new Error('Failed to fetch teacher leave requests');
+  return res.json();
+}
+
+export async function updateLeaveRequestStatus(
+  leaveId: string,
+  status: LeaveStatus,
+  teacherComment?: string
+): Promise<{ message: string; leaveRequest: LeaveRequest }> {
+  const res = await fetch(`${API_BASE}/leave-requests/${leaveId}/status`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, teacherComment }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to update leave request status');
+  return data;
+}
+
+export async function cancelLeaveRequest(leaveId: string): Promise<{ message: string; id: string }> {
+  const res = await fetch(`${API_BASE}/leave-requests/${leaveId}`, {
+    method: 'DELETE',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to cancel leave request');
+  return data;
+}
+
+// --- ADMIN & REALTIME DATABASE INSPECTOR API ---
+
+export async function fetchAdminDatabaseOverview() {
+  const res = await fetch(`${API_BASE}/admin/database/overview`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch database overview');
+  return data;
+}
+
+export async function fetchAdminCollection(collectionName: string) {
+  const res = await fetch(`${API_BASE}/admin/database/collection/${collectionName}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Failed to fetch collection ${collectionName}`);
+  return data;
+}
+
+export async function saveAdminDocument(collectionName: string, docData: any) {
+  const res = await fetch(`${API_BASE}/admin/database/document/${collectionName}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(docData),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to save document');
+  return data;
+}
+
+export async function deleteAdminDocument(collectionName: string, docId: string) {
+  const res = await fetch(`${API_BASE}/admin/database/document/${collectionName}/${docId}`, {
+    method: 'DELETE',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to delete document');
+  return data;
+}
+
+export async function updateUserRole(userId: string, role: string) {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}/role`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to update user role');
+  return data;
+}
+
+export async function resetUserDevice(userId: string) {
+  const res = await fetch(`${API_BASE}/users/${userId}/devices/reset`, {
+    method: 'POST',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to reset user device');
+  return data;
+}
+
+export async function getUserDevices(userId: string) {
+  const res = await fetch(`${API_BASE}/users/${userId}/devices`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch user devices');
+  return data;
+}
+
+export async function bindUserDeviceApi(userId: string, deviceInfo: {
+  deviceId: string;
+  deviceName?: string;
+  deviceType?: string;
+  browser?: string;
+  os?: string;
+}) {
+  const res = await fetch(`${API_BASE}/users/${userId}/devices/bind`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(deviceInfo),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to bind device');
+  return data;
+}
+
+export async function deleteUserDeviceApi(userId: string, devId: string) {
+  const res = await fetch(`${API_BASE}/users/${userId}/devices/${devId}`, {
+    method: 'DELETE',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to delete device');
+  return data;
+}
+
+export async function overrideAttendanceRecord(params: {
+  studentId: string;
+  sessionId?: string;
+  eventId?: string;
+  courseId?: string;
+  status: string;
+  checkinMethod?: string;
+}) {
+  const res = await fetch(`${API_BASE}/admin/attendance/override`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to override attendance');
+  return data;
+}
+

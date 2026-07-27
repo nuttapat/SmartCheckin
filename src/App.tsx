@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Bot } from 'lucide-react';
 import { User, UserRole } from './types';
 import { fetchCurrentUser } from './services/api';
 import { Navbar } from './components/Navbar';
@@ -9,9 +10,24 @@ import { TeacherCourseCreationModal } from './components/TeacherCourseCreationMo
 import { JoinCourseModal } from './components/JoinCourseModal';
 import { UserSettingsModal } from './components/UserSettingsModal';
 import { LoginPage } from './components/LoginPage';
+import { TestingAgentModal } from './components/TestingAgentModal';
+import { AdminDashboard } from './components/AdminDashboard';
 
 // Sample pre-seeded users for instant testing
 const INITIAL_USERS: User[] = [
+  {
+    id: 'usr_admin_1',
+    role: UserRole.ADMIN,
+    title: 'ผู้ดูแลระบบ',
+    firstNameTh: 'แอดมิน',
+    lastNameTh: 'คุมระบบ',
+    firstNameEn: 'Admin',
+    lastNameEn: 'System',
+    universityId: 'ADM001',
+    email: 'admin@university.ac.th',
+    deviceId: 'dev_admin_1',
+    createdAt: new Date().toISOString(),
+  },
   {
     id: 'usr_teacher_1',
     role: UserRole.TEACHER,
@@ -90,6 +106,7 @@ export default function App() {
   const [userSettingsTab, setUserSettingsTab] = useState<'profile' | 'password' | 'device' | 'gps'>('profile');
   const [isCreateCourseOpen, setIsCreateCourseOpen] = useState<boolean>(false);
   const [isJoinCourseOpen, setIsJoinCourseOpen] = useState<boolean>(false);
+  const [isTestingAgentOpen, setIsTestingAgentOpen] = useState<boolean>(false);
   const [refreshKey, setRefreshKey] = useState<number>(0);
   const [quickEventTrigger, setQuickEventTrigger] = useState<number>(0);
 
@@ -156,11 +173,18 @@ export default function App() {
           allUsers={allUsers}
           isDarkMode={isDarkMode}
           onToggleTheme={() => setIsDarkMode(!isDarkMode)}
+          onOpenTestingAgent={() => setIsTestingAgentOpen(true)}
         />
         <RegisterModal
           isOpen={isRegisterOpen}
           onClose={() => setIsRegisterOpen(false)}
           onSuccess={handleRegisterSuccess}
+          isDarkMode={isDarkMode}
+        />
+        <TestingAgentModal
+          isOpen={isTestingAgentOpen}
+          onClose={() => setIsTestingAgentOpen(false)}
+          currentUser={currentUser}
           isDarkMode={isDarkMode}
         />
       </>
@@ -190,6 +214,7 @@ export default function App() {
         onOpenJoinCourse={() => setIsJoinCourseOpen(true)}
         onOpenQuickEvent={handleOpenQuickEvent}
         onOpenUserSettings={handleOpenUserSettings}
+        onOpenTestingAgent={() => setIsTestingAgentOpen(true)}
         onLogout={handleLogout}
         isDarkMode={isDarkMode}
         onToggleTheme={() => setIsDarkMode(!isDarkMode)}
@@ -197,7 +222,14 @@ export default function App() {
 
       {/* Main Content View */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {currentUser.role === UserRole.TEACHER ? (
+        {currentUser.role === UserRole.ADMIN ? (
+          <AdminDashboard
+            key={`admin_${currentUser.id}_${refreshKey}`}
+            adminUser={currentUser}
+            onSwitchUserRole={(role) => handleUserUpdated({ ...currentUser, role })}
+            isDarkMode={isDarkMode}
+          />
+        ) : currentUser.role === UserRole.TEACHER ? (
           <TeacherDashboard
             key={`teacher_${currentUser.id}_${refreshKey}`}
             teacher={currentUser}
@@ -217,7 +249,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className={`mt-auto py-6 border-t text-center space-y-1 ${
+      <footer className={`mt-auto py-6 border-t text-center space-y-2 ${
         isDarkMode 
           ? 'border-slate-800/80 text-slate-400 bg-slate-950/60' 
           : 'border-slate-200/80 text-slate-600 bg-slate-100/50'
@@ -228,6 +260,20 @@ export default function App() {
         <p className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
           อัปเดตล่าสุด: 26 กรกฎาคม 2569
         </p>
+        <div className="pt-2 flex justify-center">
+          <button
+            onClick={() => setIsTestingAgentOpen(true)}
+            className={`inline-flex items-center space-x-2 px-4 py-2 rounded-2xl border text-xs font-bold transition shadow-sm cursor-pointer ${
+              isDarkMode 
+                ? 'bg-gradient-to-r from-sky-500/20 via-blue-500/20 to-indigo-500/20 text-sky-300 border-sky-500/40 hover:border-sky-400 hover:bg-sky-500/30' 
+                : 'bg-gradient-to-r from-sky-50 via-blue-50 to-indigo-50 text-sky-900 border-sky-300 hover:bg-sky-100'
+            }`}
+            title="เปิด Agent ทดสอบระบบอัจฉริยะ (System QA Agent)"
+          >
+            <Bot className="w-4 h-4 text-sky-500 shrink-0" />
+            <span>🤖 Agent ทดสอบระบบ</span>
+          </button>
+        </div>
       </footer>
 
       {/* Modals */}
@@ -261,6 +307,13 @@ export default function App() {
         onClose={() => setIsJoinCourseOpen(false)}
         userId={currentUser.id}
         onSuccess={() => setRefreshKey((prev) => prev + 1)}
+        isDarkMode={isDarkMode}
+      />
+
+      <TestingAgentModal
+        isOpen={isTestingAgentOpen}
+        onClose={() => setIsTestingAgentOpen(false)}
+        currentUser={currentUser}
         isDarkMode={isDarkMode}
       />
     </div>

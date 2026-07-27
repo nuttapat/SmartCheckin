@@ -17,6 +17,9 @@ import {
   InviteLink,
   Semester,
   AttendanceStatus,
+  LeaveType,
+  LeaveStatus,
+  LeaveRequest,
 } from './src/types.js';
 import { saveToFirestore, getAllFromFirestore, deleteFromFirestore, COLLECTIONS } from './src/lib/firebaseStore.js';
 
@@ -25,6 +28,11 @@ const server = http.createServer(app);
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
+
+// Health Check Endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 // --- IN-MEMORY DATABASE & SEED DATA ---
 const users: Map<string, User> = new Map();
@@ -35,6 +43,7 @@ const attendanceRecords: AttendanceRecord[] = [];
 const teacherAttendanceRecords: TeacherAttendanceRecord[] = [];
 const quickEvents: Map<string, QuickEvent> = new Map();
 const inviteLinks: Map<string, InviteLink> = new Map();
+const leaveRequests: LeaveRequest[] = [];
 
 // Dynamic QR Tokens: sessionId/eventId -> { token, expiresAt, lat, lng }
 interface ActiveQR {
@@ -126,10 +135,101 @@ const studentUser2: User = {
   createdAt: new Date().toISOString(),
 };
 
+const adminUser: User = {
+  id: 'usr_admin_1',
+  role: UserRole.ADMIN,
+  title: 'ผู้ดูแลระบบ',
+  firstNameTh: 'แอดมิน',
+  lastNameTh: 'คุมระบบ',
+  firstNameEn: 'Admin',
+  lastNameEn: 'System',
+  universityId: 'ADM001',
+  email: 'admin@university.ac.th',
+  password: '123456',
+  deviceId: 'dev_admin_1',
+  createdAt: new Date().toISOString(),
+};
+
 users.set(teacherUser.id, teacherUser);
 users.set(coTeacherUser.id, coTeacherUser);
 users.set(studentUser1.id, studentUser1);
 users.set(studentUser2.id, studentUser2);
+users.set(adminUser.id, adminUser);
+
+/**
+ * Helper to bind/register or update a user device.
+ * Rules:
+ * - STUDENT: Maximum 3 devices allowed. Returns error if student tries to bind a 4th device without unbinding existing ones.
+ * - TEACHER & ADMIN: UNLIMITED devices allowed for maximum flexibility in teaching.
+ */
+function bindUserDevice(
+  user: User,
+  deviceId: string,
+  deviceName?: string,
+  deviceType?: string,
+  browser?: string,
+  os?: string
+): { success: boolean; error?: string; user: User; isNewDevice?: boolean } {
+  if (!user) return { success: false, error: 'ไม่พบข้อมูลผู้ใช้งาน', user };
+  if (!deviceId) return { success: true, user };
+
+  if (!user.devices) {
+    user.devices = [];
+    if (user.deviceId) {
+      user.devices.push({
+        id: `dev_primary_${user.id}`,
+        deviceId: user.deviceId,
+        deviceName: user.role === UserRole.STUDENT ? 'อุปกรณ์หลัก (Primary Phone)' : 'อุปกรณ์หลักอาจารย์ (Primary Device)',
+        deviceType: 'MOBILE',
+        boundAt: user.createdAt || new Date().toISOString(),
+        lastUsedAt: new Date().toISOString(),
+        isPrimary: true,
+      });
+    }
+  }
+
+  const existingDevice = user.devices.find((d) => d.deviceId === deviceId);
+
+  if (existingDevice) {
+    existingDevice.lastUsedAt = new Date().toISOString();
+    if (deviceName) existingDevice.deviceName = deviceName;
+    if (deviceType) existingDevice.deviceType = deviceType as any;
+    if (browser) existingDevice.browser = browser;
+    if (os) existingDevice.os = os;
+    user.deviceId = user.deviceId || deviceId;
+    return { success: true, user, isNewDevice: false };
+  }
+
+  // Check limits
+  const isStudent = user.role === UserRole.STUDENT;
+  const MAX_STUDENT_DEVICES = 3;
+
+  if (isStudent && user.devices.length >= MAX_STUDENT_DEVICES) {
+    return {
+      success: false,
+      error: `[Anti-Proxy Device Limit] บัญชีนักศึกษานี้ผูกอุปกรณ์ครบ 3 เครื่องแล้ว (สิทธิ์สูงสุด 3 เครื่องสำหรับนักศึกษา) อุปกรณ์นี้ยังไม่ได้ผูกในระบบ กรุณาเข้าเมนู "ตั้งค่าบัญชี" เพื่อยกเลิกอุปกรณ์เดิม หรือติดต่ออาจารย์/แอดมินเพื่อรีเซ็ตอุปกรณ์`,
+      user,
+    };
+  }
+
+  // Register new device (No limit for TEACHER & ADMIN, <3 for STUDENT)
+  const newDevice = {
+    id: `dev_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    deviceId,
+    deviceName: deviceName || (isStudent ? 'อุปกรณ์นักศึกษา' : 'อุปกรณ์อาจารย์/ผู้ใช้'),
+    deviceType: (deviceType as any) || 'DESKTOP',
+    browser: browser || '',
+    os: os || '',
+    boundAt: new Date().toISOString(),
+    lastUsedAt: new Date().toISOString(),
+    isPrimary: user.devices.length === 0,
+  };
+
+  user.devices.push(newDevice);
+  if (!user.deviceId) user.deviceId = deviceId;
+
+  return { success: true, user, isNewDevice: true };
+}
 
 // Seed Initial Course: TEST101
 const sampleCourse: Course = {
@@ -244,6 +344,25 @@ attendanceRecords.push(
     deviceId: 'dev_student_1',
   }
 );
+
+// Seed initial sample leave request
+leaveRequests.push({
+  id: 'leave_demo_1',
+  studentId: 'usr_student_1',
+  studentNameTh: 'นาย กิตติพงษ์ สุขเสริฐ',
+  studentNameEn: 'Mr. Kittipong Suksert',
+  studentUniversityId: '66010012',
+  courseId: 'crs_test101',
+  courseCode: 'TEST101',
+  courseName: 'Software Architecture & System Design',
+  weekNumber: 3,
+  leaveType: LeaveType.SICK,
+  leaveDate: '2026-07-24',
+  reason: 'มีอาการไข้สูงและปวดศีรษะอย่างรุนแรง แพทย์ให้พักผ่อนเป็นเวลา 2 วัน',
+  attachmentName: 'medical_certificate.pdf',
+  status: LeaveStatus.PENDING,
+  createdAt: new Date().toISOString(),
+});
 
 // --- WEBSOCKET SERVER SETUP ---
 const wss = new WebSocketServer({ noServer: true });
@@ -454,9 +573,12 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(400).json({ error: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบและลองใหม่อีกครั้ง' });
   }
 
-  // Update device ID if provided
-  if (deviceId && !user.deviceId) {
-    user.deviceId = deviceId;
+  // Update device ID or bind device if provided
+  const { deviceName, deviceType, browser, os } = req.body || {};
+  if (deviceId) {
+    bindUserDevice(user, deviceId, deviceName, deviceType, browser, os);
+    users.set(user.id, user);
+    saveToFirestore(COLLECTIONS.USERS, user);
   }
 
   res.json({ message: 'Login successful', user });
@@ -524,7 +646,7 @@ app.put('/api/users/:userId/profile', (req, res) => {
 });
 
 app.post('/api/auth/google', (req, res) => {
-  const { email, name, picture, role, title, universityId, firstNameTh, lastNameTh, firstNameEn, lastNameEn } = req.body || {};
+  const { email, name, picture, role, title, universityId, firstNameTh, lastNameTh, firstNameEn, lastNameEn, password } = req.body || {};
   const userEmail = (email || `user_${Math.floor(1000 + Math.random() * 9000)}@university.ac.th`).toString().trim().toLowerCase();
 
   let user = Array.from(users.values()).find((u) => u.email && u.email.toLowerCase() === userEmail);
@@ -537,7 +659,7 @@ app.post('/api/auth/google', (req, res) => {
         email: userEmail,
         name: name || userEmail.split('@')[0],
         picture: picture || 'https://lh3.googleusercontent.com/a/default-user',
-        message: 'ผู้ใช้งานใหม่ กรุณาตั้งค่าประเภทบัญชีและระบุข้อมูลประจำตัวเพื่อเริ่มต้นใช้งาน',
+        message: 'ผู้ใช้งานใหม่ กรุณาตั้งค่าประเภทบัญชี กำหนดรหัสผ่าน และระบุข้อมูลประจำตัวเพื่อเริ่มต้นใช้งาน',
       });
     }
 
@@ -564,6 +686,7 @@ app.post('/api/auth/google', (req, res) => {
       lastNameEn: lEn,
       universityId: universityId ? universityId.toString().trim() : '',
       email: userEmail,
+      password: password && password.toString().trim() ? password.toString().trim() : '123456',
       avatarUrl: picture || 'https://lh3.googleusercontent.com/a/default-user',
       authProvider: 'google',
       deviceId: `dev_g_${Date.now()}`,
@@ -572,9 +695,12 @@ app.post('/api/auth/google', (req, res) => {
     users.set(user.id, user);
     saveToFirestore(COLLECTIONS.USERS, user);
   } else {
-    // Existing user signing in with Google - link account & update avatar if available
+    // Existing user signing in with Google - link account & update avatar / password if provided
     if (picture) user.avatarUrl = picture;
     if (!user.authProvider) user.authProvider = 'google';
+    if (password && password.toString().trim()) {
+      user.password = password.toString().trim();
+    }
     saveToFirestore(COLLECTIONS.USERS, user);
   }
 
@@ -713,6 +839,21 @@ app.put('/api/courses/:id', (req, res) => {
     return res.status(404).json({ error: 'Course not found' });
   }
 
+  const reqUserId = (req.headers['x-user-id'] as string) || req.body.requesterUserId || req.body.teacherId;
+  if (reqUserId) {
+    const isOwner = course.ownerId === reqUserId;
+    const member = courseMembers.find((m) => m.courseId === courseId && m.userId === reqUserId);
+    const isCoordinator = member && (member.role === CourseMemberRole.COORDINATOR || member.role === CourseMemberRole.CO_TEACHER);
+    const reqUser = users.get(reqUserId);
+    const isAdmin = reqUser?.role === UserRole.ADMIN;
+
+    if (!isOwner && !isCoordinator && !isAdmin) {
+      return res.status(403).json({
+        error: 'เฉพาะผู้รับผิดชอบรายวิชา (Course Coordinator) และเจ้าของรายวิชาเท่านั้นที่มีสิทธิ์แก้ไขรายวิชา',
+      });
+    }
+  }
+
   const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, defaultLat, defaultLng } = req.body;
 
   if (courseCode) course.courseCode = courseCode;
@@ -774,16 +915,199 @@ app.put('/api/courses/:id', (req, res) => {
   });
 });
 
+// Delete Course API (Requires password confirmation and Coordinator permission)
+app.delete('/api/courses/:id', async (req, res) => {
+  const courseId = req.params.id;
+  const { teacherId, password } = req.body || {};
+  const reqUserId = (req.headers['x-user-id'] as string) || teacherId;
+
+  const course = courses.get(courseId);
+  if (!course) {
+    return res.status(404).json({ error: 'ไม่พบรายวิชานี้ในระบบ' });
+  }
+
+  // Verify Coordinator/Owner permissions
+  if (reqUserId) {
+    const isOwner = course.ownerId === reqUserId;
+    const member = courseMembers.find((m) => m.courseId === courseId && m.userId === reqUserId);
+    const isCoordinator = member && (member.role === CourseMemberRole.COORDINATOR || member.role === CourseMemberRole.CO_TEACHER);
+    const reqUser = users.get(reqUserId);
+    const isAdmin = reqUser?.role === UserRole.ADMIN;
+
+    if (!isOwner && !isCoordinator && !isAdmin) {
+      return res.status(403).json({
+        error: 'เฉพาะผู้รับผิดชอบรายวิชา (Course Coordinator) และเจ้าของรายวิชาเท่านั้นที่มีสิทธิ์ลบรายวิชา',
+      });
+    }
+  }
+
+  // Find user to verify password
+  const user = teacherId ? users.get(teacherId) : Array.from(users.values()).find((u) => u.id === course.ownerId);
+  if (!user) {
+    return res.status(404).json({ error: 'ไม่พบข้อมูลผู้ใช้งานเจ้าของวิชา' });
+  }
+
+  if (!password || password.toString().trim() === '') {
+    return res.status(400).json({ error: 'กรุณากรอกรหัสผ่านเพื่อยืนยันการลบรายวิชา' });
+  }
+
+  const expectedPassword = user.password || '123456';
+  if (password.toString().trim() !== expectedPassword) {
+    return res.status(400).json({ error: 'รหัสผ่านไม่ถูกต้อง ไม่สามารถลบรายวิชาได้' });
+  }
+
+  // Delete course from memory and Firestore
+  courses.delete(courseId);
+  await deleteFromFirestore(COLLECTIONS.COURSES, courseId);
+
+  // Delete course members
+  for (let i = courseMembers.length - 1; i >= 0; i--) {
+    if (courseMembers[i].courseId === courseId) {
+      const member = courseMembers[i];
+      courseMembers.splice(i, 1);
+      await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, member.id);
+    }
+  }
+
+  // Delete sessions associated with courseId
+  const deletedSessionIds = new Set<string>();
+  for (const [sesId, ses] of Array.from(sessions.entries())) {
+    if (ses.courseId === courseId) {
+      sessions.delete(sesId);
+      deletedSessionIds.add(sesId);
+      await deleteFromFirestore(COLLECTIONS.SESSIONS, sesId);
+    }
+  }
+
+  // Delete attendances associated with deleted sessionIds
+  for (let i = attendanceRecords.length - 1; i >= 0; i--) {
+    if (deletedSessionIds.has(attendanceRecords[i].sessionId)) {
+      const att = attendanceRecords[i];
+      attendanceRecords.splice(i, 1);
+      await deleteFromFirestore(COLLECTIONS.ATTENDANCE, att.id);
+    }
+  }
+
+  // Delete quick events associated with teacher if any
+  for (const [qId, qEvent] of Array.from(quickEvents.entries())) {
+    if (qEvent.teacherId === user.id) {
+      quickEvents.delete(qId);
+      await deleteFromFirestore(COLLECTIONS.QUICK_EVENTS, qId);
+    }
+  }
+
+  res.json({ message: 'ลบรายวิชาและข้อมูลที่เกี่ยวข้องทั้งหมดเรียบร้อยแล้ว', courseId });
+});
+
+// Teacher Directory and Member Management Endpoints
+app.get('/api/teachers', (req, res) => {
+  const teacherUsers = Array.from(users.values())
+    .filter((u) => u.role === UserRole.TEACHER || u.role === UserRole.ADMIN)
+    .map(({ password, ...u }) => u);
+  res.json(teacherUsers);
+});
+
+app.post('/api/courses/:id/members/invite-teacher', (req, res) => {
+  const courseId = req.params.id;
+  const { teacherUserId, role } = req.body;
+
+  const course = courses.get(courseId);
+  if (!course) {
+    return res.status(404).json({ error: 'ไม่พบรายวิชาที่ระบุ' });
+  }
+
+  const targetTeacher = users.get(teacherUserId);
+  if (!targetTeacher) {
+    return res.status(404).json({ error: 'ไม่พบอาจารย์ที่เลือกในระบบ' });
+  }
+
+  const validRoles = [
+    CourseMemberRole.COORDINATOR,
+    CourseMemberRole.CO_COORDINATOR,
+    CourseMemberRole.INSTRUCTOR,
+    CourseMemberRole.CO_TEACHER,
+  ];
+
+  const targetRole = validRoles.includes(role) ? role : CourseMemberRole.INSTRUCTOR;
+
+  const existingMember = courseMembers.find((m) => m.courseId === courseId && m.userId === teacherUserId);
+
+  if (existingMember) {
+    existingMember.role = targetRole;
+    saveToFirestore(COLLECTIONS.COURSE_MEMBERS, existingMember);
+    return res.json({
+      message: `ปรับเปลี่ยนสิทธิ์ของ ${targetTeacher.title} ${targetTeacher.firstNameTh} ${targetTeacher.lastNameTh} เป็นสิทธิ์ใหม่เรียบร้อยแล้ว`,
+      member: { ...existingMember, user: targetTeacher },
+    });
+  }
+
+  const newMember: CourseMember = {
+    id: `cm_${Date.now()}`,
+    courseId,
+    userId: teacherUserId,
+    role: targetRole,
+    joinedAt: new Date().toISOString(),
+  };
+
+  courseMembers.push(newMember);
+  saveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMember);
+
+  res.json({
+    message: `เพิ่ม/เชิญ ${targetTeacher.title} ${targetTeacher.firstNameTh} ${targetTeacher.lastNameTh} เข้าร่วมรายวิชาสำเร็จ`,
+    member: { ...newMember, user: targetTeacher },
+  });
+});
+
+app.put('/api/courses/:id/members/:memberId/role', (req, res) => {
+  const { id: courseId, memberId } = req.params;
+  const { role } = req.body;
+
+  const member = courseMembers.find((m) => m.id === memberId || (m.courseId === courseId && m.userId === memberId));
+  if (!member) {
+    return res.status(404).json({ error: 'ไม่พบข้อมูลอาจารย์ในรายวิชานี้' });
+  }
+
+  member.role = role;
+  saveToFirestore(COLLECTIONS.COURSE_MEMBERS, member);
+
+  res.json({ message: 'อัปเดตสิทธิ์ของอาจารย์เรียบร้อยแล้ว', member });
+});
+
+app.delete('/api/courses/:id/members/:memberId', async (req, res) => {
+  const { id: courseId, memberId } = req.params;
+
+  const index = courseMembers.findIndex((m) => m.id === memberId || (m.courseId === courseId && m.userId === memberId));
+  if (index === -1) {
+    return res.status(404).json({ error: 'ไม่พบสมาชิกในรายวิชานี้' });
+  }
+
+  const removed = courseMembers.splice(index, 1)[0];
+  await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, removed.id);
+
+  res.json({ message: 'ลบสมาชิกออกจากรายวิชาเรียบร้อยแล้ว', memberId: removed.id });
+});
+
 // Invite link generation & acceptance
 app.post('/api/courses/:id/invite', (req, res) => {
   const { role } = req.body;
   const courseId = req.params.id;
   const code = crypto.randomBytes(4).toString('hex').toUpperCase();
 
+  let targetRole = CourseMemberRole.STUDENT;
+  if (role === 'COORDINATOR' || role === CourseMemberRole.COORDINATOR) {
+    targetRole = CourseMemberRole.COORDINATOR;
+  } else if (role === 'CO_COORDINATOR' || role === CourseMemberRole.CO_COORDINATOR) {
+    targetRole = CourseMemberRole.CO_COORDINATOR;
+  } else if (role === 'INSTRUCTOR' || role === CourseMemberRole.INSTRUCTOR) {
+    targetRole = CourseMemberRole.INSTRUCTOR;
+  } else if (role === 'CO_TEACHER' || role === CourseMemberRole.CO_TEACHER) {
+    targetRole = CourseMemberRole.CO_TEACHER;
+  }
+
   const invite: InviteLink = {
     id: `inv_${Date.now()}`,
     courseId,
-    role: role === 'CO_TEACHER' ? CourseMemberRole.CO_TEACHER : CourseMemberRole.STUDENT,
+    role: targetRole,
     code,
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
   };
@@ -933,14 +1257,16 @@ app.post('/api/checkin', (req, res) => {
   }
 
   // Anti-Proxy Mechanism 1: Device Binding
-  if (student.deviceId && deviceId && student.deviceId !== deviceId) {
-    return res.status(403).json({
-      error: `[Anti-Proxy] Device Mismatch! This student account is bound to another physical mobile device (${student.deviceId.slice(0, 8)}...). Checking in for another person is strictly prohibited.`,
-    });
-  }
-
-  if (!student.deviceId && deviceId) {
-    student.deviceId = deviceId;
+  const { deviceName, deviceType, browser, os } = req.body || {};
+  if (deviceId) {
+    const bindResult = bindUserDevice(student, deviceId, deviceName, deviceType, browser, os);
+    if (!bindResult.success) {
+      return res.status(403).json({
+        error: bindResult.error || `[Anti-Proxy] Device Mismatch or Limit Reached!`,
+      });
+    }
+    users.set(student.id, student);
+    saveToFirestore(COLLECTIONS.USERS, student);
   }
 
   // Geofence Distance Calculation
@@ -1130,6 +1456,19 @@ app.post('/api/checkin/quick', (req, res) => {
     return res.status(404).json({ error: 'Student not found.' });
   }
 
+  // Device Binding
+  const { deviceName, deviceType, browser, os } = req.body || {};
+  if (deviceId) {
+    const bindResult = bindUserDevice(student, deviceId, deviceName, deviceType, browser, os);
+    if (!bindResult.success) {
+      return res.status(403).json({
+        error: bindResult.error || `[Anti-Proxy] Device Mismatch or Limit Reached!`,
+      });
+    }
+    users.set(student.id, student);
+    saveToFirestore(COLLECTIONS.USERS, student);
+  }
+
   const activeQR = activeQRCodes.get(eventId);
   let inputToken = qrToken ? qrToken.trim() : '';
   if (inputToken.includes(':')) {
@@ -1250,6 +1589,142 @@ app.get('/api/export-teacher-csv', (req, res) => {
   );
   // Add UTF-8 BOM for Thai character encoding in Excel
   res.send('\uFEFF' + csv);
+});
+
+// 7. LEAVE REQUEST ENDPOINTS
+// Submit leave request (นักศึกษาส่งใบลาเรียน)
+app.post('/api/leave-requests', (req, res) => {
+  const {
+    studentId,
+    courseId,
+    weekNumber,
+    leaveType,
+    leaveDate,
+    reason,
+    attachmentUrl,
+    attachmentName,
+  } = req.body;
+
+  const student = users.get(studentId);
+  if (!student) {
+    return res.status(404).json({ error: 'ไม่พบข้อมูลนักศึกษาในระบบ' });
+  }
+
+  const course = courses.get(courseId);
+  if (!course) {
+    return res.status(404).json({ error: 'ไม่พบข้อมูลรายวิชาในระบบ' });
+  }
+
+  if (!leaveType || !leaveDate || !reason) {
+    return res.status(400).json({ error: 'กรุณาระบุประเภทการลา วันที่ลา และเหตุผลการลาให้ครบถ้วน' });
+  }
+
+  const newLeave: LeaveRequest = {
+    id: `leave_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+    studentId: student.id,
+    studentNameTh: `${student.title || ''} ${student.firstNameTh} ${student.lastNameTh}`.trim(),
+    studentNameEn: `${student.firstNameEn || ''} ${student.lastNameEn || ''}`.trim(),
+    studentUniversityId: student.universityId,
+    courseId: course.id,
+    courseCode: course.courseCode,
+    courseName: course.courseName,
+    weekNumber: weekNumber ? Number(weekNumber) : undefined,
+    leaveType: leaveType as LeaveType,
+    leaveDate,
+    reason,
+    attachmentUrl,
+    attachmentName,
+    status: LeaveStatus.PENDING,
+    createdAt: new Date().toISOString(),
+  };
+
+  leaveRequests.unshift(newLeave);
+  saveToFirestore(COLLECTIONS.LEAVE_REQUESTS, newLeave);
+
+  res.json({
+    message: 'ส่งใบลาเรียนเรียบร้อยแล้ว รออาจารย์ผู้สอนพิจารณาอนุมัติ',
+    leaveRequest: newLeave,
+  });
+});
+
+// Get student's leave requests (ประวัติการแจ้งลาของนักศึกษา)
+app.get('/api/leave-requests/student/:studentId', (req, res) => {
+  const { studentId } = req.params;
+  const list = leaveRequests.filter((l) => l.studentId === studentId);
+  res.json(list);
+});
+
+// Get teacher's leave requests for courses taught by teacher (รายการแจ้งลาสำหรับอาจารย์)
+app.get('/api/leave-requests/teacher/:teacherId', (req, res) => {
+  const { teacherId } = req.params;
+
+  // Find courses where teacher is owner or co-teacher
+  const teacherCourseIds = new Set(
+    Array.from(courses.values())
+      .filter((c) => c.ownerId === teacherId)
+      .map((c) => c.id)
+  );
+
+  courseMembers.forEach((cm) => {
+    if (cm.userId === teacherId && cm.role === CourseMemberRole.CO_TEACHER) {
+      teacherCourseIds.add(cm.courseId);
+    }
+  });
+
+  const list = leaveRequests.filter((l) => teacherCourseIds.has(l.courseId));
+  res.json(list);
+});
+
+// Update leave request status (อาจารย์อนุมัติ/ปฏิเสธใบลา)
+app.put('/api/leave-requests/:id/status', (req, res) => {
+  const { id } = req.params;
+  const { status, teacherComment } = req.body;
+
+  const itemIndex = leaveRequests.findIndex((l) => l.id === id);
+  if (itemIndex === -1) {
+    return res.status(404).json({ error: 'ไม่พบข้อมูลใบลาที่ต้องการอัปเดต' });
+  }
+
+  if (![LeaveStatus.APPROVED, LeaveStatus.REJECTED, LeaveStatus.PENDING].includes(status)) {
+    return res.status(400).json({ error: 'สถานะการลาไม่ถูกต้อง' });
+  }
+
+  leaveRequests[itemIndex] = {
+    ...leaveRequests[itemIndex],
+    status,
+    teacherComment: teacherComment !== undefined ? teacherComment : leaveRequests[itemIndex].teacherComment,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const updated = leaveRequests[itemIndex];
+  saveToFirestore(COLLECTIONS.LEAVE_REQUESTS, updated);
+
+  res.json({
+    message: status === LeaveStatus.APPROVED ? 'อนุมัติการลาเรียนเรียบร้อยแล้ว' : 'ปฏิเสธใบลาเรียนเรียบร้อยแล้ว',
+    leaveRequest: updated,
+  });
+});
+
+// Cancel leave request (นักศึกษายกเลิกใบลาที่ยังรอดำเนินการ)
+app.delete('/api/leave-requests/:id', (req, res) => {
+  const { id } = req.params;
+  const itemIndex = leaveRequests.findIndex((l) => l.id === id);
+
+  if (itemIndex === -1) {
+    return res.status(404).json({ error: 'ไม่พบข้อมูลใบลาที่ต้องการยกเลิก' });
+  }
+
+  if (leaveRequests[itemIndex].status !== LeaveStatus.PENDING) {
+    return res.status(400).json({ error: 'ไม่สามารถยกเลิกใบลาที่ได้รับการพิจารณาไปแล้วได้' });
+  }
+
+  const [removed] = leaveRequests.splice(itemIndex, 1);
+  deleteFromFirestore(COLLECTIONS.LEAVE_REQUESTS, id);
+
+  res.json({
+    message: 'ยกเลิกใบลาเรียนเรียบร้อยแล้ว',
+    id: removed.id,
+  });
 });
 
 // Student Dashboard Stats endpoint
@@ -1463,7 +1938,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
 });
 
 // Demo User IDs whitelist
-const DEMO_USER_IDS = new Set(['usr_teacher_1', 'usr_teacher_2', 'usr_student_1', 'usr_student_2']);
+const DEMO_USER_IDS = new Set(['usr_teacher_1', 'usr_teacher_2', 'usr_student_1', 'usr_student_2', 'usr_admin_1']);
 
 // Purge all non-demo users from both Firestore and in-memory Map
 async function purgeNonDemoUsers(): Promise<{ deletedCount: number; remainingUsers: string[] }> {
@@ -1506,23 +1981,401 @@ app.post('/api/admin/reset-users', async (req, res) => {
   }
 });
 
+// --- ADMIN & REALTIME DATABASE INSPECTOR ENDPOINTS ---
+
+// Overview of all collections count and system status
+app.get('/api/admin/database/overview', (req, res) => {
+  try {
+    res.json({
+      timestamp: new Date().toISOString(),
+      collections: {
+        users: users ? users.size : 0,
+        courses: courses ? courses.size : 0,
+        courseMembers: Array.isArray(courseMembers) ? courseMembers.length : 0,
+        sessions: sessions ? sessions.size : 0,
+        attendanceRecords: Array.isArray(attendanceRecords) ? attendanceRecords.length : 0,
+        teacherAttendanceRecords: Array.isArray(teacherAttendanceRecords) ? teacherAttendanceRecords.length : 0,
+        leaveRequests: Array.isArray(leaveRequests) ? leaveRequests.length : 0,
+        quickEvents: quickEvents ? quickEvents.size : 0,
+        activeQRCodes: activeQRCodes ? activeQRCodes.size : 0,
+      },
+      system: {
+        uptime: process.uptime(),
+        nodeEnv: process.env.NODE_ENV || 'development',
+        port: PORT,
+      }
+    });
+  } catch (err: any) {
+    console.error('Error fetching admin database overview:', err);
+    res.status(500).json({ error: err.message || 'Error fetching database overview' });
+  }
+});
+
+// Fetch documents of a specific collection
+app.get('/api/admin/database/collection/:collectionName', (req, res) => {
+  try {
+    const { collectionName } = req.params;
+    let data: any[] = [];
+
+    switch (collectionName) {
+      case 'users':
+        data = users ? Array.from(users.values()) : [];
+        break;
+      case 'courses':
+        data = courses ? Array.from(courses.values()) : [];
+        break;
+      case 'courseMembers':
+        data = Array.isArray(courseMembers) ? courseMembers : [];
+        break;
+      case 'sessions':
+        data = sessions ? Array.from(sessions.size ? sessions.values() : []) : [];
+        break;
+      case 'attendanceRecords':
+        data = Array.isArray(attendanceRecords) ? attendanceRecords : [];
+        break;
+      case 'teacherAttendanceRecords':
+        data = Array.isArray(teacherAttendanceRecords) ? teacherAttendanceRecords : [];
+        break;
+      case 'leaveRequests':
+        data = Array.isArray(leaveRequests) ? leaveRequests : [];
+        break;
+      case 'quickEvents':
+        data = quickEvents ? Array.from(quickEvents.values()) : [];
+        break;
+      case 'activeQRCodes':
+        data = activeQRCodes ? Array.from(activeQRCodes.entries()).map(([key, val]) => ({ id: key, ...val })) : [];
+        break;
+      default:
+        return res.status(400).json({ error: 'Collection ไม่ถูกต้อง' });
+    }
+
+    res.json({
+      collectionName,
+      count: data.length,
+      documents: data,
+    });
+  } catch (err: any) {
+    console.error('Error fetching admin collection:', err);
+    res.status(500).json({ error: err.message || 'Error fetching collection' });
+  }
+});
+
+// Create or update a document in a collection
+app.post('/api/admin/database/document/:collectionName', async (req, res) => {
+  const { collectionName } = req.params;
+  const docData = req.body;
+
+  if (!docData || !docData.id) {
+    return res.status(400).json({ error: 'เอกสารต้องมี field "id"' });
+  }
+
+  try {
+    switch (collectionName) {
+      case 'users':
+        users.set(docData.id, docData);
+        await saveToFirestore(COLLECTIONS.USERS, docData);
+        break;
+      case 'courses':
+        courses.set(docData.id, docData);
+        await saveToFirestore(COLLECTIONS.COURSES, docData);
+        break;
+      case 'courseMembers': {
+        const idx = courseMembers.findIndex((m) => m.id === docData.id);
+        if (idx >= 0) courseMembers[idx] = docData;
+        else courseMembers.push(docData);
+        await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, docData);
+        break;
+      }
+      case 'sessions':
+        sessions.set(docData.id, docData);
+        await saveToFirestore(COLLECTIONS.SESSIONS, docData);
+        break;
+      case 'attendanceRecords': {
+        const idx = attendanceRecords.findIndex((a) => a.id === docData.id);
+        if (idx >= 0) attendanceRecords[idx] = docData;
+        else attendanceRecords.push(docData);
+        await saveToFirestore(COLLECTIONS.ATTENDANCE, docData);
+        break;
+      }
+      case 'leaveRequests': {
+        const idx = leaveRequests.findIndex((l) => l.id === docData.id);
+        if (idx >= 0) leaveRequests[idx] = docData;
+        else leaveRequests.push(docData);
+        await saveToFirestore(COLLECTIONS.LEAVE_REQUESTS, docData);
+        break;
+      }
+      case 'quickEvents':
+        quickEvents.set(docData.id, docData);
+        await saveToFirestore(COLLECTIONS.QUICK_EVENTS, docData);
+        break;
+      default:
+        return res.status(400).json({ error: 'Collection ไม่รองรับการแก้ไขโดยตรง' });
+    }
+
+    res.json({ message: `บันทึกข้อมูลใน ${collectionName} สำเร็จ`, document: docData });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการบันทึกเอกสาร' });
+  }
+});
+
+// Delete a document from a collection
+app.delete('/api/admin/database/document/:collectionName/:docId', async (req, res) => {
+  const { collectionName, docId } = req.params;
+
+  try {
+    switch (collectionName) {
+      case 'users':
+        users.delete(docId);
+        await deleteFromFirestore(COLLECTIONS.USERS, docId);
+        break;
+      case 'courses':
+        courses.delete(docId);
+        await deleteFromFirestore(COLLECTIONS.COURSES, docId);
+        break;
+      case 'courseMembers': {
+        const idx = courseMembers.findIndex((m) => m.id === docId);
+        if (idx >= 0) courseMembers.splice(idx, 1);
+        await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, docId);
+        break;
+      }
+      case 'sessions':
+        sessions.delete(docId);
+        await deleteFromFirestore(COLLECTIONS.SESSIONS, docId);
+        break;
+      case 'attendanceRecords': {
+        const idx = attendanceRecords.findIndex((a) => a.id === docId);
+        if (idx >= 0) attendanceRecords.splice(idx, 1);
+        await deleteFromFirestore(COLLECTIONS.ATTENDANCE, docId);
+        break;
+      }
+      case 'leaveRequests': {
+        const idx = leaveRequests.findIndex((l) => l.id === docId);
+        if (idx >= 0) leaveRequests.splice(idx, 1);
+        await deleteFromFirestore(COLLECTIONS.LEAVE_REQUESTS, docId);
+        break;
+      }
+      case 'quickEvents':
+        quickEvents.delete(docId);
+        await deleteFromFirestore(COLLECTIONS.QUICK_EVENTS, docId);
+        break;
+      default:
+        return res.status(400).json({ error: 'Collection ไม่รองรับการลบโดยตรง' });
+    }
+
+    res.json({ message: `ลบเอกสาร ${docId} จาก ${collectionName} เรียบร้อยแล้ว`, docId });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการลบเอกสาร' });
+  }
+});
+
+// Update user role directly
+app.put('/api/admin/users/:userId/role', async (req, res) => {
+  const { userId } = req.params;
+  const { role } = req.body;
+
+  const targetUser = users.get(userId);
+  if (!targetUser) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  if (![UserRole.STUDENT, UserRole.TEACHER, UserRole.ADMIN].includes(role)) {
+    return res.status(400).json({ error: 'สิทธิ์ไม่ถูกต้อง' });
+  }
+
+  targetUser.role = role;
+  users.set(userId, targetUser);
+  await saveToFirestore(COLLECTIONS.USERS, targetUser);
+
+  res.json({ message: `ปรับเปลี่ยนสิทธิ์ผู้ใช้เป็น ${role} สำเร็จ`, user: targetUser });
+});
+
+// Reset device fingerprint for a user
+app.put('/api/admin/users/:userId/reset-device', async (req, res) => {
+  const { userId } = req.params;
+
+  const targetUser = users.get(userId);
+  if (!targetUser) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  targetUser.deviceId = undefined;
+  targetUser.devices = [];
+  users.set(userId, targetUser);
+  await saveToFirestore(COLLECTIONS.USERS, targetUser);
+
+  res.json({ message: `ปลดล็อกอุปกรณ์ทั้งหมดของผู้ใช้ (${targetUser.firstNameTh}) เรียบร้อยแล้ว`, user: targetUser });
+});
+
+// -------------------- DEVICE BINDING MANAGEMENT API --------------------
+// Get bound devices for a user
+app.get('/api/users/:userId/devices', (req, res) => {
+  const { userId } = req.params;
+  const user = users.get(userId);
+  if (!user) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  if (!user.devices) {
+    user.devices = [];
+    if (user.deviceId) {
+      user.devices.push({
+        id: `dev_primary_${user.id}`,
+        deviceId: user.deviceId,
+        deviceName: user.role === UserRole.STUDENT ? 'อุปกรณ์หลัก (Primary Phone)' : 'อุปกรณ์หลักอาจารย์ (Primary Device)',
+        deviceType: 'MOBILE',
+        boundAt: user.createdAt || new Date().toISOString(),
+        lastUsedAt: new Date().toISOString(),
+        isPrimary: true,
+      });
+    }
+  }
+
+  const isStudent = user.role === UserRole.STUDENT;
+  res.json({
+    devices: user.devices,
+    maxDevices: isStudent ? 3 : null, // null means unlimited
+    role: user.role,
+    userId: user.id,
+  });
+});
+
+// Bind or update a device
+app.post('/api/users/:userId/devices/bind', async (req, res) => {
+  const { userId } = req.params;
+  const { deviceId, deviceName, deviceType, browser, os } = req.body || {};
+
+  const user = users.get(userId);
+  if (!user) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  if (!deviceId) {
+    return res.status(400).json({ error: 'กรุณาระบุ Device ID ที่ต้องการผูก' });
+  }
+
+  const result = bindUserDevice(user, deviceId, deviceName, deviceType, browser, os);
+  if (!result.success) {
+    return res.status(400).json({ error: result.error });
+  }
+
+  users.set(user.id, user);
+  await saveToFirestore(COLLECTIONS.USERS, user);
+
+  res.json({
+    message: result.isNewDevice ? 'ผูกอุปกรณ์ใหม่เรียบร้อยแล้ว' : 'อัปเดตข้อมูลอุปกรณ์เรียบร้อยแล้ว',
+    devices: user.devices,
+    user,
+  });
+});
+
+// Remove a specific bound device
+app.delete('/api/users/:userId/devices/:devId', async (req, res) => {
+  const { userId, devId } = req.params;
+
+  const user = users.get(userId);
+  if (!user) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  if (!user.devices || user.devices.length === 0) {
+    return res.status(400).json({ error: 'ไม่มีอุปกรณ์ที่ผูกไว้ในระบบ' });
+  }
+
+  const initialCount = user.devices.length;
+  user.devices = user.devices.filter((d) => d.id !== devId && d.deviceId !== devId);
+
+  if (user.devices.length === initialCount) {
+    return res.status(404).json({ error: 'ไม่พบอุปกรณ์ที่ระบุในรายการผูกเครื่อง' });
+  }
+
+  if (user.devices.length > 0) {
+    user.deviceId = user.devices[0].deviceId;
+  } else {
+    user.deviceId = undefined;
+  }
+
+  users.set(user.id, user);
+  await saveToFirestore(COLLECTIONS.USERS, user);
+
+  res.json({
+    message: 'ยกเลิกการผูกอุปกรณ์เรียบร้อยแล้ว',
+    devices: user.devices,
+    user,
+  });
+});
+
+// Reset all devices for a user
+app.post('/api/users/:userId/devices/reset', async (req, res) => {
+  const { userId } = req.params;
+
+  const user = users.get(userId);
+  if (!user) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  user.devices = [];
+  user.deviceId = undefined;
+
+  users.set(user.id, user);
+  await saveToFirestore(COLLECTIONS.USERS, user);
+
+  res.json({
+    message: `รีเซ็ตอุปกรณ์ทั้งหมดของผู้ใช้ (${user.firstNameTh}) เรียบร้อยแล้ว`,
+    devices: [],
+    user,
+  });
+});
+
+// Override attendance record manually
+app.post('/api/admin/attendance/override', async (req, res) => {
+  const { studentId, sessionId, eventId, courseId, status, checkinMethod } = req.body;
+
+  const student = users.get(studentId);
+  if (!student) {
+    return res.status(404).json({ error: 'ไม่พบนัศึกษาในระบบ' });
+  }
+
+  // Find existing record or create new
+  let record = attendanceRecords.find(
+    (ar) => ar.studentId === studentId && ((sessionId && ar.sessionId === sessionId) || (eventId && ar.eventId === eventId))
+  );
+
+  if (record) {
+    record.status = status as AttendanceStatus;
+    record.timestamp = new Date().toISOString();
+  } else {
+    record = {
+      id: `att_admin_override_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      sessionId,
+      eventId,
+      studentId: student.id,
+      studentNameTh: `${student.firstNameTh} ${student.lastNameTh}`,
+      studentNameEn: `${student.firstNameEn || ''} ${student.lastNameEn || ''}`.trim(),
+      studentUniversityId: student.universityId,
+      timestamp: new Date().toISOString(),
+      status: status as AttendanceStatus,
+      scannedLat: 0,
+      scannedLng: 0,
+      distanceMeters: 0,
+      deviceId: student.deviceId || 'admin_override',
+      checkinMethod: (checkinMethod as any) || 'HYBRID',
+    };
+    attendanceRecords.push(record);
+  }
+
+  await saveToFirestore(COLLECTIONS.ATTENDANCE, record);
+
+  res.json({ message: 'ปรับแก้ไขข้อมูลการเช็กชื่อสำเร็จเรียบร้อยแล้ว', record });
+});
+
 // Firestore Database Sync Handler
 async function syncFromFirestore() {
   try {
     const fsUsers = await getAllFromFirestore<User>(COLLECTIONS.USERS);
     if (fsUsers && fsUsers.length > 0) {
       for (const u of fsUsers) {
-        if (!DEMO_USER_IDS.has(u.id)) {
-          console.log(`[Firestore Sync Cleanup] Removing non-demo user doc ${u.id} (${u.email})`);
-          await deleteFromFirestore(COLLECTIONS.USERS, u.id);
-        } else {
+        if (u && u.id) {
           users.set(u.id, u);
-        }
-      }
-      // Remove any non-demo users from in-memory Map
-      for (const id of Array.from(users.keys())) {
-        if (!DEMO_USER_IDS.has(id)) {
-          users.delete(id);
         }
       }
     } else {
@@ -1593,6 +2446,16 @@ async function syncFromFirestore() {
     } else {
       for (const ar of attendanceRecords) {
         await saveToFirestore(COLLECTIONS.ATTENDANCE, ar);
+      }
+    }
+
+    const fsLeaves = await getAllFromFirestore<LeaveRequest>(COLLECTIONS.LEAVE_REQUESTS);
+    if (fsLeaves && fsLeaves.length > 0) {
+      leaveRequests.length = 0;
+      leaveRequests.push(...fsLeaves);
+    } else {
+      for (const lr of leaveRequests) {
+        await saveToFirestore(COLLECTIONS.LEAVE_REQUESTS, lr);
       }
     }
 

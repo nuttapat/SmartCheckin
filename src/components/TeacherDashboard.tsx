@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { User, Course, Session, AttendanceRecord, TeacherAttendanceRecord, QuickEvent, InviteLink } from '../types';
-import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, createQuickEvent, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview } from '../services/api';
-import { QrCode, Users, Download, Sparkles, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar } from 'lucide-react';
+import { User, Course, Session, AttendanceRecord, TeacherAttendanceRecord, QuickEvent, InviteLink, CourseMember, CourseMemberRole } from '../types';
+import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, createQuickEvent, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests } from '../services/api';
+import { QrCode, Users, Download, Sparkles, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
 import { TeacherCourseEditModal } from './TeacherCourseEditModal';
+import { TeacherLeaveManagementModal } from './TeacherLeaveManagementModal';
+import { DeleteCourseConfirmModal } from './DeleteCourseConfirmModal';
+import { TeacherInviteModal } from './TeacherInviteModal';
 
 interface TeacherDashboardProps {
   teacher: User;
@@ -26,8 +29,77 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [courseSessions, setCourseSessions] = useState<Session[]>([]);
+  const [currentCourseMembers, setCurrentCourseMembers] = useState<CourseMember[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
+  const [isDeleteCourseModalOpen, setIsDeleteCourseModalOpen] = useState<boolean>(false);
+  const [isInviteTeacherModalOpen, setIsInviteTeacherModalOpen] = useState<boolean>(false);
+  const [isLeaveManagementOpen, setIsLeaveManagementOpen] = useState<boolean>(false);
+  const [pendingLeaveCount, setPendingLeaveCount] = useState<number>(0);
+
+  // Compute teacher role in the currently selected course
+  const teacherRoleInfo = useMemo(() => {
+    if (!selectedCourse) return { role: CourseMemberRole.INSTRUCTOR, isOwner: false, isCoordinator: false, isCoCoordinator: false, isInstructor: true, canEdit: false };
+
+    const isOwner = selectedCourse.ownerId === teacher.id;
+    const member = currentCourseMembers.find((m) => m.userId === teacher.id);
+    const role = member ? member.role : (isOwner ? CourseMemberRole.COORDINATOR : CourseMemberRole.INSTRUCTOR);
+
+    const isCoordinator = isOwner || role === CourseMemberRole.COORDINATOR || role === CourseMemberRole.CO_TEACHER;
+    const isCoCoordinator = role === CourseMemberRole.CO_COORDINATOR;
+    const isInstructor = role === CourseMemberRole.INSTRUCTOR;
+
+    return {
+      role,
+      isOwner,
+      isCoordinator,
+      isCoCoordinator,
+      isInstructor,
+      canEdit: isCoordinator, // Owner & Course Coordinators can edit/delete
+    };
+  }, [selectedCourse, currentCourseMembers, teacher.id]);
+
+  const handleCourseDeleted = async (deletedCourseId: string) => {
+    setIsDeleteCourseModalOpen(false);
+    setIsEditModalOpen(false);
+
+    try {
+      const updatedList = await fetchCourses(teacher.id);
+      setCourses(updatedList);
+
+      if (selectedCourse?.id === deletedCourseId) {
+        if (updatedList.length > 0) {
+          handleSelectCourse(updatedList[0]);
+        } else {
+          setSelectedCourse(null);
+          setCourseSessions([]);
+          setActiveSession(null);
+        }
+      }
+
+      if (dashboardTab === 'COURSE_OVERVIEW') {
+        loadOverviewData();
+      }
+    } catch (err) {
+      console.error('Error refreshing courses after deletion:', err);
+    }
+  };
+
+  const loadPendingLeaveCount = async () => {
+    try {
+      const leaves = await fetchTeacherLeaveRequests(teacher.id);
+      const pending = leaves.filter((l) => l.status === 'PENDING').length;
+      setPendingLeaveCount(pending);
+    } catch (e) {
+      console.error('Failed to load pending leave count:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (teacher.id) {
+      loadPendingLeaveCount();
+    }
+  }, [teacher.id]);
 
   // Active Dynamic QR state
   const [qrToken, setQrToken] = useState<string>('');
@@ -369,6 +441,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     try {
       const details = await fetchCourseDetails(course.id);
       setCourseSessions(details.sessions || []);
+      setCurrentCourseMembers(details.members || []);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRefreshCourseMembers = async () => {
+    if (!selectedCourse) return;
+    try {
+      const details = await fetchCourseDetails(selectedCourse.id);
+      setCurrentCourseMembers(details.members || []);
     } catch (err) {
       console.error(err);
     }
@@ -518,43 +601,56 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           ? 'bg-gradient-to-r from-slate-950 via-slate-900 to-sky-950/50 border-sky-900/40 text-white shadow-2xl' 
           : 'bg-gradient-to-r from-sky-100/80 via-blue-50/70 to-indigo-50/50 border-sky-200/90 text-slate-900 shadow-sm'
       }`}>
-        <div className="space-y-1">
+        <div className="space-y-1 text-left">
           <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-bold border ${
             isDarkMode
               ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
               : 'bg-sky-100 border-sky-200/90 text-sky-900'
           }`}>
             <ShieldCheck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-            <span>Teacher Console • {teacher.universityId ? `Staff ID: ${teacher.universityId}` : teacher.email}</span>
+            <span>Teacher Console</span>
           </div>
           <h1 className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
             ยินดีต้อนรับ, {teacher.title} {teacher.firstNameTh} {teacher.lastNameTh}
           </h1>
-          <p className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-            ระบบจัดการรายวิชาและเปิดสแกน QR Code แบบเรียลไทม์
+          <p className={`text-xs md:text-sm ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+            {teacher.email}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+        <div className="grid grid-cols-2 gap-2.5 w-full sm:w-auto md:ml-auto shrink-0">
           <button
-            onClick={onOpenCreateCourse}
-            className="flex-1 md:flex-initial px-4 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-sky-500/20 active:scale-95 transition border border-sky-300/40 cursor-pointer"
+            onClick={() => setIsLeaveManagementOpen(true)}
+            className="w-full px-4 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-amber-600/20 active:scale-95 transition border border-amber-400/30 cursor-pointer relative whitespace-nowrap"
           >
-            <Plus className="w-4 h-4" />
-            <span>สร้างรายวิชา</span>
+            <FileText className="w-4 h-4 text-white shrink-0" />
+            <span>คำขอลาเรียน</span>
+            {pendingLeaveCount > 0 && (
+              <span className="ml-1 px-2 py-0.5 rounded-full bg-white text-amber-900 font-black text-[10px]">
+                {pendingLeaveCount}
+              </span>
+            )}
           </button>
 
           <button
             onClick={onOpenQuickEvent}
-            className="flex-1 md:flex-initial px-4 py-3 rounded-2xl bg-sky-200 hover:bg-sky-300 text-sky-950 dark:bg-sky-900/70 dark:text-sky-100 dark:hover:bg-sky-800 font-extrabold text-xs flex items-center justify-center space-x-2 shadow-sm active:scale-95 transition border border-sky-300/80 dark:border-sky-700 cursor-pointer"
+            className="w-full px-4 py-3 rounded-2xl bg-sky-200 hover:bg-sky-300 text-sky-950 dark:bg-sky-900/70 dark:text-sky-100 dark:hover:bg-sky-800 font-extrabold text-xs flex items-center justify-center space-x-2 shadow-sm active:scale-95 transition border border-sky-300/80 dark:border-sky-700 cursor-pointer whitespace-nowrap"
           >
-            <Sparkles className="w-4 h-4 text-sky-700 dark:text-sky-300" />
+            <Sparkles className="w-4 h-4 text-sky-700 dark:text-sky-300 shrink-0" />
             <span>เช็คชื่อด่วน</span>
           </button>
 
           <button
+            onClick={onOpenCreateCourse}
+            className="w-full px-4 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-sky-500/20 active:scale-95 transition border border-sky-300/40 cursor-pointer whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            <span>สร้างรายวิชา</span>
+          </button>
+
+          <button
             onClick={handleOpenTeacherCheckin}
-            className="w-full md:w-auto px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-emerald-600/20 active:scale-95 transition border border-emerald-400/30 cursor-pointer"
+            className="w-full px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-emerald-600/20 active:scale-95 transition border border-emerald-400/30 cursor-pointer whitespace-nowrap"
           >
             <UserCheck className="w-4 h-4 text-white shrink-0" />
             <span>ลงชื่อเข้าสอน</span>
@@ -714,9 +810,26 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   isDarkMode ? 'border-slate-800' : 'border-slate-100'
                 }`}>
                   <div>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-sm font-bold text-blue-600 dark:text-blue-400">{selectedCourse.courseCode}</span>
                       <span className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>({selectedCourse.courseName})</span>
+                      
+                      {/* Course Role Badge */}
+                      {teacherRoleInfo.isCoordinator && (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/30 flex items-center gap-1">
+                          👑 ผู้รับผิดชอบรายวิชา (Coordinator)
+                        </span>
+                      )}
+                      {teacherRoleInfo.isCoCoordinator && (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 flex items-center gap-1">
+                          🤝 ผู้ร่วมรับผิดชอบรายวิชา (Co-coordinator)
+                        </span>
+                      )}
+                      {teacherRoleInfo.isInstructor && !teacherRoleInfo.isCoordinator && !teacherRoleInfo.isCoCoordinator && (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                          👨‍🏫 อาจารย์ผู้สอน (Instructor)
+                        </span>
+                      )}
                     </div>
                     <h2 className={`text-lg font-bold mt-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                       รายการสัปดาห์สอน &amp; เปิดเช็คชื่อนักเรียน
@@ -724,12 +837,54 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto ml-auto">
+                    {/* Invite Teachers button - Available for Course Coordinators & Owners */}
+                    {teacherRoleInfo.isCoordinator && (
+                      <button
+                        onClick={() => setIsInviteTeacherModalOpen(true)}
+                        className="px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-500/15 hover:bg-purple-500/25 text-purple-600 dark:text-purple-300 border border-purple-500/30 flex items-center space-x-1.5 transition active:scale-95 cursor-pointer shadow-xs"
+                        title="เชิญอาจารย์และจัดการสิทธิ์รายวิชา"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>เชิญอาจารย์ผู้สอน</span>
+                      </button>
+                    )}
+
                     <button
-                      onClick={() => setIsEditModalOpen(true)}
-                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 flex items-center space-x-1.5 transition active:scale-95"
+                      onClick={() => {
+                        if (teacherRoleInfo.canEdit) {
+                          setIsEditModalOpen(true);
+                        } else {
+                          alert("สิทธิ์ไม่เพียงพอ: เฉพาะผู้รับผิดชอบรายวิชา (Course Coordinator) และเจ้าของรายวิชาเท่านั้นที่มีสิทธิ์แก้ไขข้อมูลรายวิชา\n\nสิทธิ์ของคุณ: " + (teacherRoleInfo.isCoCoordinator ? "ผู้ร่วมรับผิดชอบรายวิชา" : "อาจารย์ผู้สอน") + " สามารถเปิดเช็คชื่อ สร้าง QR Code และดูรายชื่อนักศึกษาได้");
+                        }
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition active:scale-95 cursor-pointer ${
+                        teacherRoleInfo.canEdit
+                          ? 'bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30'
+                          : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 opacity-70'
+                      }`}
+                      title={teacherRoleInfo.canEdit ? "แก้ไขวิชา / เพิ่มลดสัปดาห์" : "เฉพาะผู้รับผิดชอบรายวิชาเท่านั้นที่แก้ไขได้"}
                     >
                       <Edit3 className="w-3.5 h-3.5" />
                       <span>แก้ไขวิชา / เพิ่มลดสัปดาห์</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        if (teacherRoleInfo.canEdit) {
+                          setIsDeleteCourseModalOpen(true);
+                        } else {
+                          alert("สิทธิ์ไม่เพียงพอ: เฉพาะผู้รับผิดชอบรายวิชา (Course Coordinator) และเจ้าของรายวิชาเท่านั้นที่มีสิทธิ์ลบรายวิชา\n\nสิทธิ์ของคุณ: " + (teacherRoleInfo.isCoCoordinator ? "ผู้ร่วมรับผิดชอบรายวิชา" : "อาจารย์ผู้สอน"));
+                        }
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition active:scale-95 cursor-pointer ${
+                        teacherRoleInfo.canEdit
+                          ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30'
+                          : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 opacity-70'
+                      }`}
+                      title={teacherRoleInfo.canEdit ? "ลบรายวิชานี้ถาวร" : "เฉพาะผู้รับผิดชอบรายวิชาเท่านั้นที่ลบรายวิชาได้"}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>ลบรายวิชา</span>
                     </button>
 
                     {/* Export Student Attendance CSV Button */}
@@ -1928,12 +2083,26 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           isOpen={isEditModalOpen}
           onClose={() => setIsEditModalOpen(false)}
           course={selectedCourse}
+          teacherId={teacher.id}
           isDarkMode={isDarkMode}
           onSuccess={(updatedCourse) => {
             setSelectedCourse(updatedCourse);
             loadTeacherCourses();
             handleSelectCourse(updatedCourse);
           }}
+          onDeleteSuccess={handleCourseDeleted}
+        />
+      )}
+
+      {/* Delete Course Confirmation Modal */}
+      {selectedCourse && (
+        <DeleteCourseConfirmModal
+          isOpen={isDeleteCourseModalOpen}
+          onClose={() => setIsDeleteCourseModalOpen(false)}
+          course={selectedCourse}
+          teacherId={teacher.id}
+          isDarkMode={isDarkMode}
+          onSuccess={handleCourseDeleted}
         />
       )}
 
@@ -2707,6 +2876,31 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* Teacher Leave Management Modal */}
+      <TeacherLeaveManagementModal
+        isOpen={isLeaveManagementOpen}
+        onClose={() => {
+          setIsLeaveManagementOpen(false);
+          loadPendingLeaveCount();
+        }}
+        teacher={teacher}
+        courses={courses}
+        isDarkMode={isDarkMode}
+      />
+
+      {/* Teacher Invite & RBAC Management Modal */}
+      {selectedCourse && (
+        <TeacherInviteModal
+          isOpen={isInviteTeacherModalOpen}
+          onClose={() => setIsInviteTeacherModalOpen(false)}
+          course={selectedCourse}
+          currentUserId={teacher.id}
+          courseMembers={currentCourseMembers || []}
+          isDarkMode={isDarkMode}
+          onMembersUpdated={handleRefreshCourseMembers}
+          onRefresh={handleRefreshCourseMembers}
+        />
       )}
     </div>
   );

@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, AttendanceRecord, Course, Session } from '../types';
 import { fetchStudentStats, submitCheckin, fetchActiveSessions } from '../services/api';
-import { QrCode, Camera, CheckCircle2, AlertTriangle, ShieldX, MapPin, Clock, Award, ChevronRight, RefreshCw, X, ShieldCheck, Navigation, Sparkles, Image, Plus, KeyRound } from 'lucide-react';
+import { QrCode, Camera, CheckCircle2, AlertTriangle, ShieldX, MapPin, Clock, Award, ChevronRight, RefreshCw, X, ShieldCheck, Navigation, Sparkles, Image, Plus, KeyRound, FileText } from 'lucide-react';
 import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
+import { getDeviceInfo } from '../utils/deviceHelper';
+import { StudentLeaveModal } from './StudentLeaveModal';
 
 interface StudentDashboardProps {
   student: User;
@@ -28,6 +30,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
   const [coursesStats, setCoursesStats] = useState<StudentCourseItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [selectedCourseHistory, setSelectedCourseHistory] = useState<StudentCourseItem | null>(null);
+  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState<boolean>(false);
 
   // Scanner modal & checkin options state
   const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
@@ -246,6 +249,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
         }
       }
 
+      const devInfo = getDeviceInfo();
       const res = await submitCheckin({
         sessionId,
         eventId,
@@ -253,7 +257,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
         studentId: student.id,
         scannedLat: lat,
         scannedLng: lng,
-        deviceId: student.deviceId || `dev_${student.id}`,
+        deviceId: devInfo.deviceId,
+        deviceName: devInfo.deviceName,
+        deviceType: devInfo.deviceType,
+        browser: devInfo.browser,
+        os: devInfo.os,
         checkinMode: mode,
       });
 
@@ -290,14 +298,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
         <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-sky-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
-          <div className="space-y-2">
+          <div className="space-y-2 text-left">
             <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-bold border ${
               isDarkMode
                 ? 'bg-slate-800 border-slate-700 text-sky-300'
                 : 'bg-sky-100 border-sky-200 text-sky-900'
             }`}>
               <ShieldCheck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-              <span>Student Profile Verified</span>
+              <span>Student Console</span>
             </div>
             <h1 className={`text-2xl md:text-3xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
               สวัสดี, {student.title} {student.firstNameTh} {student.lastNameTh}
@@ -308,10 +316,23 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
           </div>
 
           {/* Action Buttons in Welcome Banner */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto shrink-0">
+          <div className="flex flex-col items-stretch gap-3 w-full md:w-auto md:ml-auto shrink-0">
+            <button
+              onClick={() => setIsLeaveModalOpen(true)}
+              className="px-5 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs flex items-center justify-start space-x-3 shadow-md shadow-amber-500/20 active:scale-95 transition border border-amber-500/30 w-full cursor-pointer"
+            >
+              <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                <FileText className="w-5 h-5 text-white" />
+              </div>
+              <div className="text-left">
+                <div className="text-sm font-black leading-none">แจ้งลาเรียน</div>
+                <div className="text-[10px] opacity-90 font-medium mt-0.5">ยื่นใบลาป่วย / ลากิจส่งอาจารย์</div>
+              </div>
+            </button>
+
             <button
               onClick={onOpenJoinCourse}
-              className="px-5 py-3 rounded-2xl bg-sky-600 hover:bg-sky-500 text-white font-extrabold text-xs flex items-center justify-center space-x-3 shadow-md shadow-sky-500/20 active:scale-95 transition border border-sky-500/30 grow sm:grow-0 cursor-pointer"
+              className="px-5 py-3 rounded-2xl bg-sky-600 hover:bg-sky-500 text-white font-extrabold text-xs flex items-center justify-start space-x-3 shadow-md shadow-sky-500/20 active:scale-95 transition border border-sky-500/30 w-full cursor-pointer"
             >
               <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
                 <Plus className="w-5 h-5 text-white" />
@@ -324,7 +345,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
 
             <button
               onClick={() => openCheckinModal('HYBRID')}
-              className="px-5 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs flex items-center justify-center space-x-3 shadow-md shadow-blue-500/20 active:scale-95 transition border border-blue-500/30 grow sm:grow-0 cursor-pointer"
+              className="px-5 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs flex items-center justify-start space-x-3 shadow-md shadow-blue-500/20 active:scale-95 transition border border-blue-500/30 w-full cursor-pointer"
             >
               <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
                 <Camera className="w-5 h-5 text-white" />
@@ -874,6 +895,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
           </div>
         </div>
       )}
+      {/* Student Leave Modal */}
+      <StudentLeaveModal
+        isOpen={isLeaveModalOpen}
+        onClose={() => setIsLeaveModalOpen(false)}
+        student={student}
+        courses={coursesStats.map((c) => c.course)}
+        isDarkMode={isDarkMode}
+      />
     </div>
   );
 };

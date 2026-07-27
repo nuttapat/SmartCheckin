@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, UserRole } from '../types';
 import { loginUser, forgotPassword, googleLogin } from '../services/api';
 import { signInWithGooglePopup } from '../lib/firebaseStore';
-import { QrCode, Mail, LogIn, UserPlus, ShieldAlert, Sun, Moon, Lock, Eye, EyeOff, User as UserIcon, KeyRound, CheckCircle2, X, Sparkles } from 'lucide-react';
+import { QrCode, Mail, LogIn, UserPlus, ShieldAlert, Sun, Moon, Lock, Eye, EyeOff, User as UserIcon, KeyRound, CheckCircle2, X, Sparkles, Bot } from 'lucide-react';
 
 interface LoginPageProps {
   onLoginSuccess: (user: User) => void;
@@ -10,6 +10,7 @@ interface LoginPageProps {
   allUsers: User[];
   isDarkMode: boolean;
   onToggleTheme: () => void;
+  onOpenTestingAgent?: () => void;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({
@@ -18,6 +19,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   allUsers,
   isDarkMode,
   onToggleTheme,
+  onOpenTestingAgent,
 }) => {
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -29,6 +31,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   // Fallback Google Modal state if popup blocked
   const [isGoogleModalOpen, setIsGoogleModalOpen] = useState<boolean>(false);
   const [googleEmailInput, setGoogleEmailInput] = useState<string>('');
+  const [googlePasswordInput, setGooglePasswordInput] = useState<string>('');
+  const [googleConfirmPasswordInput, setGoogleConfirmPasswordInput] = useState<string>('');
+  const [showGooglePassword, setShowGooglePassword] = useState<boolean>(false);
+  const [showGoogleConfirmPassword, setShowGoogleConfirmPassword] = useState<boolean>(false);
   const [googleNameInput, setGoogleNameInput] = useState<string>('');
   const [googleRoleSelect, setGoogleRoleSelect] = useState<UserRole>(UserRole.STUDENT);
   const [googleTitleOption, setGoogleTitleOption] = useState<string>('นาย');
@@ -98,6 +104,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       return;
     }
 
+    if (!googlePasswordInput.trim() || googlePasswordInput.trim().length < 6) {
+      setErrorMsg('กรุณากำหนดรหัสผ่านใหม่สำหรับเข้าสู่ระบบด้วยอีเมล อย่างน้อย 6 ตัวอักษร');
+      return;
+    }
+
+    if (googlePasswordInput.trim() !== googleConfirmPasswordInput.trim()) {
+      setErrorMsg('รหัสผ่านและยืนยันรหัสผ่านไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง');
+      return;
+    }
+
     const finalTitle = googleTitleOption === 'CUSTOM' ? googleCustomTitle.trim() : googleTitleOption;
     if (!finalTitle) {
       setErrorMsg('กรุณาระบุคำนำหน้าชื่อ');
@@ -126,7 +142,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         googleFirstNameTh.trim(),
         googleLastNameTh.trim(),
         googleFirstNameEn.trim() || googleFirstNameTh.trim(),
-        googleLastNameEn.trim() || googleLastNameTh.trim()
+        googleLastNameEn.trim() || googleLastNameTh.trim(),
+        googlePasswordInput.trim()
       );
 
       if (res.user) {
@@ -435,7 +452,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 >
                   <div className="flex items-center space-x-2.5">
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
-                      u.role === UserRole.TEACHER ? 'bg-sky-500/20 text-sky-400' : 'bg-emerald-500/20 text-emerald-400'
+                      u.role === UserRole.ADMIN 
+                        ? 'bg-purple-500/20 text-purple-400'
+                        : u.role === UserRole.TEACHER 
+                        ? 'bg-sky-500/20 text-sky-400' 
+                        : 'bg-emerald-500/20 text-emerald-400'
                     }`}>
                       <UserIcon className="w-3.5 h-3.5" />
                     </div>
@@ -450,11 +471,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     </div>
                   </div>
                   <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${
-                    u.role === UserRole.TEACHER 
+                    u.role === UserRole.ADMIN
+                      ? 'bg-purple-500/15 text-purple-600 dark:text-purple-300'
+                      : u.role === UserRole.TEACHER 
                       ? 'bg-sky-500/15 text-sky-600 dark:text-sky-300' 
                       : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
                   }`}>
-                    {u.role === UserRole.TEACHER ? 'อาจารย์' : 'นักศึกษา'}
+                    {u.role === UserRole.ADMIN ? 'ผู้ดูแลระบบ' : u.role === UserRole.TEACHER ? 'อาจารย์' : 'นักศึกษา'}
                   </span>
                 </button>
               ))}
@@ -463,7 +486,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         )}
 
         {/* Footer Credit & Copyright Info */}
-        <div className={`mt-8 pt-4 border-t text-center space-y-1 ${
+        <div className={`mt-8 pt-4 border-t text-center space-y-2 ${
           isDarkMode ? 'border-slate-800/60 text-slate-500' : 'border-slate-200/80 text-slate-500'
         }`}>
           <p className="text-xs font-extrabold text-slate-900 dark:text-slate-100">
@@ -472,6 +495,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           <p className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
             อัปเดตล่าสุด: 26 กรกฎาคม 2569
           </p>
+          {onOpenTestingAgent && (
+            <div className="pt-2 flex justify-center">
+              <button
+                onClick={onOpenTestingAgent}
+                className={`inline-flex items-center space-x-2 px-4 py-2 rounded-2xl border text-xs font-bold transition shadow-sm cursor-pointer ${
+                  isDarkMode 
+                    ? 'bg-gradient-to-r from-sky-500/20 via-blue-500/20 to-indigo-500/20 text-sky-300 border-sky-500/40 hover:border-sky-400 hover:bg-sky-500/30' 
+                    : 'bg-gradient-to-r from-sky-50 via-blue-50 to-indigo-50 text-sky-900 border-sky-300 hover:bg-sky-100'
+                }`}
+                title="เปิด Agent ทดสอบระบบอัจฉริยะ (System QA Agent)"
+              >
+                <Bot className="w-4 h-4 text-sky-500 shrink-0" />
+                <span>🤖 Agent ทดสอบระบบ</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -712,6 +751,66 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 />
               </div>
 
+              {/* Password for Email Login & Confirm Password */}
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      กำหนดรหัสผ่านใหม่ <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showGooglePassword ? 'text' : 'password'}
+                        placeholder="อย่างน้อย 6 ตัวอักษร"
+                        value={googlePasswordInput}
+                        onChange={(e) => setGooglePasswordInput(e.target.value)}
+                        required
+                        minLength={6}
+                        className={`w-full border rounded-xl px-3 py-2 pr-9 text-xs focus:outline-none focus:border-emerald-500 ${
+                          isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowGooglePassword(!showGooglePassword)}
+                        className={`absolute right-2.5 top-2.5 transition ${isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                      >
+                        {showGooglePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      ยืนยันรหัสผ่านอีกครั้ง <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showGoogleConfirmPassword ? 'text' : 'password'}
+                        placeholder="พิมพ์รหัสผ่านเดิมซ้ำ"
+                        value={googleConfirmPasswordInput}
+                        onChange={(e) => setGoogleConfirmPasswordInput(e.target.value)}
+                        required
+                        minLength={6}
+                        className={`w-full border rounded-xl px-3 py-2 pr-9 text-xs focus:outline-none focus:border-emerald-500 ${
+                          isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowGoogleConfirmPassword(!showGoogleConfirmPassword)}
+                        className={`absolute right-2.5 top-2.5 transition ${isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                      >
+                        {showGoogleConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <p className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  💡 รหัสผ่านนี้จะใช้สำหรับการเข้าสู่ระบบด้วย Email ({googleEmailInput || 'ของคุณ'}) ในครั้งถัดไป
+                </p>
+              </div>
+
               <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800/40">
                 <button
                   type="button"
@@ -837,6 +936,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           </div>
         </div>
       )}
+
+
     </div>
   );
 };

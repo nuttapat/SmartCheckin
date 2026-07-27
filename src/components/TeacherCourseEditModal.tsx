@@ -3,12 +3,15 @@ import { Course, TeachingWeek, Semester } from '../types';
 import { updateCourse } from '../services/api';
 import { X, BookOpen, Plus, Trash2, Calendar, Save, CheckCircle2, MapPin, Globe } from 'lucide-react';
 import { MapPicker } from './MapPicker';
+import { DeleteCourseConfirmModal } from './DeleteCourseConfirmModal';
 
 interface TeacherCourseEditModalProps {
   isOpen: boolean;
   onClose: () => void;
   course: Course;
   onSuccess: (updatedCourse: Course) => void;
+  onDeleteSuccess?: (courseId: string) => void;
+  teacherId?: string;
   isDarkMode?: boolean;
 }
 
@@ -17,6 +20,8 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   onClose,
   course,
   onSuccess,
+  onDeleteSuccess,
+  teacherId,
   isDarkMode = true,
 }) => {
   const [courseCode, setCourseCode] = useState<string>(course.courseCode);
@@ -32,6 +37,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [successMsg, setSuccessMsg] = useState<string>('');
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
     setCourseCode(course.courseCode);
@@ -421,27 +427,54 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
           </div>
 
           {/* Modal Actions */}
-          <div className={`flex justify-end space-x-3 pt-4 border-t ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
+          <div className={`flex items-center justify-between pt-4 border-t ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
             <button
               type="button"
-              onClick={onClose}
-              className={`px-4 py-2.5 rounded-xl text-xs font-semibold ${
-                isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={() => setIsDeleteModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-500/10 border border-rose-500/25 flex items-center space-x-1.5 transition active:scale-95 cursor-pointer"
             >
-              ยกเลิก
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>ลบรายวิชานี้</span>
             </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-400 hover:to-teal-400 text-white shadow-lg shadow-sky-500/20 flex items-center space-x-2 transition active:scale-95 disabled:opacity-50"
-            >
-              <Save className="w-4 h-4" />
-              <span>{loading ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}</span>
-            </button>
+
+            <div className="flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className={`px-4 py-2.5 rounded-xl text-xs font-semibold ${
+                  isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-400 hover:to-teal-400 text-white shadow-lg shadow-sky-500/20 flex items-center space-x-2 transition active:scale-95 disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                <span>{loading ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>
+
+      {/* Delete Course Confirmation Modal */}
+      <DeleteCourseConfirmModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        course={course}
+        teacherId={teacherId || ''}
+        isDarkMode={isDarkMode}
+        onSuccess={(deletedId) => {
+          setIsDeleteModalOpen(false);
+          onClose();
+          if (onDeleteSuccess) {
+            onDeleteSuccess(deletedId);
+          }
+        }}
+      />
     </div>
   );
 };
