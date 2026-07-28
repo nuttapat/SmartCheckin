@@ -78,8 +78,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
     try {
       const data = await fetchActiveSessions();
       setActiveSessionsList(data);
-      if (data.length > 0 && !selectedSessionId) {
-        setSelectedSessionId(data[0].session.id);
+      if (data.length > 0) {
+        if (!selectedSessionId || !data.some((d) => d.session.id === selectedSessionId)) {
+          setSelectedSessionId(data[0].session.id);
+        }
       }
     } catch (err) {
       console.error('Failed to load active sessions:', err);
@@ -120,14 +122,21 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
     updateLocation();
   }, [student.id]);
 
+  const stopLiveCamera = async () => {
+    if (html5QrCodeInstanceRef.current) {
+      const instance = html5QrCodeInstanceRef.current;
+      html5QrCodeInstanceRef.current = null;
+      try {
+        await instance.stop();
+      } catch (e) {
+        // Ignore errors if camera already stopped or container unmounted
+      }
+    }
+  };
+
   const startLiveCameraStream = async () => {
     try {
-      if (html5QrCodeInstanceRef.current) {
-        try {
-          await html5QrCodeInstanceRef.current.stop();
-        } catch (e) {}
-        html5QrCodeInstanceRef.current = null;
-      }
+      await stopLiveCamera();
 
       const container = document.getElementById('qr-reader');
       if (!container) return;
@@ -140,16 +149,16 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
         { fps: 10, qrbox: { width: 220, height: 220 } },
         (decodedText) => {
           setScannedResult(decodedText);
-          try {
-            html5QrCode.stop();
-          } catch (e) {}
-          handleProcessCheckin(decodedText, checkinMode);
+          stopLiveCamera();
+          handleProcessCheckin(decodedText, 'HYBRID');
         },
         () => {}
       );
     } catch (err) {
       console.warn('Environment camera failed, trying default camera:', err);
       try {
+        const container = document.getElementById('qr-reader');
+        if (!container) return;
         if (!html5QrCodeInstanceRef.current) {
           html5QrCodeInstanceRef.current = new Html5Qrcode('qr-reader');
         }
@@ -158,10 +167,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
           { fps: 10, qrbox: { width: 220, height: 220 } },
           (decodedText) => {
             setScannedResult(decodedText);
-            try {
-              html5QrCodeInstanceRef.current?.stop();
-            } catch (e) {}
-            handleProcessCheckin(decodedText, checkinMode);
+            stopLiveCamera();
+            handleProcessCheckin(decodedText, 'HYBRID');
           },
           () => {}
         );
@@ -180,18 +187,22 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
 
       return () => {
         clearTimeout(timer);
-        if (html5QrCodeInstanceRef.current) {
-          html5QrCodeInstanceRef.current.stop().catch(() => {});
-          html5QrCodeInstanceRef.current = null;
-        }
+        stopLiveCamera();
       };
     } else {
-      if (html5QrCodeInstanceRef.current) {
-        html5QrCodeInstanceRef.current.stop().catch(() => {});
-        html5QrCodeInstanceRef.current = null;
-      }
+      stopLiveCamera();
     }
   }, [isScannerOpen, checkinMode]);
+
+  const handleSwitchTab = async (newMode: 'HYBRID' | 'GPS_ONLY' | 'TOKEN') => {
+    setCheckinStatus(null);
+    if (checkinMode === 'HYBRID' && newMode !== 'HYBRID') {
+      await stopLiveCamera();
+    }
+    setCheckinMode(newMode);
+    loadActiveSessions();
+    updateLocation();
+  };
 
   const openCheckinModal = (initialMode: 'HYBRID' | 'GPS_ONLY' | 'TOKEN' = 'HYBRID') => {
     setCheckinStatus(null);
@@ -601,10 +612,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
               {/* Position 1 (Far Left / Default): QR + GPS */}
               <button
                 type="button"
-                onClick={() => {
-                  setCheckinStatus(null);
-                  setCheckinMode('HYBRID');
-                }}
+                onClick={() => handleSwitchTab('HYBRID')}
                 className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition flex flex-col sm:flex-row items-center justify-center space-x-1 ${
                   checkinMode === 'HYBRID'
                     ? 'bg-sky-600 text-white shadow-sm'
@@ -620,10 +628,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
               {/* Position 2 (Middle): GPS อย่างเดียว */}
               <button
                 type="button"
-                onClick={() => {
-                  setCheckinStatus(null);
-                  setCheckinMode('GPS_ONLY');
-                }}
+                onClick={() => handleSwitchTab('GPS_ONLY')}
                 className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition flex flex-col sm:flex-row items-center justify-center space-x-1 ${
                   checkinMode === 'GPS_ONLY'
                     ? 'bg-blue-600 text-white shadow-sm'
@@ -639,10 +644,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
               {/* Position 3 (Far Right): รหัสเข้าชั้นเรียน (Token) */}
               <button
                 type="button"
-                onClick={() => {
-                  setCheckinStatus(null);
-                  setCheckinMode('TOKEN');
-                }}
+                onClick={() => handleSwitchTab('TOKEN')}
                 className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition flex flex-col sm:flex-row items-center justify-center space-x-1 ${
                   checkinMode === 'TOKEN'
                     ? 'bg-indigo-600 text-white shadow-sm'
@@ -657,65 +659,63 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
             </div>
 
             {/* MODE 1: QR + GPS SCANNER (DEFAULT / FAR LEFT) */}
-            {checkinMode === 'HYBRID' && (
-              <div className="space-y-4">
-                {/* Live Camera Scanner Viewport */}
-                <div className={`relative rounded-2xl overflow-hidden border min-h-[200px] ${
-                  isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-900 border-slate-300'
-                }`}>
-                  <div id="qr-reader" className="w-full"></div>
-                  <div id="qr-reader-file-temp" className="hidden"></div>
-                </div>
-
-                {/* Native Mobile Camera Photo Upload Fallback */}
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={handleFileUploadScan}
-                />
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isImageProcessing}
-                    className="w-full py-2.5 px-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-2 shadow-sm transition cursor-pointer"
-                  >
-                    <Image className="w-4 h-4" />
-                    <span>{isImageProcessing ? 'กำลังประมวลผลรูป...' : '📷 ถ่ายรูป / อัปโหลด QR Code'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => startLiveCameraStream()}
-                    className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 border transition cursor-pointer ${
-                      isDarkMode
-                        ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
-                    }`}
-                  >
-                    <Camera className="w-4 h-4 text-sky-600" />
-                    <span>ขอเปิดกล้องไลฟ์สดอีกครั้ง</span>
-                  </button>
-                </div>
-
-                <div className={`p-2.5 rounded-xl border text-[11px] space-y-1 ${
-                  isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-sky-50/70 border-sky-200 text-slate-700'
-                }`}>
-                  <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
-                    💡 หากเบราว์เซอร์ไม่แสดง Pop-up ขออนุญาตเข้าถึงกล้อง:
-                  </p>
-                  <ul className="list-disc list-inside space-y-0.5 text-[10px]">
-                    <li><b>iOS Safari:</b> ไปที่ Setting -&gt; Safari -&gt; Camera -&gt; เลือก "Allow"</li>
-                    <li><b>Android Chrome:</b> กดไอคอนกุญแจ/การตั้งค่ามุมซ้ายบนแถบ URL -&gt; Permissions -&gt; Allow Camera</li>
-                    <li>หรือกดปุ่ม <b>"ถ่ายรูป / อัปโหลด QR Code"</b> ด้านบนเพื่อใช้แอปกล้องของเครื่องสแกนได้ทันที</li>
-                  </ul>
-                </div>
+            <div className={checkinMode === 'HYBRID' ? 'space-y-4' : 'hidden'}>
+              {/* Live Camera Scanner Viewport */}
+              <div className={`relative rounded-2xl overflow-hidden border min-h-[200px] ${
+                isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-900 border-slate-300'
+              }`}>
+                <div id="qr-reader" className="w-full"></div>
+                <div id="qr-reader-file-temp" className="hidden"></div>
               </div>
-            )}
+
+              {/* Native Mobile Camera Photo Upload Fallback */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handleFileUploadScan}
+              />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isImageProcessing}
+                  className="w-full py-2.5 px-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-2 shadow-sm transition cursor-pointer"
+                >
+                  <Image className="w-4 h-4" />
+                  <span>{isImageProcessing ? 'กำลังประมวลผลรูป...' : '📷 ถ่ายรูป / อัปโหลด QR Code'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => startLiveCameraStream()}
+                  className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 border transition cursor-pointer ${
+                    isDarkMode
+                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+                  }`}
+                >
+                  <Camera className="w-4 h-4 text-sky-600" />
+                  <span>ขอเปิดกล้องไลฟ์สดอีกครั้ง</span>
+                </button>
+              </div>
+
+              <div className={`p-2.5 rounded-xl border text-[11px] space-y-1 ${
+                isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-sky-50/70 border-sky-200 text-slate-700'
+              }`}>
+                <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
+                  💡 หากเบราว์เซอร์ไม่แสดง Pop-up ขออนุญาตเข้าถึงกล้อง:
+                </p>
+                <ul className="list-disc list-inside space-y-0.5 text-[10px]">
+                  <li><b>iOS Safari:</b> ไปที่ Setting -&gt; Safari -&gt; Camera -&gt; เลือก "Allow"</li>
+                  <li><b>Android Chrome:</b> กดไอคอนกุญแจ/การตั้งค่ามุมซ้ายบนแถบ URL -&gt; Permissions -&gt; Allow Camera</li>
+                  <li>หรือกดปุ่ม <b>"ถ่ายรูป / อัปโหลด QR Code"</b> ด้านบนเพื่อใช้แอปกล้องของเครื่องสแกนได้ทันที</li>
+                </ul>
+              </div>
+            </div>
 
             {/* MODE 2: GPS ONLY CHECK-IN (MIDDLE) */}
             {checkinMode === 'GPS_ONLY' && (

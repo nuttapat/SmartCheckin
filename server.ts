@@ -908,6 +908,15 @@ app.put('/api/courses/:id', (req, res) => {
   const courseLat = course.defaultLat || 13.7988363;
   const courseLng = course.defaultLng || 100.322944;
 
+  // Synchronize all existing sessions with course default location
+  Array.from(sessions.values()).forEach((s) => {
+    if (s.courseId === courseId) {
+      s.teacherLat = courseLat;
+      s.teacherLng = courseLng;
+      sessions.set(s.id, s);
+    }
+  });
+
   if (Array.isArray(weeks)) {
     course.weeks = weeks;
 
@@ -1314,11 +1323,28 @@ app.post('/api/sessions/:id/activate', (req, res) => {
     return res.status(404).json({ error: 'Session not found' });
   }
 
+  const course = courses.get(session.courseId);
+
   session.isActive = true;
   session.isGpsCheckEnabled = isGpsCheckEnabled !== false;
-  if (teacherLat && teacherLng) {
-    session.teacherLat = parseFloat(teacherLat);
-    session.teacherLng = parseFloat(teacherLng);
+
+  let inputLat = teacherLat !== undefined ? parseFloat(teacherLat) : NaN;
+  let inputLng = teacherLng !== undefined ? parseFloat(teacherLng) : NaN;
+
+  // If teacher Lat/Lng passed is missing, generic default, or uncalibrated, prefer course classroom location
+  if (isNaN(inputLat) || isNaN(inputLng) || (Math.abs(inputLat - 13.7563) < 0.05 && Math.abs(inputLng - 100.5018) < 0.05)) {
+    if (course && course.defaultLat && course.defaultLng) {
+      inputLat = course.defaultLat;
+      inputLng = course.defaultLng;
+    }
+  }
+
+  if (!isNaN(inputLat) && !isNaN(inputLng)) {
+    session.teacherLat = inputLat;
+    session.teacherLng = inputLng;
+  } else if (course && course.defaultLat && course.defaultLng) {
+    session.teacherLat = course.defaultLat;
+    session.teacherLng = course.defaultLng;
   }
 
   // Generate immediate active QR token (6 characters)
@@ -1432,13 +1458,21 @@ app.post('/api/checkin', (req, res) => {
   const course = courses.get(session.courseId);
   const isGenericDefault = (lat?: number, lng?: number) =>
     lat === undefined || lng === undefined || isNaN(lat) || isNaN(lng) ||
-    (Math.abs(lat - 13.7563) < 0.001 && Math.abs(lng - 100.5018) < 0.001);
+    (Math.abs(lat - 13.7563) < 0.05 && Math.abs(lng - 100.5018) < 0.05);
 
   let lat1 = activeQR ? activeQR.lat : session.teacherLat;
   let lon1 = activeQR ? activeQR.lng : session.teacherLng;
 
-  // If session or activeQR coordinates are uncalibrated generic defaults, prioritize course classroom location
-  if (course && course.defaultLat && course.defaultLng && isGenericDefault(lat1, lon1)) {
+  // In GPS_ONLY mode or when coordinates are generic defaults, prioritize course's registered classroom location
+  if (checkinMode === 'GPS_ONLY') {
+    if (course && course.defaultLat && course.defaultLng) {
+      lat1 = course.defaultLat;
+      lon1 = course.defaultLng;
+    } else if (session.teacherLat !== undefined && session.teacherLng !== undefined) {
+      lat1 = session.teacherLat;
+      lon1 = session.teacherLng;
+    }
+  } else if (course && course.defaultLat && course.defaultLng && isGenericDefault(lat1, lon1)) {
     lat1 = course.defaultLat;
     lon1 = course.defaultLng;
   }
