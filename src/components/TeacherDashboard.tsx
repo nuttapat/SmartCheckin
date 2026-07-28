@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { User, Course, Session, AttendanceRecord, TeacherAttendanceRecord, QuickEvent, InviteLink, CourseMember, CourseMemberRole } from '../types';
-import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, createQuickEvent, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck } from '../services/api';
-import { QrCode, Users, Download, Sparkles, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown } from 'lucide-react';
+import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, createQuickEvent, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck, toggleQrMode } from '../services/api';
+import { QrCode, Users, Download, Sparkles, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown, EyeOff, Eye, Lock } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
@@ -111,6 +111,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [liveCheckins, setLiveCheckins] = useState<AttendanceRecord[]>([]);
   const [isGpsCheckEnabled, setIsGpsCheckEnabled] = useState<boolean>(true);
+  const [isStaticQr, setIsStaticQr] = useState<boolean>(false);
+  const [isQrModalOpen, setIsQrModalOpen] = useState<boolean>(true);
+  const [sessionDurationMinutes, setSessionDurationMinutes] = useState<number>(30);
+  const [lateThresholdMinutes, setLateThresholdMinutes] = useState<number>(15);
   const [qrCountdown, setQrCountdown] = useState<number>(30);
   const [teacherCoords, setTeacherCoords] = useState<{ lat: number; lng: number }>(() => {
     try {
@@ -479,6 +483,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         if (payload.type === 'QR_REFRESH') {
           const newToken = payload.data.token;
           setQrToken(newToken);
+          if (payload.data.isStatic !== undefined) {
+            setIsStaticQr(payload.data.isStatic);
+          }
           setQrCountdown(30);
 
           // Generate QR Code Data URL image
@@ -498,16 +505,24 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   };
 
   // Launch Active Session QR Code
-  const handleStartSessionQR = async (session: Session) => {
+  const handleStartSessionQR = async (
+    session: Session,
+    duration: number = sessionDurationMinutes,
+    lateThreshold: number = lateThresholdMinutes
+  ) => {
     try {
       setActiveSession(session);
+      setIsQrModalOpen(true);
       setLiveCheckins([]);
 
       // Prioritize classroom location specified for this course or session
       let currentLat = session.teacherLat || selectedCourse?.defaultLat || teacherCoords.lat;
       let currentLng = session.teacherLng || selectedCourse?.defaultLng || teacherCoords.lng;
 
-      const res = await activateSession(session.id, currentLat, currentLng, isGpsCheckEnabled);
+      const res = await activateSession(session.id, currentLat, currentLng, isGpsCheckEnabled, duration, lateThreshold, isStaticQr);
+      if (res.isStatic !== undefined) {
+        setIsStaticQr(res.isStatic);
+      }
 
       // Render initial QR
       const initialText = `SES:${session.id}:${res.qrToken || 'active'}`;
@@ -522,6 +537,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
   };
 
+  // Update duration / late threshold on active session
+  const handleUpdateDurationAndLate = async (newDuration: number, newLateThreshold: number) => {
+    setSessionDurationMinutes(newDuration);
+    setLateThresholdMinutes(newLateThreshold);
+    if (activeSession) {
+      let currentLat = activeSession.teacherLat || selectedCourse?.defaultLat || teacherCoords.lat;
+      let currentLng = activeSession.teacherLng || selectedCourse?.defaultLng || teacherCoords.lng;
+      await activateSession(activeSession.id, currentLat, currentLng, isGpsCheckEnabled, newDuration, newLateThreshold);
+    }
+  };
+
   // Close QR Session
   const handleStopSessionQR = async () => {
     if (activeSession) {
@@ -531,6 +557,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     if (quickEventModal) {
       setQuickEventModal(null);
     }
+    setIsQrModalOpen(false);
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -719,7 +746,47 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
       {/* VIEW TAB 1: STUDENT ATTENDANCE MANAGEMENT */}
       {dashboardTab === 'STUDENT_ATTENDANCE' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="space-y-4">
+          {/* ACTIVE BACKGROUND SESSION NOTIFICATION BANNER */}
+          {activeSession && !isQrModalOpen && (
+            <div className="p-4 rounded-2xl bg-emerald-600 text-white shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3 border border-emerald-400/50">
+              <div className="flex items-center space-x-3 text-xs font-bold">
+                <div className="w-3.5 h-3.5 rounded-full bg-white animate-ping shrink-0"></div>
+                <div>
+                  <p className="font-extrabold text-sm flex items-center space-x-2">
+                    <span>🟢 ระบบกำลังเปิดรับเช็คชื่อในพื้นหลัง</span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-800 text-[10px] font-mono">
+                      0 - {lateThresholdMinutes}m (ตรงเวลา) | {lateThresholdMinutes} - {sessionDurationMinutes}m (สาย)
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-emerald-100 font-normal">
+                    {selectedCourse ? `${selectedCourse.courseCode} (${selectedCourse.courseName}) - สัปดาห์ที่ ${activeSession.weekNumber}` : 'วิชาที่เลือก'} •
+                    นักศึกษาที่มาสายยังคงสามารถเช็คอินด้วย GPS Only ในห้องเรียนได้โดยที่อาจารย์ไม่ต้องเปิด QR Code ใหม่
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 shrink-0 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsQrModalOpen(true)}
+                  className="px-3.5 py-2 bg-white text-emerald-950 font-bold rounded-xl text-xs hover:bg-emerald-50 transition shadow-xs flex items-center space-x-1 cursor-pointer"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>เปิดหน้าจอ QR</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStopSessionQR}
+                  className="px-3.5 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-xl text-xs transition shadow-xs flex items-center space-x-1 cursor-pointer"
+                >
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                  <span>ปิดระบบ</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column: Course Selector & Settings */}
           <div className="space-y-4">
             <div className={`rounded-2xl p-5 space-y-4 border ${
@@ -919,6 +986,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </div>
           )}
         </div>
+      </div>
       </div>
       )}
 
@@ -1828,7 +1896,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       )}
 
       {/* DYNAMIC QR DISPLAY MODAL / SCREEN (Active QR Session or Quick Event) */}
-      {(activeSession || quickEventModal) && (
+      {(activeSession || quickEventModal) && isQrModalOpen && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
           <div className={`border rounded-2xl sm:rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
@@ -1846,46 +1914,134 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       : `กำลังเปิดสแกน: ${selectedCourse?.courseCode} - สัปดาห์ที่ ${activeSession?.weekNumber}`}
                   </h3>
                   <p className={`text-[11px] sm:text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Dynamic QR Code เปลี่ยนรหัสอัตโนมัติทุก 30 วินาที • ป้องกันการถ่ายรูปส่งให้เพื่อน
+                    {isStaticQr
+                      ? '📌 Static QR Code: รหัสคงที่ตลอดคลาส'
+                      : '🔄 Dynamic QR Code: เปลี่ยนรหัสอัตโนมัติทุก 30 วินาที'}
                   </p>
                 </div>
               </div>
 
-              <button
-                onClick={handleStopSessionQR}
-                className="w-full sm:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition shadow-sm active:scale-95 shrink-0"
-              >
-                <Square className="w-3.5 h-3.5 fill-current" />
-                <span>ปิดหน้าจอรับเช็คชื่อ</span>
-              </button>
+              <div className="flex items-center space-x-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsQrModalOpen(false)}
+                  className="px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition shadow-sm cursor-pointer"
+                  title="ย่อหน้าจอเพื่อเริ่มการสอน (นักศึกษายังคงเช็คอินด้วย GPS Only ได้โดยไม่ต้องเปิด QR ใหม่)"
+                >
+                  <EyeOff className="w-3.5 h-3.5 text-sky-400" />
+                  <span>ย่อหน้าจอ (ให้ นศ. เช็คอินผ่าน GPS)</span>
+                </button>
+
+                <button
+                  onClick={handleStopSessionQR}
+                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition shadow-sm active:scale-95 cursor-pointer"
+                >
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                  <span>ปิดระบบ</span>
+                </button>
+              </div>
             </div>
 
             {/* Modal Body Grid */}
             <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 items-start overflow-y-auto">
-              {/* Dynamic QR Code Canvas Display */}
+              {/* Dynamic / Static QR Code Canvas Display */}
               <div className={`flex flex-col items-center justify-center p-4 sm:p-6 rounded-2xl border space-y-4 ${
                 isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-100/70 border-slate-200'
               }`}>
+                {/* Minimal Segment Toggle Switch: Dynamic / Static */}
+                <div className={`inline-flex p-1 border rounded-xl shadow-inner text-xs font-bold space-x-1 ${
+                  isDarkMode
+                    ? 'bg-slate-900 border-slate-800'
+                    : 'bg-slate-200/80 border-slate-300'
+                }`}>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!isStaticQr) return;
+                      setIsStaticQr(false);
+                      const targetId = activeSession?.id || quickEventModal?.id;
+                      if (targetId) {
+                        try {
+                          await toggleQrMode(targetId, false);
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-all duration-200 cursor-pointer ${
+                      !isStaticQr
+                        ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20 font-extrabold'
+                        : isDarkMode
+                          ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/60'
+                    }`}
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${!isStaticQr ? 'animate-spin' : ''}`} />
+                    <span>Dynamic</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (isStaticQr) return;
+                      setIsStaticQr(true);
+                      const targetId = activeSession?.id || quickEventModal?.id;
+                      if (targetId) {
+                        try {
+                          await toggleQrMode(targetId, true);
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-all duration-200 cursor-pointer ${
+                      isStaticQr
+                        ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20 font-extrabold'
+                        : isDarkMode
+                          ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/60'
+                    }`}
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Static</span>
+                  </button>
+                </div>
+
                 <div className="relative p-3 sm:p-4 bg-white rounded-2xl shadow-xl border border-slate-100">
                   {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="Dynamic Attendance QR" className="w-48 h-48 sm:w-60 sm:h-60 object-contain" />
+                    <img src={qrDataUrl} alt="Attendance QR Code" className="w-48 h-48 sm:w-60 sm:h-60 object-contain" />
                   ) : (
                     <div className="w-48 h-48 sm:w-60 sm:h-60 flex items-center justify-center text-slate-500 text-xs">
                       กำลังสร้าง QR Code...
                     </div>
                   )}
-                  <div className="absolute top-2 right-2 px-2.5 py-0.5 bg-emerald-500 text-slate-950 font-black text-[10px] rounded-full uppercase tracking-wider">
-                    Dynamic 30s
-                  </div>
+                  {isStaticQr ? (
+                    <div className="absolute top-2 right-2 px-2.5 py-0.5 bg-sky-600 text-white font-black text-[10px] rounded-full uppercase tracking-wider flex items-center space-x-1 shadow-xs">
+                      <Lock className="w-3 h-3" />
+                      <span>Static</span>
+                    </div>
+                  ) : (
+                    <div className="absolute top-2 right-2 px-2.5 py-0.5 bg-emerald-500 text-slate-950 font-black text-[10px] rounded-full uppercase tracking-wider flex items-center space-x-1 shadow-xs">
+                      <span>Dynamic 30s</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* 6-Character Token Display */}
-                <div className="w-full bg-slate-900 border border-slate-700/80 rounded-2xl p-3 text-center space-y-1">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-sky-400">
-                    🔑 รหัส Token 6 ตัวอักษร (สำหรับป้อนด้วยตนเอง):
+                <div className={`w-full border rounded-2xl p-3 text-center space-y-1 ${
+                  isDarkMode
+                    ? 'bg-slate-900 border-slate-800'
+                    : 'bg-white border-slate-200 shadow-sm'
+                }`}>
+                  <div className={`text-[10px] font-bold uppercase tracking-wider flex items-center justify-center space-x-1 ${
+                    isDarkMode ? 'text-sky-400' : 'text-sky-600'
+                  }`}>
+                    <span>🔑 รหัส Token 6 ตัวอักษร (สำหรับป้อนด้วยตนเอง):</span>
                   </div>
                   <div className="flex items-center justify-center space-x-3">
-                    <span className="font-mono text-xl sm:text-2xl font-black tracking-widest text-emerald-400">
+                    <span className={`font-mono text-xl sm:text-2xl font-black tracking-widest ${
+                      isDarkMode ? 'text-emerald-400' : 'text-emerald-600'
+                    }`}>
                       {qrToken || '------'}
                     </span>
                     <button
@@ -1894,7 +2050,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         navigator.clipboard.writeText(qrToken);
                         alert(`คัดลอกรหัส ${qrToken} เรียบร้อยแล้ว!`);
                       }}
-                      className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 flex items-center space-x-1"
+                      className={`p-1.5 rounded-xl text-xs font-bold border flex items-center space-x-1 cursor-pointer transition ${
+                        isDarkMode
+                          ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                      }`}
                       title="คัดลอกรหัส 6 หลัก"
                     >
                       <Copy className="w-3.5 h-3.5" />
@@ -1903,22 +2063,33 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   </div>
                 </div>
 
-                {/* Countdown Timer Bar */}
-                <div className="w-full space-y-1">
-                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
-                    <span className="flex items-center space-x-1">
-                      <Clock className="w-3.5 h-3.5 text-blue-400 animate-spin" />
-                      <span>รีเฟรชรหัสถัดไปในอีก:</span>
-                    </span>
-                    <span className="font-mono text-emerald-400 font-bold">{qrCountdown} วินาที</span>
+                {/* Timer Bar or Static Notice */}
+                {isStaticQr ? (
+                  <div className={`w-full p-2 rounded-xl border text-xs flex items-center justify-center space-x-1.5 ${
+                    isDarkMode
+                      ? 'bg-sky-950/40 border-sky-800/60 text-sky-200'
+                      : 'bg-sky-50 border-sky-200 text-sky-800'
+                  }`}>
+                    <Lock className={`w-3.5 h-3.5 shrink-0 ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`} />
+                    <span className={`text-[11px] font-bold ${isDarkMode ? 'text-sky-300' : 'text-sky-700'}`}>โหมด Static: รหัสคงที่ตลอดคลาส</span>
                   </div>
-                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-blue-500 transition-all duration-1000 ease-linear"
-                      style={{ width: `${(qrCountdown / 30) * 100}%` }}
-                    ></div>
+                ) : (
+                  <div className="w-full space-y-1">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
+                      <span className="flex items-center space-x-1">
+                        <Clock className="w-3.5 h-3.5 text-blue-400 animate-spin" />
+                        <span>รีเฟรชรหัสถัดไปในอีก:</span>
+                      </span>
+                      <span className="font-mono text-emerald-400 font-bold">{qrCountdown} วินาที</span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-500 transition-all duration-1000 ease-linear"
+                        style={{ width: `${(qrCountdown / 30) * 100}%` }}
+                      ></div>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* GPS Toggle Switch */}
                 <div className="w-full pt-1">
@@ -1941,6 +2112,53 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       {isGpsCheckEnabled ? '🟢 เปิดตรวจ GPS (Geofence 200m)' : '🔴 ปิดตรวจ GPS (QR อย่างเดียว)'}
                     </span>
                   </button>
+                </div>
+
+                {/* Duration & Late Threshold Controls */}
+                <div className="w-full space-y-2 pt-3 border-t border-slate-700/60">
+                  <div className="text-[11px] font-extrabold text-slate-200 flex items-center justify-between">
+                    <span>⏱️ กำหนดเวลาเปิดรับเช็คชื่อ &amp; เกณฑ์เข้าสาย:</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-1">ระยะเวลาเปิดรับทั้งหมด:</label>
+                      <select
+                        value={sessionDurationMinutes}
+                        onChange={(e) => handleUpdateDurationAndLate(Number(e.target.value), lateThresholdMinutes)}
+                        className="w-full p-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-200 text-xs font-bold focus:ring-2 focus:ring-sky-500"
+                      >
+                        <option value={15}>15 นาที</option>
+                        <option value={30}>30 นาที (มาตรฐาน)</option>
+                        <option value={45}>45 นาที</option>
+                        <option value={60}>60 นาที (1 ชม.)</option>
+                        <option value={90}>90 นาที (1.5 ชม.)</option>
+                        <option value={120}>120 นาที (2 ชม.)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-1">เริ่มถือว่า "เข้าเรียนสาย" หลัง:</label>
+                      <select
+                        value={lateThresholdMinutes}
+                        onChange={(e) => handleUpdateDurationAndLate(sessionDurationMinutes, Number(e.target.value))}
+                        className="w-full p-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-200 text-xs font-bold focus:ring-2 focus:ring-sky-500"
+                      >
+                        <option value={5}>5 นาทีแรก</option>
+                        <option value={10}>10 นาทีแรก</option>
+                        <option value={15}>15 นาทีแรก (มาตรฐาน)</option>
+                        <option value={20}>20 นาทีแรก</option>
+                        <option value={30}>30 นาทีแรก</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-sky-950/60 border border-sky-800/80 text-[10px] text-sky-200 space-y-1">
+                    <p className="font-bold text-sky-300">💡 การนับสถานะสำหรับผู้มาสาย:</p>
+                    <p>• <b>0 ถึง {lateThresholdMinutes} นาที:</b> ลงบันทึก <span className="text-emerald-400 font-bold">🟢 ตรงเวลา (PRESENT)</span></p>
+                    <p>• <b>{lateThresholdMinutes} ถึง {sessionDurationMinutes} นาที:</b> ลงบันทึก <span className="text-amber-400 font-bold">🟡 มาสาย (LATE)</span> อัตโนมัติ</p>
+                    <p>• <b>เกิน {sessionDurationMinutes} นาที:</b> หมดเวลาเช็คชื่อ ถือว่า <span className="text-rose-400 font-bold">🔴 ขาดเรียน (ABSENT)</span></p>
+                    <p className="text-slate-400 italic mt-1">อาจารย์สามารถย่อหน้าจอนี้ไปเริ่มสอนได้ทันที นักศึกษาที่มาสายจะกดเช็คชื่อด้วย GPS Only ในห้องเรียนได้เอง</p>
+                  </div>
                 </div>
               </div>
 

@@ -132,6 +132,10 @@ export interface Session {
   teacherLat: number;
   teacherLng: number;
   isActive: boolean;
+  activatedAt?: string;
+  sessionDurationMinutes?: number; // e.g. 30 minutes
+  lateThresholdMinutes?: number; // e.g. 15 minutes
+  isStaticQr?: boolean; // false for Dynamic QR (30s rotation), true for Static QR
   qrSecretToken?: string;
   qrExpiresAt?: number;
   createdAt: string;
@@ -181,6 +185,10 @@ export interface QuickEvent {
   teacherLat: number;
   teacherLng: number;
   isActive: boolean;
+  activatedAt?: string;
+  sessionDurationMinutes?: number;
+  lateThresholdMinutes?: number;
+  isStaticQr?: boolean;
   createdAt: string;
   isGpsCheckEnabled?: boolean;
 }

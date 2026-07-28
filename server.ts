@@ -53,6 +53,7 @@ interface ActiveQR {
   lat: number;
   lng: number;
   isGpsCheckEnabled?: boolean;
+  isStatic?: boolean;
 }
 const activeQRCodes: Map<string, ActiveQR> = new Map();
 
@@ -419,6 +420,18 @@ setInterval(() => {
   // Loop active sessions
   sessions.forEach((session, sId) => {
     if (session.isActive) {
+      const existingQR = activeQRCodes.get(sId);
+      if (existingQR && existingQR.isStatic) {
+        existingQR.expiresAt = now + 86400000;
+        activeQRCodes.set(sId, existingQR);
+        activeWsClients.forEach((client) => {
+          if (client.sessionId === sId && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'QR_REFRESH', data: existingQR }));
+          }
+        });
+        return;
+      }
+
       const newToken = generate6CharToken();
       const expiresAt = now + 35000; // valid for 35 seconds (30s cycle + 5s latency grace)
       const qrData: ActiveQR = {
@@ -427,6 +440,7 @@ setInterval(() => {
         lat: session.teacherLat,
         lng: session.teacherLng,
         isGpsCheckEnabled: session.isGpsCheckEnabled !== false,
+        isStatic: false,
       };
       activeQRCodes.set(sId, qrData);
 
@@ -442,6 +456,18 @@ setInterval(() => {
   // Loop active quick events
   quickEvents.forEach((qEvent, eId) => {
     if (qEvent.isActive) {
+      const existingQR = activeQRCodes.get(eId);
+      if (existingQR && existingQR.isStatic) {
+        existingQR.expiresAt = now + 86400000;
+        activeQRCodes.set(eId, existingQR);
+        activeWsClients.forEach((client) => {
+          if (client.eventId === eId && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'QR_REFRESH', data: existingQR }));
+          }
+        });
+        return;
+      }
+
       const newToken = generate6CharToken();
       const expiresAt = now + 35000;
       const qrData: ActiveQR = {
@@ -450,6 +476,7 @@ setInterval(() => {
         lat: qEvent.teacherLat,
         lng: qEvent.teacherLng,
         isGpsCheckEnabled: qEvent.isGpsCheckEnabled !== false,
+        isStatic: false,
       };
       activeQRCodes.set(eId, qrData);
 
@@ -1316,7 +1343,7 @@ app.post('/api/invites/join', (req, res) => {
 
 // 3. Active Session & Dynamic QR Management
 app.post('/api/sessions/:id/activate', (req, res) => {
-  const { teacherLat, teacherLng, isGpsCheckEnabled = true } = req.body;
+  const { teacherLat, teacherLng, isGpsCheckEnabled = true, sessionDurationMinutes, lateThresholdMinutes, isStaticQr } = req.body;
   const session = sessions.get(req.params.id);
 
   if (!session) {
@@ -1326,7 +1353,11 @@ app.post('/api/sessions/:id/activate', (req, res) => {
   const course = courses.get(session.courseId);
 
   session.isActive = true;
+  session.activatedAt = new Date().toISOString();
   session.isGpsCheckEnabled = isGpsCheckEnabled !== false;
+  session.sessionDurationMinutes = sessionDurationMinutes ? Number(sessionDurationMinutes) : (session.sessionDurationMinutes || 30);
+  session.lateThresholdMinutes = lateThresholdMinutes ? Number(lateThresholdMinutes) : (session.lateThresholdMinutes || 15);
+  session.isStaticQr = isStaticQr === true;
 
   let inputLat = teacherLat !== undefined ? parseFloat(teacherLat) : NaN;
   let inputLng = teacherLng !== undefined ? parseFloat(teacherLng) : NaN;
@@ -1347,18 +1378,20 @@ app.post('/api/sessions/:id/activate', (req, res) => {
     session.teacherLng = course.defaultLng;
   }
 
-  // Generate immediate active QR token (6 characters)
+  // Generate immediate active QR token (6 characters) - fresh for each session
   const token = generate6CharToken();
-  const expiresAt = Date.now() + 35000;
+  const isStatic = isStaticQr === true;
+  const expiresAt = isStatic ? Date.now() + 86400000 : Date.now() + 35000;
   activeQRCodes.set(session.id, {
     token,
     expiresAt,
     lat: session.teacherLat,
     lng: session.teacherLng,
     isGpsCheckEnabled: session.isGpsCheckEnabled,
+    isStatic,
   });
 
-  res.json({ message: 'Session QR code activated', session, qrToken: token, expiresAt });
+  res.json({ message: 'Session QR code activated', session, qrToken: token, expiresAt, isStatic });
 });
 
 app.post('/api/sessions/:id/gps-toggle', (req, res) => {
@@ -1379,6 +1412,36 @@ app.post('/api/sessions/:id/gps-toggle', (req, res) => {
   res.json({ message: 'GPS check status updated', isGpsCheckEnabled: isGpsCheckEnabled !== false });
 });
 
+app.post('/api/sessions/:id/qr-mode', (req, res) => {
+  const { isStatic } = req.body;
+  const targetId = req.params.id;
+  const isStaticBool = isStatic === true;
+
+  const session = sessions.get(targetId);
+  if (session) {
+    session.isStaticQr = isStaticBool;
+  }
+  const qEvt = quickEvents.get(targetId);
+  if (qEvt) {
+    qEvt.isStaticQr = isStaticBool;
+  }
+
+  const activeQR = activeQRCodes.get(targetId);
+  if (activeQR) {
+    activeQR.isStatic = isStaticBool;
+    activeQR.expiresAt = isStaticBool ? Date.now() + 86400000 : Date.now() + 35000;
+
+    // Broadcast updated QR data immediately via WebSocket
+    activeWsClients.forEach((client) => {
+      if ((client.sessionId === targetId || client.eventId === targetId) && client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ type: 'QR_REFRESH', data: activeQR }));
+      }
+    });
+  }
+
+  res.json({ message: 'QR Mode updated successfully', isStatic: isStaticBool, activeQR });
+});
+
 app.post('/api/sessions/:id/deactivate', (req, res) => {
   const session = sessions.get(req.params.id);
   if (session) {
@@ -1395,8 +1458,18 @@ app.get('/api/sessions/:id/records', (req, res) => {
 
 app.get('/api/sessions/active', (req, res) => {
   const activeSessionsList: Array<{ session: Session; course?: Course; activeQR?: ActiveQR }> = [];
+  const now = Date.now();
   sessions.forEach((s) => {
     if (s.isActive) {
+      const maxDuration = s.sessionDurationMinutes || 30;
+      if (s.activatedAt) {
+        const elapsedMin = (now - new Date(s.activatedAt).getTime()) / (1000 * 60);
+        if (elapsedMin > maxDuration) {
+          s.isActive = false;
+          activeQRCodes.delete(s.id);
+          return;
+        }
+      }
       const course = courses.get(s.courseId);
       const qrData = activeQRCodes.get(s.id);
       activeSessionsList.push({ session: s, course, activeQR: qrData });
@@ -1538,6 +1611,27 @@ app.post('/api/checkin', (req, res) => {
     });
   }
 
+  // Time-window check: 0 to lateThreshold -> PRESENT, lateThreshold to maxDuration -> LATE, > maxDuration -> Expired/ABSENT
+  let calculatedStatus = AttendanceStatus.PRESENT;
+  let statusMessage = 'เช็คชื่อเข้าเรียนสำเร็จ (ตรงเวลา)';
+
+  if (session.activatedAt) {
+    const startTime = new Date(session.activatedAt).getTime();
+    const nowTime = Date.now();
+    const diffMinutes = (nowTime - startTime) / (1000 * 60);
+    const maxDuration = session.sessionDurationMinutes || 30;
+    const lateThreshold = session.lateThresholdMinutes || 15;
+
+    if (diffMinutes > maxDuration) {
+      return res.status(400).json({
+        error: `[หมดเวลาเช็คอิน] คาบเรียนนี้เปิดเช็คชื่อมาแล้ว ${Math.floor(diffMinutes)} นาที (เกินกำหนด ${maxDuration} นาที ถือว่าขาดเรียน) หากมีเหตุจำเป็นกรุณาแจ้งอาจารย์ผู้สอน`,
+      });
+    } else if (diffMinutes > lateThreshold) {
+      calculatedStatus = AttendanceStatus.LATE;
+      statusMessage = `เช็คชื่อสำเร็จ (เข้าเรียนสาย: สายไป ${Math.floor(diffMinutes)} นาที / เกิน ${lateThreshold} นาทีแรก)`;
+    }
+  }
+
   // Record Attendance
   const newRecord: AttendanceRecord = {
     id: `rec_${Date.now()}`,
@@ -1547,7 +1641,7 @@ app.post('/api/checkin', (req, res) => {
     studentNameEn: `${student.firstNameEn} ${student.lastNameEn}`,
     studentUniversityId: student.universityId,
     timestamp: new Date().toISOString(),
-    status: AttendanceStatus.PRESENT,
+    status: calculatedStatus,
     scannedLat: lat2,
     scannedLng: lon2,
     distanceMeters,
@@ -1560,7 +1654,7 @@ app.post('/api/checkin', (req, res) => {
   broadcastCheckinEvent(sessionId, newRecord);
 
   res.json({
-    message: 'เช็คชื่อสำเร็จแล้ว! (Check-in Verified)',
+    message: statusMessage,
     record: newRecord,
     distanceMeters,
     checkinMethod: checkinMode,

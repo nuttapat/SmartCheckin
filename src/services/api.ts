@@ -158,11 +158,26 @@ export async function fetchCourseDetails(courseId: string) {
   return res.json();
 }
 
-export async function activateSession(sessionId: string, lat: number, lng: number, isGpsCheckEnabled: boolean = true) {
+export async function activateSession(
+  sessionId: string,
+  lat: number,
+  lng: number,
+  isGpsCheckEnabled: boolean = true,
+  sessionDurationMinutes: number = 30,
+  lateThresholdMinutes: number = 15,
+  isStaticQr: boolean = false
+) {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/activate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ teacherLat: lat, teacherLng: lng, isGpsCheckEnabled }),
+    body: JSON.stringify({
+      teacherLat: lat,
+      teacherLng: lng,
+      isGpsCheckEnabled,
+      sessionDurationMinutes,
+      lateThresholdMinutes,
+      isStaticQr,
+    }),
   });
   return res.json();
 }
@@ -172,6 +187,15 @@ export async function toggleGpsCheck(targetId: string, isGpsCheckEnabled: boolea
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ isGpsCheckEnabled }),
+  });
+  return res.json();
+}
+
+export async function toggleQrMode(targetId: string, isStatic: boolean) {
+  const res = await fetch(`${API_BASE}/sessions/${targetId}/qr-mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ isStatic }),
   });
   return res.json();
 }
