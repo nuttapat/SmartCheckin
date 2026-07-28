@@ -451,8 +451,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       semester: '1',
       coordinatorName: `${defaultOwner.title || ''}${defaultOwner.firstNameTh || ''} ${defaultOwner.lastNameTh || ''}`.trim() || 'อาจารย์ผู้รับผิดชอบ',
       ownerId: defaultOwner.id || '',
-      defaultLat: 13.7563,
-      defaultLng: 100.5018,
+      defaultLat: 13.7988363,
+      defaultLng: 100.322944,
       weeks: Array.from({ length: 15 }, (_, i) => ({
         weekNumber: i + 1,
         topic: `สัปดาห์ที่ ${i + 1}`,
@@ -517,8 +517,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       courseId: courseId,
       weekNumber: nextWeekNum,
       topic: `การเรียนสัปดาห์ที่ ${nextWeekNum}`,
-      teacherLat: course?.defaultLat || 13.7563,
-      teacherLng: course?.defaultLng || 100.5018,
+      teacherLat: course?.defaultLat || 13.7988363,
+      teacherLng: course?.defaultLng || 100.322944,
       isActive: false,
       createdAt: new Date().toISOString(),
     };
@@ -601,8 +601,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           courseId: course.id,
           weekNumber: wNum,
           topic: w.topic || `การเรียนสัปดาห์ที่ ${wNum}`,
-          teacherLat: course.defaultLat || 13.7563,
-          teacherLng: course.defaultLng || 100.5018,
+          teacherLat: course.defaultLat || 13.7988363,
+          teacherLng: course.defaultLng || 100.322944,
           isActive: false,
           createdAt: new Date().toISOString(),
         };
@@ -2623,7 +2623,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="number"
                     step="0.0001"
-                    value={editingCourseData.defaultLat || 13.7563}
+                    value={editingCourseData.defaultLat || 13.7988363}
                     onChange={(e) => setEditingCourseData({ ...editingCourseData, defaultLat: parseFloat(e.target.value) || 0 })}
                     className={`w-full p-2.5 rounded-xl border font-mono ${
                       isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900 font-semibold'
@@ -2769,7 +2769,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="number"
                     step="0.0001"
-                    value={editingSessionData.teacherLat || 13.7563}
+                    value={editingSessionData.teacherLat || 13.7988363}
                     onChange={(e) => setEditingSessionData({ ...editingSessionData, teacherLat: parseFloat(e.target.value) || 0 })}
                     className={`w-full p-2.5 rounded-xl border font-mono ${
                       isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900 font-semibold'

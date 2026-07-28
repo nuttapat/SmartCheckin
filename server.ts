@@ -272,8 +272,8 @@ const session1: Session = {
   courseId: sampleCourse.id,
   weekNumber: 1,
   topic: 'Introduction & Requirements Engineering',
-  teacherLat: 13.7563,
-  teacherLng: 100.5018,
+  teacherLat: 13.7988363,
+  teacherLng: 100.322944,
   isActive: false,
   createdAt: new Date().toISOString(),
 };
@@ -283,8 +283,8 @@ const session2: Session = {
   courseId: sampleCourse.id,
   weekNumber: 2,
   topic: 'Microservices & RESTful API Design',
-  teacherLat: 13.7563,
-  teacherLng: 100.5018,
+  teacherLat: 13.7988363,
+  teacherLng: 100.322944,
   isActive: false,
   createdAt: new Date().toISOString(),
 };
@@ -294,8 +294,8 @@ const session3: Session = {
   courseId: sampleCourse.id,
   weekNumber: 3,
   topic: 'Database Schema & Anti-Proxy Security',
-  teacherLat: 13.7563,
-  teacherLng: 100.5018,
+  teacherLat: 13.7988363,
+  teacherLng: 100.322944,
   isActive: true,
   createdAt: new Date().toISOString(),
 };
@@ -1429,12 +1429,16 @@ app.post('/api/checkin', (req, res) => {
   }
 
   // Geofence Distance Calculation
+  const course = courses.get(session.courseId);
+  const isGenericDefault = (lat?: number, lng?: number) =>
+    lat === undefined || lng === undefined || isNaN(lat) || isNaN(lng) ||
+    (Math.abs(lat - 13.7563) < 0.001 && Math.abs(lng - 100.5018) < 0.001);
+
   let lat1 = activeQR ? activeQR.lat : session.teacherLat;
   let lon1 = activeQR ? activeQR.lng : session.teacherLng;
 
-  // Fallback to course default coordinates if session coordinates are not set
-  const course = courses.get(session.courseId);
-  if ((lat1 === undefined || lon1 === undefined) && course && course.defaultLat && course.defaultLng) {
+  // If session or activeQR coordinates are uncalibrated generic defaults, prioritize course classroom location
+  if (course && course.defaultLat && course.defaultLng && isGenericDefault(lat1, lon1)) {
     lat1 = course.defaultLat;
     lon1 = course.defaultLng;
   }
@@ -1596,8 +1600,8 @@ app.post('/api/quick-events', (req, res) => {
     id: `evt_${Date.now()}`,
     title: title || 'Ad-hoc Quick Attendance Event',
     teacherId: teacherId || reqUserId || '',
-    teacherLat: parseFloat(teacherLat) || 13.7563,
-    teacherLng: parseFloat(teacherLng) || 100.5018,
+    teacherLat: parseFloat(teacherLat) || 13.7988363,
+    teacherLng: parseFloat(teacherLng) || 100.322944,
     isActive: true,
     createdAt: new Date().toISOString(),
     isGpsCheckEnabled: isGpsCheckEnabled !== false,
