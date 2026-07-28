@@ -110,6 +110,7 @@ export interface Course {
   ownerName?: string;
   defaultLat?: number;
   defaultLng?: number;
+  allowedGpsRadius?: number;
   weeks: TeachingWeek[];
   createdAt: string;
 }

@@ -503,25 +503,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       setActiveSession(session);
       setLiveCheckins([]);
 
-      let currentLat = teacherCoords.lat;
-      let currentLng = teacherCoords.lng;
-
-      if (navigator.geolocation) {
-        try {
-          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: true,
-              timeout: 3000,
-              maximumAge: 0,
-            });
-          });
-          currentLat = position.coords.latitude;
-          currentLng = position.coords.longitude;
-          updateTeacherCoords({ lat: currentLat, lng: currentLng });
-        } catch (e) {
-          console.warn('Fast geolocation fetch skipped, using last known teacher coords:', e);
-        }
-      }
+      // Prioritize classroom location specified for this course or session
+      let currentLat = session.teacherLat || selectedCourse?.defaultLat || teacherCoords.lat;
+      let currentLng = session.teacherLng || selectedCourse?.defaultLng || teacherCoords.lng;
 
       const res = await activateSession(session.id, currentLat, currentLng, isGpsCheckEnabled);
 

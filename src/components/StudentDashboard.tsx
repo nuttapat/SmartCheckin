@@ -94,12 +94,12 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
         },
         (err) => {
           console.warn('Geolocation warning:', err.message);
-          setCurrentCoords({ lat: 13.7563, lng: 100.5018 });
+          setCurrentCoords(null);
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     } else {
-      setCurrentCoords({ lat: 13.7563, lng: 100.5018 });
+      setCurrentCoords(null);
     }
   };
 
@@ -232,15 +232,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
         sessionId = 'ses_3';
       }
 
-      let lat = currentCoords?.lat || 13.7563;
-      let lng = currentCoords?.lng || 100.5018;
+      let lat = currentCoords?.lat;
+      let lng = currentCoords?.lng;
 
       if (navigator.geolocation) {
         try {
           const position = await new Promise<GeolocationPosition>((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(resolve, reject, {
               enableHighAccuracy: true,
-              timeout: 4000,
+              timeout: 6000,
               maximumAge: 0,
             });
           });
@@ -248,7 +248,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
           lng = position.coords.longitude;
           setCurrentCoords({ lat, lng });
         } catch (err) {
-          console.warn('Fast student location lookup skipped, using currentCoords:', err);
+          console.warn('Geolocation lookup during checkin failed/denied:', err);
         }
       }
 

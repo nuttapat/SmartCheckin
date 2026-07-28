@@ -34,6 +34,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   const [coordinatorName, setCoordinatorName] = useState<string>(course.coordinatorName);
   const [defaultLat, setDefaultLat] = useState<number>(course.defaultLat || 13.7988363);
   const [defaultLng, setDefaultLng] = useState<number>(course.defaultLng || 100.322944);
+  const [allowedGpsRadius, setAllowedGpsRadius] = useState<number>(course.allowedGpsRadius || 200);
   const [showMapPicker, setShowMapPicker] = useState<boolean>(false);
   const [weeks, setWeeks] = useState<TeachingWeek[]>(course.weeks || []);
 
@@ -50,6 +51,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
     setCoordinatorName(course.coordinatorName);
     setDefaultLat(course.defaultLat || 13.7988363);
     setDefaultLng(course.defaultLng || 100.322944);
+    setAllowedGpsRadius(course.allowedGpsRadius || 200);
     setWeeks(course.weeks ? [...course.weeks] : []);
     setErrorMsg('');
     setSuccessMsg('');
@@ -116,6 +118,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
         coordinatorName,
         defaultLat,
         defaultLng,
+        allowedGpsRadius,
         weeks,
       });
 
@@ -324,7 +327,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
                   />
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-[11px] font-medium text-slate-400 mb-1">
                       Latitude (ละติจูด)
@@ -348,6 +351,21 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
                       step="0.000001"
                       value={defaultLng}
                       onChange={(e) => setDefaultLng(parseFloat(e.target.value) || 0)}
+                      className={`w-full border rounded-xl px-3 py-1.5 text-xs font-mono font-bold ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-blue-400' : 'bg-white border-slate-300 text-blue-700'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                      รัศมีเช็คชื่อ GPS (เมตร)
+                    </label>
+                    <input
+                      type="number"
+                      min="10"
+                      max="5000"
+                      value={allowedGpsRadius}
+                      onChange={(e) => setAllowedGpsRadius(Math.max(1, parseInt(e.target.value, 10) || 200))}
                       className={`w-full border rounded-xl px-3 py-1.5 text-xs font-mono font-bold ${
                         isDarkMode ? 'bg-slate-800 border-slate-700 text-blue-400' : 'bg-white border-slate-300 text-blue-700'
                       }`}

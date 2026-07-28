@@ -243,6 +243,9 @@ const sampleCourse: Course = {
   coordinatorName: 'อ.ดร. สมชาย ใจดี',
   ownerId: teacherUser.id,
   ownerName: 'อ.ดร. สมชาย ใจดี',
+  defaultLat: 13.7988363,
+  defaultLng: 100.322944,
+  allowedGpsRadius: 200,
   weeks: [
     { weekNumber: 1, topic: 'Introduction & Requirements Engineering', date: '2026-07-10' },
     { weekNumber: 2, topic: 'Microservices & RESTful API Design', date: '2026-07-17' },
@@ -782,7 +785,7 @@ app.get('/api/courses', (req, res) => {
 });
 
 app.post('/api/courses', (req, res) => {
-  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, ownerId, defaultLat, defaultLng } = req.body;
+  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, ownerId, defaultLat, defaultLng, allowedGpsRadius } = req.body;
 
   if (!courseCode || !courseName) {
     return res.status(400).json({ error: 'Course code and name are required.' });
@@ -795,6 +798,7 @@ app.post('/api/courses', (req, res) => {
   }
   const lat = parseFloat(defaultLat) || 13.7988363;
   const lng = parseFloat(defaultLng) || 100.322944;
+  const radius = parseFloat(allowedGpsRadius) || 200;
 
   const newCourse: Course = {
     id: `crs_${Date.now()}`,
@@ -807,6 +811,7 @@ app.post('/api/courses', (req, res) => {
     ownerName: `${owner.title} ${owner.firstNameTh} ${owner.lastNameTh}`,
     defaultLat: lat,
     defaultLng: lng,
+    allowedGpsRadius: radius,
     weeks: weeks || [],
     createdAt: new Date().toISOString(),
   };
@@ -889,7 +894,7 @@ app.put('/api/courses/:id', (req, res) => {
     }
   }
 
-  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, defaultLat, defaultLng } = req.body;
+  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, defaultLat, defaultLng, allowedGpsRadius } = req.body;
 
   if (courseCode) course.courseCode = courseCode;
   if (courseName) course.courseName = courseName;
@@ -898,6 +903,7 @@ app.put('/api/courses/:id', (req, res) => {
   if (coordinatorName) course.coordinatorName = coordinatorName;
   if (defaultLat !== undefined) course.defaultLat = parseFloat(defaultLat);
   if (defaultLng !== undefined) course.defaultLng = parseFloat(defaultLng);
+  if (allowedGpsRadius !== undefined) course.allowedGpsRadius = parseFloat(allowedGpsRadius);
 
   const courseLat = course.defaultLat || 13.7988363;
   const courseLng = course.defaultLng || 100.322944;
@@ -1423,48 +1429,63 @@ app.post('/api/checkin', (req, res) => {
   }
 
   // Geofence Distance Calculation
-  const DEFAULT_LAT = 13.7563;
-  const DEFAULT_LNG = 100.5018;
-
   let lat1 = activeQR ? activeQR.lat : session.teacherLat;
   let lon1 = activeQR ? activeQR.lng : session.teacherLng;
-  const lat2 = parseFloat(scannedLat || lat1);
-  const lon2 = parseFloat(scannedLng || lon1);
 
-  const isTeacherDefault = Math.abs(lat1 - DEFAULT_LAT) < 0.0001 && Math.abs(lon1 - DEFAULT_LNG) < 0.0001;
-  const isStudentDefault = Math.abs(lat2 - DEFAULT_LAT) < 0.0001 && Math.abs(lon2 - DEFAULT_LNG) < 0.0001;
-
-  // Auto-calibrate teacher classroom location if teacher used default fallback while student provides real GPS
-  if (isTeacherDefault && !isStudentDefault) {
-    session.teacherLat = lat2;
-    session.teacherLng = lon2;
-    if (activeQR) {
-      activeQR.lat = lat2;
-      activeQR.lng = lon2;
-    }
-    lat1 = lat2;
-    lon1 = lon2;
+  // Fallback to course default coordinates if session coordinates are not set
+  const course = courses.get(session.courseId);
+  if ((lat1 === undefined || lon1 === undefined) && course && course.defaultLat && course.defaultLng) {
+    lat1 = course.defaultLat;
+    lon1 = course.defaultLng;
   }
-
-  let distanceMeters = getHaversineDistance(lat1, lon1, lat2, lon2);
 
   // Determine if GPS Geofence Check is required
   const sessionGpsEnabled = session.isGpsCheckEnabled !== false;
   const qrGpsEnabled = activeQR ? activeQR.isGpsCheckEnabled !== false : true;
-  const isGpsCheckRequired = sessionGpsEnabled && qrGpsEnabled && checkinMode !== 'QR_ONLY';
+  const isGpsCheckRequired = sessionGpsEnabled && qrGpsEnabled;
+
+  // If student tries GPS_ONLY mode while teacher has disabled GPS
+  if (checkinMode === 'GPS_ONLY' && !isGpsCheckRequired) {
+    return res.status(400).json({
+      error: 'ไม่สามารถเช็คชื่อด้วย GPS ได้ เนื่องจากอาจารย์ปิดระบบตรวจสอบ GPS สำหรับคาบนี้ กรุณาสแกน QR Code หรือใช้รหัสเข้าชั้นเรียน',
+    });
+  }
+
+  const hasStudentCoords = scannedLat !== undefined && scannedLat !== null && scannedLat !== '' && !isNaN(Number(scannedLat)) &&
+                           scannedLng !== undefined && scannedLng !== null && scannedLng !== '' && !isNaN(Number(scannedLng));
+
+  const lat2 = hasStudentCoords ? parseFloat(scannedLat) : NaN;
+  const lon2 = hasStudentCoords ? parseFloat(scannedLng) : NaN;
+
+  let distanceMeters = 0;
 
   if (isGpsCheckRequired) {
-    // If either device still uses default fallback or distance mismatch > 500m due to laptop lack of GPS
-    if ((isTeacherDefault || isStudentDefault) && distanceMeters > 200) {
-      // Auto allow with distance set to calibrated distance
-      distanceMeters = Math.min(distanceMeters, 15);
-    } else if (distanceMeters > 200) {
+    if (isNaN(lat2) || isNaN(lon2)) {
       return res.status(400).json({
-        error: `[GPS Geofence] คุณอยู่ห่างจากห้องเรียน ${distanceMeters} เมตร (อนุญาตไม่เกิน 200 เมตร) หากอาจารย์เปิดบน MacBook ให้เปลี่ยนเป็นโหมด 'QR อย่างเดียว' ในหน้าจอผู้สอน`,
-        distanceMeters,
-        allowedRadius: 200,
+        error: 'ไม่พบตำแหน่ง GPS จากอุปกรณ์ของคุณ กรุณาเปิดอนุญาตสิทธิ์ตำแหน่งที่ตั้ง (Location Service) ในเบราว์เซอร์แล้วลองใหม่อีกครั้ง',
       });
     }
+
+    if (lat1 === undefined || lon1 === undefined || isNaN(lat1) || isNaN(lon1)) {
+      return res.status(400).json({
+        error: 'ยังไม่ได้ระบุพิกัดสถานที่เรียนสำหรับวิชานี้ กรุณาให้อาจารย์ผู้สอนตั้งค่าพิกัดห้องเรียน หรือสลับเป็นโหมด QR อย่างเดียว',
+      });
+    }
+
+    distanceMeters = getHaversineDistance(lat1, lon1, lat2, lon2);
+    const ALLOWED_RADIUS = (course && typeof course.allowedGpsRadius === 'number' && course.allowedGpsRadius > 0)
+      ? course.allowedGpsRadius
+      : 200;
+
+    if (distanceMeters > ALLOWED_RADIUS) {
+      return res.status(400).json({
+        error: `[GPS Geofence Violation] คุณอยู่ห่างจากสถานที่เรียน ${distanceMeters} เมตร (อนุญาตไม่เกิน ${ALLOWED_RADIUS} เมตร)`,
+        distanceMeters,
+        allowedRadius: ALLOWED_RADIUS,
+      });
+    }
+  } else if (!isNaN(lat1) && !isNaN(lon1) && !isNaN(lat2) && !isNaN(lon2)) {
+    distanceMeters = getHaversineDistance(lat1, lon1, lat2, lon2);
   }
 
   // Duplicate check
@@ -1639,22 +1660,52 @@ app.post('/api/checkin/quick', (req, res) => {
     return res.status(400).json({ error: 'Invalid or expired event QR code.' });
   }
 
-  const distanceMeters = getHaversineDistance(
-    activeQR.lat,
-    activeQR.lng,
-    parseFloat(scannedLat || activeQR.lat),
-    parseFloat(scannedLng || activeQR.lng)
-  );
+  const lat1 = activeQR ? activeQR.lat : qEvent.teacherLat;
+  const lon1 = activeQR ? activeQR.lng : qEvent.teacherLng;
 
   const eventGpsEnabled = qEvent.isGpsCheckEnabled !== false;
   const qrGpsEnabled = activeQR ? activeQR.isGpsCheckEnabled !== false : true;
-  const isGpsCheckRequired = eventGpsEnabled && qrGpsEnabled && req.body.checkinMode !== 'QR_ONLY';
+  const isGpsCheckRequired = eventGpsEnabled && qrGpsEnabled;
 
-  if (isGpsCheckRequired && distanceMeters > 200) {
+  if (req.body.checkinMode === 'GPS_ONLY' && !isGpsCheckRequired) {
     return res.status(400).json({
-      error: `[Geofence Violation] Distance: ${distanceMeters}m (Max allowed: 200m).`,
-      distanceMeters,
+      error: 'ไม่สามารถเช็คชื่อด้วย GPS ได้ เนื่องจากอาจารย์ปิดระบบตรวจสอบ GPS สำหรับกิจกรรมนี้ กรุณาสแกน QR Code หรือใช้รหัสเข้าชั้นเรียน',
     });
+  }
+
+  const hasStudentCoords = scannedLat !== undefined && scannedLat !== null && scannedLat !== '' && !isNaN(Number(scannedLat)) &&
+                           scannedLng !== undefined && scannedLng !== null && scannedLng !== '' && !isNaN(Number(scannedLng));
+
+  const lat2 = hasStudentCoords ? parseFloat(scannedLat) : NaN;
+  const lon2 = hasStudentCoords ? parseFloat(scannedLng) : NaN;
+
+  let distanceMeters = 0;
+
+  if (isGpsCheckRequired) {
+    if (isNaN(lat2) || isNaN(lon2)) {
+      return res.status(400).json({
+        error: 'ไม่พบตำแหน่ง GPS จากอุปกรณ์ของคุณ กรุณาเปิดอนุญาตสิทธิ์ตำแหน่งที่ตั้ง (Location Service) ในเบราว์เซอร์แล้วลองใหม่อีกครั้ง',
+      });
+    }
+
+    if (lat1 === undefined || lon1 === undefined || isNaN(lat1) || isNaN(lon1)) {
+      return res.status(400).json({
+        error: 'ยังไม่ได้ระบุพิกัดสถานที่เช็คชื่อกิจกรรมนี้',
+      });
+    }
+
+    distanceMeters = getHaversineDistance(lat1, lon1, lat2, lon2);
+    const ALLOWED_RADIUS = 200;
+
+    if (distanceMeters > ALLOWED_RADIUS) {
+      return res.status(400).json({
+        error: `[GPS Geofence Violation] คุณอยู่ห่างจากสถานที่กิจกรรม ${distanceMeters} เมตร (อนุญาตไม่เกิน ${ALLOWED_RADIUS} เมตร)`,
+        distanceMeters,
+        allowedRadius: ALLOWED_RADIUS,
+      });
+    }
+  } else if (!isNaN(lat1) && !isNaN(lon1) && !isNaN(lat2) && !isNaN(lon2)) {
+    distanceMeters = getHaversineDistance(lat1, lon1, lat2, lon2);
   }
 
   const newRecord: AttendanceRecord = {
@@ -2383,6 +2434,13 @@ app.post('/api/admin/database/document/:collectionName', async (req, res) => {
         quickEvents.set(docData.id, docData);
         await saveToFirestore(COLLECTIONS.QUICK_EVENTS, docData);
         break;
+      case 'teacherAttendanceRecords': {
+        const idx = teacherAttendanceRecords.findIndex((a) => a.id === docData.id);
+        if (idx >= 0) teacherAttendanceRecords[idx] = docData;
+        else teacherAttendanceRecords.push(docData);
+        await saveToFirestore('teacherAttendanceRecords', docData);
+        break;
+      }
       default:
         return res.status(400).json({ error: 'Collection ไม่รองรับการแก้ไขโดยตรง' });
     }
@@ -2471,6 +2529,12 @@ app.delete('/api/admin/database/document/:collectionName/:docId', async (req, re
         quickEvents.delete(docId);
         await deleteFromFirestore(COLLECTIONS.QUICK_EVENTS, docId);
         break;
+      case 'teacherAttendanceRecords': {
+        const idx = teacherAttendanceRecords.findIndex((a) => a.id === docId);
+        if (idx >= 0) teacherAttendanceRecords.splice(idx, 1);
+        await deleteFromFirestore('teacherAttendanceRecords', docId);
+        break;
+      }
       default:
         return res.status(400).json({ error: 'Collection ไม่รองรับการลบโดยตรง' });
     }
@@ -2740,14 +2804,57 @@ app.post('/api/users/:userId/devices/reset', async (req, res) => {
 app.post('/api/admin/attendance/override', async (req, res) => {
   const { studentId, sessionId, eventId, courseId, status, checkinMethod } = req.body;
 
-  const student = users.get(studentId);
-  if (!student) {
-    return res.status(404).json({ error: 'ไม่พบนัศึกษาในระบบ' });
+  let targetUser = users.get(studentId);
+  if (!targetUser) {
+    targetUser = Array.from(users.values()).find(
+      (u) => u.id === studentId || u.universityId === studentId
+    );
   }
 
-  // Find existing record or create new
+  if (!targetUser) {
+    return res.status(404).json({ error: 'ไม่พบข้อมูลผู้ใช้ในระบบ (กรุณาเลือกผู้ใช้ที่มีอยู่จริง)' });
+  }
+
+  if (targetUser.role === UserRole.TEACHER) {
+    let teacherRecord = teacherAttendanceRecords.find(
+      (tr) =>
+        tr.teacherId === targetUser!.id &&
+        ((sessionId && tr.sessionId === sessionId) || (courseId && tr.courseId === courseId))
+    );
+    const crs = courseId ? courses.get(courseId) : undefined;
+    const ses = sessionId ? sessions.get(sessionId) : undefined;
+
+    if (teacherRecord) {
+      teacherRecord.timestamp = new Date().toISOString();
+      teacherRecord.notes = `Admin override status: ${status}`;
+    } else {
+      teacherRecord = {
+        id: `tatt_admin_override_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        teacherId: targetUser.id,
+        teacherName: `${targetUser.title || ''}${targetUser.firstNameTh || ''} ${targetUser.lastNameTh || ''}`.trim(),
+        courseId: courseId || ses?.courseId,
+        courseCode: crs?.courseCode,
+        courseName: crs?.courseName,
+        sessionId,
+        sessionTopic: ses?.topic,
+        timestamp: new Date().toISOString(),
+        lat: 0,
+        lng: 0,
+        checkinMethod: (checkinMethod as any) || 'HYBRID',
+        deviceId: targetUser.deviceId || 'admin_override',
+        notes: `Admin override status: ${status}`,
+      };
+      teacherAttendanceRecords.push(teacherRecord);
+    }
+    await saveToFirestore('teacherAttendanceRecords', teacherRecord);
+    return res.json({ message: 'ปรับแก้ไขข้อมูลการเช็กชื่อของอาจารย์สำเร็จเรียบร้อยแล้ว', record: teacherRecord });
+  }
+
+  // Handle Student Attendance Override
   let record = attendanceRecords.find(
-    (ar) => ar.studentId === studentId && ((sessionId && ar.sessionId === sessionId) || (eventId && ar.eventId === eventId))
+    (ar) =>
+      ar.studentId === targetUser!.id &&
+      ((sessionId && ar.sessionId === sessionId) || (eventId && ar.eventId === eventId))
   );
 
   if (record) {
@@ -2758,16 +2865,16 @@ app.post('/api/admin/attendance/override', async (req, res) => {
       id: `att_admin_override_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       sessionId,
       eventId,
-      studentId: student.id,
-      studentNameTh: `${student.firstNameTh} ${student.lastNameTh}`,
-      studentNameEn: `${student.firstNameEn || ''} ${student.lastNameEn || ''}`.trim(),
-      studentUniversityId: student.universityId,
+      studentId: targetUser.id,
+      studentNameTh: `${targetUser.title || ''}${targetUser.firstNameTh} ${targetUser.lastNameTh}`.trim(),
+      studentNameEn: `${targetUser.firstNameEn || ''} ${targetUser.lastNameEn || ''}`.trim(),
+      studentUniversityId: targetUser.universityId,
       timestamp: new Date().toISOString(),
       status: status as AttendanceStatus,
       scannedLat: 0,
       scannedLng: 0,
       distanceMeters: 0,
-      deviceId: student.deviceId || 'admin_override',
+      deviceId: targetUser.deviceId || 'admin_override',
       checkinMethod: (checkinMethod as any) || 'HYBRID',
     };
     attendanceRecords.push(record);
@@ -2775,7 +2882,7 @@ app.post('/api/admin/attendance/override', async (req, res) => {
 
   await saveToFirestore(COLLECTIONS.ATTENDANCE, record);
 
-  res.json({ message: 'ปรับแก้ไขข้อมูลการเช็กชื่อสำเร็จเรียบร้อยแล้ว', record });
+  res.json({ message: 'ปรับแก้ไขข้อมูลการเช็กชื่อของนักศึกษาสำเร็จเรียบร้อยแล้ว', record });
 });
 
 // Firestore Database Sync Handler

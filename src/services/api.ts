@@ -194,14 +194,14 @@ export async function submitCheckin(params: {
   eventId?: string;
   qrToken?: string;
   studentId: string;
-  scannedLat: number;
-  scannedLng: number;
+  scannedLat?: number;
+  scannedLng?: number;
   deviceId: string;
   deviceName?: string;
   deviceType?: 'MOBILE' | 'TABLET' | 'DESKTOP' | 'OTHER';
   browser?: string;
   os?: string;
-  checkinMode?: 'QR_ONLY' | 'GPS_ONLY' | 'HYBRID';
+  checkinMode?: 'QR_ONLY' | 'GPS_ONLY' | 'HYBRID' | 'TOKEN';
 }) {
   const url = params.eventId ? `${API_BASE}/checkin/quick` : `${API_BASE}/checkin`;
   const res = await fetch(url, {

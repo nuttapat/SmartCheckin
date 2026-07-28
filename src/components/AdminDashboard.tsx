@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { User, UserRole, Course, LeaveStatus, AttendanceStatus, Session } from '../types';
 import {
   fetchAdminDatabaseOverview,
@@ -34,6 +34,8 @@ import {
   Smartphone,
   Eye,
   AlertCircle,
+  AlertTriangle,
+  GraduationCap,
   Sparkles,
   Check,
   X,
@@ -292,11 +294,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // Attendance Override Form state
-  const [overrideStudentId, setOverrideStudentId] = useState<string>('');
-  const [overrideStatus, setOverrideStatus] = useState<string>('PRESENT');
+  // Attendance Override Form state & User Search
+  const [overrideUserType, setOverrideUserType] = useState<'ALL' | 'STUDENT' | 'TEACHER'>('ALL');
+  const [overrideUserSearch, setOverrideUserSearch] = useState<string>('');
+  const [overrideSelectedUser, setOverrideSelectedUser] = useState<User | null>(null);
+  const [overrideCourseId, setOverrideCourseId] = useState<string>('');
   const [overrideSessionId, setOverrideSessionId] = useState<string>('');
+  const [overrideStatus, setOverrideStatus] = useState<string>('PRESENT');
   const [overrideMsg, setOverrideMsg] = useState<string>('');
+  const [overrideErrorMsg, setOverrideErrorMsg] = useState<string>('');
+  const [isOverrideSubmitting, setIsOverrideSubmitting] = useState<boolean>(false);
+
+  // Check-in History & Deletion state
+  const [checkinRoleFilter, setCheckinRoleFilter] = useState<'ALL' | 'STUDENT' | 'TEACHER'>('ALL');
+  const [checkinSearchQuery, setCheckinSearchQuery] = useState<string>('');
+  const [checkinCourseFilter, setCheckinCourseFilter] = useState<string>('ALL');
+  const [allUsersList, setAllUsersList] = useState<User[]>([]);
+  const [allStudentAttendance, setAllStudentAttendance] = useState<any[]>([]);
+  const [allTeacherAttendance, setAllTeacherAttendance] = useState<any[]>([]);
+  const [loadingOverrideData, setLoadingOverrideData] = useState<boolean>(false);
+
+  // Filter users for Override Form search
+  const filteredUsersForOverride = useMemo(() => {
+    return allUsersList.filter((u) => {
+      if (overrideUserType === 'STUDENT' && u.role !== UserRole.STUDENT) return false;
+      if (overrideUserType === 'TEACHER' && u.role !== UserRole.TEACHER) return false;
+
+      if (!overrideUserSearch.trim()) return true;
+
+      const q = overrideUserSearch.toLowerCase().trim();
+      const fullName = `${u.title || ''}${u.firstNameTh || ''} ${u.lastNameTh || ''}`.toLowerCase();
+      const id = (u.id || '').toLowerCase();
+      const uniId = (u.universityId || '').toLowerCase();
+      const email = (u.email || '').toLowerCase();
+
+      return fullName.includes(q) || id.includes(q) || uniId.includes(q) || email.includes(q);
+    });
+  }, [allUsersList, overrideUserType, overrideUserSearch]);
 
   // Course & Weekly Session Management state
   const [allCourses, setAllCourses] = useState<any[]>([]);
@@ -351,7 +385,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // Auto-refresh interval for Real-time database inspection & Courses
+  // Load Override & Check-in Management data
+  const loadOverrideTabData = async (silent = false) => {
+    try {
+      if (!silent) setLoadingOverrideData(true);
+      const [usersRes, coursesRes, sessionsRes, attRes, teacherAttRes] = await Promise.all([
+        fetchAdminCollection('users'),
+        fetchAdminCollection('courses'),
+        fetchAdminCollection('sessions'),
+        fetchAdminCollection('attendanceRecords'),
+        fetchAdminCollection('teacherAttendanceRecords').catch(() => ({ documents: [] })),
+      ]);
+      setAllUsersList(usersRes.documents || []);
+      setAllCourses(coursesRes.documents || []);
+      setAllSessions(sessionsRes.documents || []);
+      setAllStudentAttendance(attRes.documents || []);
+      setAllTeacherAttendance(teacherAttRes.documents || []);
+    } catch (err) {
+      console.error('Failed to load override tab data:', err);
+    } finally {
+      if (!silent) setLoadingOverrideData(false);
+    }
+  };
+
+  // Auto-refresh interval for Real-time database inspection & Courses & Override
   useEffect(() => {
     let interval: any;
     if (autoRefresh) {
@@ -361,6 +418,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           loadCollectionDocs(selectedCollection, true);
         } else if (activeTab === 'COURSES') {
           loadCoursesAndSessionsData(true);
+        } else if (activeTab === 'OVERRIDE') {
+          loadOverrideTabData(true);
         }
       }, 4000);
     }
@@ -372,6 +431,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       loadCollectionDocs(selectedCollection);
     } else if (activeTab === 'COURSES') {
       loadCoursesAndSessionsData();
+    } else if (activeTab === 'OVERRIDE') {
+      loadOverrideTabData();
     }
   }, [selectedCollection, activeTab]);
 
@@ -677,22 +738,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleOverrideAttendanceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!overrideStudentId) {
-      alert('กรุณาระบุรหัสนักศึกษา/User ID');
+    setOverrideMsg('');
+    setOverrideErrorMsg('');
+
+    if (!overrideSelectedUser) {
+      setOverrideErrorMsg('กรุณาค้นหาและเลือกผู้ใช้ (นักศึกษา หรือ อาจารย์) จากระบบก่อนทำรายการ');
       return;
     }
+
+    const sessionsForSelectedCourse = overrideCourseId && overrideCourseId !== 'ALL'
+      ? allSessions.filter((s) => s.courseId === overrideCourseId)
+      : allSessions;
+
+    if (overrideCourseId && overrideCourseId !== 'ALL' && sessionsForSelectedCourse.length > 0 && !overrideSessionId) {
+      setOverrideErrorMsg('กรุณาเลือก Session ที่ต้องการปรับสถานะ');
+      return;
+    }
+
     try {
-      await overrideAttendanceRecord({
-        studentId: overrideStudentId,
+      setIsOverrideSubmitting(true);
+      const res = await overrideAttendanceRecord({
+        studentId: overrideSelectedUser.id,
+        courseId: overrideCourseId !== 'ALL' ? overrideCourseId : undefined,
         sessionId: overrideSessionId || undefined,
         status: overrideStatus,
       });
-      setOverrideMsg('บันทึกแก้ไขสถานะการเช็กชื่อสำเร็จเรียบร้อยแล้ว');
-      setTimeout(() => setOverrideMsg(''), 3000);
-      loadOverview(true);
+
+      setOverrideMsg(res.message || 'บันทึกแก้ไขสถานะการเช็กชื่อสำเร็จเรียบร้อยแล้ว');
+      showToast('ปรับสถานะการเช็กชื่อเรียบร้อยแล้ว');
+      setTimeout(() => setOverrideMsg(''), 4000);
+      await loadOverrideTabData(true);
+      await loadOverview(true);
     } catch (err: any) {
-      alert(err.message || 'เกิดข้อผิดพลาดในการแก้ไขข้อมูล');
+      setOverrideErrorMsg(err.message || 'เกิดข้อผิดพลาดในการปรับสถานะ');
+    } finally {
+      setIsOverrideSubmitting(false);
     }
+  };
+
+  const handleDeleteCheckinRecord = (record: any, type: 'STUDENT' | 'TEACHER') => {
+    const coll = type === 'STUDENT' ? 'attendanceRecords' : 'teacherAttendanceRecords';
+    const userName = record.studentNameTh || record.teacherName || record.studentUniversityId || record.id;
+    const courseInfo = record.courseCode || record.sessionId || '';
+
+    setDeleteConfirmItem({
+      type: 'document',
+      id: record.id,
+      title: `ยืนยันการลบประวัติการเช็กชื่อของ ${userName}`,
+      subtitle: `รายการเช็กชื่อ (${type === 'STUDENT' ? 'นักศึกษา' : 'อาจารย์'}) ${courseInfo ? `วิชา ${courseInfo}` : ''} จะถูกลบออกจากฐานข้อมูลถาวร`,
+      action: async () => {
+        await deleteAdminDocument(coll, record.id);
+        showToast(`ลบข้อมูลการเช็กชื่อของ ${userName} เรียบร้อยแล้ว`);
+        await loadOverrideTabData(true);
+        await loadOverview(true);
+      },
+    });
   };
 
   // Filter documents
@@ -1795,111 +1895,592 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* TAB 3: ATTENDANCE & LEAVE OVERRIDE */}
       {activeTab === 'OVERRIDE' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Override Attendance Form */}
-          <div className={`p-6 rounded-3xl border shadow-xl ${
-            isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
-          }`}>
-            <h3 className="text-base font-extrabold flex items-center space-x-2 mb-4">
-              <Sliders className={`w-5 h-5 ${isDarkMode ? 'text-purple-400' : 'text-purple-700'}`} />
-              <span>ปรับแก้ไขสถานะการเช็กชื่อ (Attendance Override)</span>
-            </h3>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Override Attendance Form */}
+            <div
+              className={`p-6 rounded-3xl border shadow-xl ${
+                isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
+              }`}
+            >
+              <h3 className="text-base font-extrabold flex items-center space-x-2 mb-4">
+                <Sliders className={`w-5 h-5 ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`} />
+                <span>ปรับแก้ไขสถานะการเช็กชื่อ (Attendance Override)</span>
+              </h3>
 
-            {overrideMsg && (
-              <div className={`mb-4 p-3 rounded-2xl border text-xs font-bold flex items-center space-x-2 ${
-                isDarkMode ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-950'
-              }`}>
-                <CheckCircle className="w-4 h-4" />
-                <span>{overrideMsg}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleOverrideAttendanceSubmit} className="space-y-4 text-xs">
-              <div>
-                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>รหัสนักศึกษา / User ID:</label>
-                <input
-                  type="text"
-                  placeholder="เช่น usr_student_1 หรือ 66010012"
-                  value={overrideStudentId}
-                  onChange={(e) => setOverrideStudentId(e.target.value)}
-                  className={`w-full p-3 rounded-2xl border font-mono ${
-                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900 font-semibold'
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>Session ID / Event ID (ถ้ามี):</label>
-                <input
-                  type="text"
-                  placeholder="เช่น ses_1 หรือปล่อยว่างไว้ปรับเซสชันล่าสุด"
-                  value={overrideSessionId}
-                  onChange={(e) => setOverrideSessionId(e.target.value)}
-                  className={`w-full p-3 rounded-2xl border font-mono ${
-                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900 font-semibold'
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>สถานะที่ต้องการกำหนด:</label>
-                <select
-                  value={overrideStatus}
-                  onChange={(e) => setOverrideStatus(e.target.value)}
-                  className={`w-full p-3 rounded-2xl border font-bold ${
-                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+              {overrideMsg && (
+                <div
+                  className={`mb-4 p-3 rounded-2xl border text-xs font-bold flex items-center space-x-2 ${
+                    isDarkMode ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-950'
                   }`}
                 >
-                  <option value={AttendanceStatus.PRESENT}>🟢 PRESENT (มาเรียน)</option>
-                  <option value={AttendanceStatus.LATE}>🟡 LATE (สาย)</option>
-                  <option value={AttendanceStatus.ABSENT}>🔴 ABSENT (ขาดเรียน)</option>
-                </select>
-              </div>
+                  <CheckCircle className="w-4 h-4 text-emerald-500" />
+                  <span>{overrideMsg}</span>
+                </div>
+              )}
 
-              <button
-                type="submit"
-                className="w-full py-3.5 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-lg shadow-purple-600/30 transition cursor-pointer"
-              >
-                บันทึกการปรับสถานะเช็กชื่อ
-              </button>
-            </form>
+              {overrideErrorMsg && (
+                <div
+                  className={`mb-4 p-3 rounded-2xl border text-xs font-bold flex items-center space-x-2 ${
+                    isDarkMode ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' : 'bg-rose-50 border-rose-200 text-rose-950'
+                  }`}
+                >
+                  <AlertTriangle className="w-4 h-4 text-rose-500" />
+                  <span>{overrideErrorMsg}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleOverrideAttendanceSubmit} className="space-y-4 text-xs">
+                {/* 1. Target User Selector */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
+                      1. ค้นหาและเลือกผู้ใช้ (นักศึกษา หรือ อาจารย์) <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setOverrideUserType('ALL')}
+                        className={`px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
+                          overrideUserType === 'ALL'
+                            ? 'bg-sky-600 text-white shadow'
+                            : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        ทั้งหมด
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOverrideUserType('STUDENT')}
+                        className={`px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
+                          overrideUserType === 'STUDENT'
+                            ? 'bg-sky-600 text-white shadow'
+                            : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        นักศึกษา
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOverrideUserType('TEACHER')}
+                        className={`px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
+                          overrideUserType === 'TEACHER'
+                            ? 'bg-sky-600 text-white shadow'
+                            : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        อาจารย์
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Selected User Preview Card */}
+                  {overrideSelectedUser ? (
+                    <div
+                      className={`p-3 rounded-2xl border flex items-center justify-between ${
+                        isDarkMode
+                          ? 'bg-sky-500/10 border-sky-500/30 text-white'
+                          : 'bg-sky-50/80 border-sky-200 text-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div
+                          className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white shadow-sm ${
+                            overrideSelectedUser.role === UserRole.TEACHER ? 'bg-amber-500' : 'bg-sky-600'
+                          }`}
+                        >
+                          {overrideSelectedUser.role === UserRole.TEACHER ? <UserCheck className="w-5 h-5" /> : <GraduationCap className="w-5 h-5" />}
+                        </div>
+                        <div>
+                          <div className="font-extrabold flex items-center space-x-1.5">
+                            <span>
+                              {overrideSelectedUser.title || ''}
+                              {overrideSelectedUser.firstNameTh} {overrideSelectedUser.lastNameTh}
+                            </span>
+                            <span
+                              className={`px-1.5 py-0.2 rounded text-[9px] font-black ${
+                                overrideSelectedUser.role === UserRole.TEACHER
+                                  ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                                  : 'bg-sky-500/20 text-sky-600 dark:text-sky-400'
+                              }`}
+                            >
+                              {overrideSelectedUser.role === UserRole.TEACHER ? 'อาจารย์' : 'นักศึกษา'}
+                            </span>
+                          </div>
+                          <div className="text-[11px] opacity-75 font-mono">
+                            {overrideSelectedUser.universityId ? `รหัสประจำตัว: ${overrideSelectedUser.universityId} | ` : ''}
+                            User ID: {overrideSelectedUser.id}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOverrideSelectedUser(null);
+                          setOverrideUserSearch('');
+                        }}
+                        className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer border ${
+                          isDarkMode
+                            ? 'bg-slate-800 hover:bg-slate-700 text-rose-400 border-rose-500/30'
+                            : 'bg-white hover:bg-rose-50 text-rose-600 border-rose-200'
+                        }`}
+                      >
+                        ✕ เปลี่ยนผู้ใช้
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="พิมพ์รหัสนักศึกษา, User ID, ชื่อ-นามสกุล หรือ อีเมล..."
+                          value={overrideUserSearch}
+                          onChange={(e) => setOverrideUserSearch(e.target.value)}
+                          className={`w-full pl-9 pr-3 py-2.5 rounded-2xl border font-mono text-xs ${
+                            isDarkMode
+                              ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500'
+                              : 'bg-slate-50 border-slate-300 text-slate-900 font-semibold placeholder-slate-400'
+                          }`}
+                        />
+                      </div>
+
+                      {/* Dropdown list of matching users */}
+                      <div
+                        className={`max-h-48 overflow-y-auto rounded-2xl border divide-y ${
+                          isDarkMode
+                            ? 'bg-slate-800/90 border-slate-700 divide-slate-700/50'
+                            : 'bg-slate-50 border-slate-200 divide-slate-200'
+                        }`}
+                      >
+                        {filteredUsersForOverride.length === 0 ? (
+                          <div className="p-3 text-center text-slate-400 text-[11px]">
+                            {allUsersList.length === 0 ? 'กำลังโหลดรายการผู้ใช้...' : 'ไม่พบข้อมูลผู้ใช้ที่ตรงกับเงื่อนไขการค้นหา'}
+                          </div>
+                        ) : (
+                          filteredUsersForOverride.slice(0, 10).map((u) => (
+                            <div
+                              key={u.id}
+                              onClick={() => {
+                                setOverrideSelectedUser(u);
+                                setOverrideErrorMsg('');
+                              }}
+                              className={`p-2.5 hover:bg-sky-500/10 transition cursor-pointer flex items-center justify-between text-xs ${
+                                isDarkMode ? 'hover:text-sky-300' : 'hover:text-sky-700'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                    u.role === UserRole.TEACHER
+                                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                                      : 'bg-sky-500/20 text-sky-600 dark:text-sky-400'
+                                  }`}
+                                >
+                                  {u.role === UserRole.TEACHER ? 'อาจารย์' : 'นักศึกษา'}
+                                </span>
+                                <span className="font-bold">
+                                  {u.title || ''}
+                                  {u.firstNameTh} {u.lastNameTh}
+                                </span>
+                              </div>
+                              <div className="text-[11px] font-mono text-slate-400">
+                                {u.universityId ? `รหัส: ${u.universityId}` : `ID: ${u.id}`}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Course Selection Dropdown */}
+                <div>
+                  <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
+                    2. เลือกรายวิชา:
+                  </label>
+                  <select
+                    value={overrideCourseId}
+                    onChange={(e) => {
+                      setOverrideCourseId(e.target.value);
+                      setOverrideSessionId('');
+                      setOverrideErrorMsg('');
+                    }}
+                    className={`w-full p-2.5 rounded-2xl border font-semibold ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    <option value="">-- เลือกรายวิชา --</option>
+                    <option value="ALL">-- ทุกวิชา / กิจกรรมส่วนกลาง (Quick Event) --</option>
+                    {allCourses.map((crs) => (
+                      <option key={crs.id} value={crs.id}>
+                        [{crs.courseCode}] {crs.courseName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3. Session Selection Dropdown */}
+                <div>
+                  <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
+                    3. เลือก Session หรือสัปดาห์เรียน:
+                  </label>
+                  <select
+                    value={overrideSessionId}
+                    onChange={(e) => {
+                      setOverrideSessionId(e.target.value);
+                      setOverrideErrorMsg('');
+                    }}
+                    className={`w-full p-2.5 rounded-2xl border font-semibold ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    <option value="">-- เลือก Session --</option>
+                    {(overrideCourseId && overrideCourseId !== 'ALL'
+                      ? allSessions.filter((s) => s.courseId === overrideCourseId)
+                      : allSessions
+                    ).map((ses) => (
+                      <option key={ses.id} value={ses.id}>
+                        สัปดาห์ที่ {ses.weekNumber}: {ses.topic || 'ไม่มีหัวข้อ'} ({ses.isActive ? '🟢 Active' : '🔴 Inactive'})
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Warning if selected course has no sessions */}
+                  {overrideCourseId &&
+                    overrideCourseId !== 'ALL' &&
+                    allSessions.filter((s) => s.courseId === overrideCourseId).length === 0 && (
+                      <div
+                        className={`mt-1.5 p-2 rounded-xl border text-[11px] font-bold flex items-center space-x-1.5 ${
+                          isDarkMode
+                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                            : 'bg-amber-50 border-amber-200 text-amber-900'
+                        }`}
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span>รายวิชานี้ยังไม่มี Session ในระบบ กรุณาสร้าง Session ในเมนูจัดการวิชาก่อน</span>
+                      </div>
+                    )}
+                </div>
+
+                {/* 4. Status Selection (Includes AttendanceStatus & LeaveStatus) */}
+                <div>
+                  <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
+                    4. สถานะที่ต้องการกำหนด (รวมสถานะลา):
+                  </label>
+                  <select
+                    value={overrideStatus}
+                    onChange={(e) => setOverrideStatus(e.target.value)}
+                    className={`w-full p-2.5 rounded-2xl border font-bold ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    <optgroup label="-- สถานะเข้าเรียนทั่วไป --">
+                      <option value={AttendanceStatus.PRESENT}>🟢 PRESENT (มาเรียน)</option>
+                      <option value={AttendanceStatus.LATE}>🟡 LATE (สาย)</option>
+                      <option value={AttendanceStatus.ABSENT}>🔴 ABSENT (ขาดเรียน)</option>
+                    </optgroup>
+                    <optgroup label="-- สถานะการลาเรียน (Leave System) --">
+                      <option value="SICK_LEAVE">🏥 SICK_LEAVE (ลาป่วย)</option>
+                      <option value="PERSONAL_LEAVE">📝 PERSONAL_LEAVE (ลากิจ)</option>
+                      <option value="LEAVE">📄 LEAVE / APPROVED_LEAVE (อนุมัติการลา)</option>
+                    </optgroup>
+                  </select>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isOverrideSubmitting}
+                  className="w-full py-3.5 rounded-2xl bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-extrabold text-xs shadow-lg shadow-sky-600/30 transition cursor-pointer flex items-center justify-center space-x-2"
+                >
+                  {isOverrideSubmitting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>กำลังบันทึกข้อมูล...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-4 h-4" />
+                      <span>บันทึกการปรับสถานะเช็กชื่อ</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+
+            {/* Quick Info & Guidelines */}
+            <div
+              className={`p-6 rounded-3xl border shadow-xl space-y-4 ${
+                isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-800'
+              }`}
+            >
+              <h3 className={`text-base font-extrabold flex items-center space-x-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                <Shield className="w-5 h-5 text-sky-500 dark:text-sky-400" />
+                <span>คำแนะนำสำหรับการใช้ Admin Mode</span>
+              </h3>
+
+              <div className="space-y-3 text-xs leading-relaxed">
+                <div
+                  className={`p-3 rounded-2xl border ${
+                    isDarkMode ? 'bg-sky-500/10 border-sky-500/20 text-sky-300' : 'bg-sky-50 border-sky-200 text-sky-950 font-medium'
+                  }`}
+                >
+                  <span className="font-bold">Realtime Search & Override:</span> ค้นหานักศึกษาหรืออาจารย์ด้วย User ID, รหัสนักศึกษา หรือชื่อจากฐานข้อมูลจริง เพื่อป้องกันข้อมูลซ้ำซ้อน
+                </div>
+
+                <div
+                  className={`p-3 rounded-2xl border ${
+                    isDarkMode ? 'bg-purple-500/10 border-purple-500/20 text-purple-300' : 'bg-purple-50 border-purple-200 text-purple-950 font-medium'
+                  }`}
+                >
+                  <span className="font-bold">Leave Integration:</span> รองรับการปรับสถานะการเช็กชื่อเป็นสถานะลาป่วย (SICK_LEAVE), ลากิจ (PERSONAL_LEAVE) หรืออนุมัติการลา (LEAVE) ได้โดยตรง
+                </div>
+
+                <div
+                  className={`p-3 rounded-2xl border ${
+                    isDarkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-950 font-medium'
+                  }`}
+                >
+                  <span className="font-bold">Check-in Deletion:</span> Admin สามารถตรวจสอบและกดลบรายการเช็กชื่อของทั้งนักศึกษาและอาจารย์ที่มีปัญหาออกจากระบบในตารางด้านล่างได้ทันที
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Quick Info & Guidelines */}
-          <div className={`p-6 rounded-3xl border shadow-xl space-y-4 ${
-            isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-800'
-          }`}>
-            <h3 className={`text-base font-extrabold flex items-center space-x-2 ${
-              isDarkMode ? 'text-white' : 'text-slate-900'
-            }`}>
-              <Shield className="w-5 h-5 text-purple-500 dark:text-purple-400" />
-              <span>คำแนะนำสำหรับการใช้ Admin Mode</span>
-            </h3>
-
-            <div className="space-y-3 text-xs leading-relaxed">
-              <div className={`p-3 rounded-2xl border ${
-                isDarkMode
-                  ? 'bg-purple-500/10 border-purple-500/20 text-purple-300'
-                  : 'bg-purple-50 border-purple-200 text-purple-950 font-medium'
-              }`}>
-                <span className="font-bold">Realtime Firestore Sync:</span> การแก้ไขหรือลบเอกสารผ่านแผงควบคุมนี้จะอัปเดตลงทั้งใน Memory และ Firestore แบบทันที
+          {/* LOWER SECTION: CHECK-IN HISTORY & DELETION TABLE */}
+          <div
+            className={`p-6 rounded-3xl border shadow-xl ${
+              isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
+            }`}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-base font-extrabold flex items-center space-x-2">
+                  <Database className={`w-5 h-5 ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`} />
+                  <span>รายการประวัติการเช็กชื่อและลบข้อมูล (Check-in History & Deletion)</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  ตรวจสอบรายการเช็กชื่อทั้งหมด สามารถค้นหา กรองรายวิชา และกดลบรายการที่ไม่ถูกต้องได้
+                </p>
               </div>
 
-              <div className={`p-3 rounded-2xl border ${
-                isDarkMode
-                  ? 'bg-sky-500/10 border-sky-500/20 text-sky-300'
-                  : 'bg-sky-50 border-sky-200 text-blue-950 font-medium'
-              }`}>
-                <span className="font-bold">Unbind Device (ปลดล็อกเครื่อง):</span> ใช้กรณีที่นักศึกษาเปลี่ยนโทรศัพท์ หรือมีปัญหา anti-proxy ล็อกไม่ให้อุปกรณ์อื่นเช็กชื่อ
+              {/* Role filter buttons */}
+              <div className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl text-xs">
+                <button
+                  type="button"
+                  onClick={() => setCheckinRoleFilter('ALL')}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
+                    checkinRoleFilter === 'ALL'
+                      ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  ทั้งหมด ({allStudentAttendance.length + allTeacherAttendance.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCheckinRoleFilter('STUDENT')}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
+                    checkinRoleFilter === 'STUDENT'
+                      ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  🎓 นักศึกษา ({allStudentAttendance.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCheckinRoleFilter('TEACHER')}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
+                    checkinRoleFilter === 'TEACHER'
+                      ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  👨‍🏫 อาจารย์ ({allTeacherAttendance.length})
+                </button>
+              </div>
+            </div>
+
+            {/* Filter controls bar */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="ค้นหาชื่อ, รหัสนักศึกษา, วิชา, สถานะ..."
+                  value={checkinSearchQuery}
+                  onChange={(e) => setCheckinSearchQuery(e.target.value)}
+                  className={`w-full pl-9 pr-3 py-2 rounded-xl border text-xs ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                />
               </div>
 
-              <div className={`p-3 rounded-2xl border ${
-                isDarkMode
-                  ? 'bg-amber-500/10 border-amber-500/20 text-amber-300'
-                  : 'bg-amber-50 border-amber-200 text-amber-950 font-medium'
-              }`}>
-                <span className="font-bold">Role Switcher:</span> คุณสามารถเปลี่ยนสิทธิ์ของตนเองหรือทดสอบมุมมองของนักศึกษา/อาจารย์ได้ตลอดเวลา
-              </div>
+              <select
+                value={checkinCourseFilter}
+                onChange={(e) => setCheckinCourseFilter(e.target.value)}
+                className={`w-full p-2 rounded-xl border text-xs font-semibold ${
+                  isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                }`}
+              >
+                <option value="ALL">-- กรองตามรายวิชาทั้งหมด --</option>
+                {allCourses.map((crs) => (
+                  <option key={crs.id} value={crs.id}>
+                    [{crs.courseCode}] {crs.courseName}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Check-in History Table */}
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr
+                    className={`border-b font-extrabold ${
+                      isDarkMode ? 'bg-slate-800/80 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <th className="p-3 w-10">#</th>
+                    <th className="p-3">ประเภท</th>
+                    <th className="p-3">ผู้เช็กชื่อ (Name / ID)</th>
+                    <th className="p-3">รายวิชา & Session</th>
+                    <th className="p-3">เวลาที่ประทับ</th>
+                    <th className="p-3">สถานะ</th>
+                    <th className="p-3">วิธีเช็กชื่อ</th>
+                    <th className="p-3 text-right">การจัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${isDarkMode ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-800'}`}>
+                  {(() => {
+                    const combined = [
+                      ...allStudentAttendance.map((a) => ({ ...a, __type: 'STUDENT' as const })),
+                      ...allTeacherAttendance.map((a) => ({ ...a, __type: 'TEACHER' as const })),
+                    ].sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+
+                    const filtered = combined.filter((item) => {
+                      if (checkinRoleFilter === 'STUDENT' && item.__type !== 'STUDENT') return false;
+                      if (checkinRoleFilter === 'TEACHER' && item.__type !== 'TEACHER') return false;
+
+                      if (checkinCourseFilter !== 'ALL') {
+                        const ses = allSessions.find((s) => s.id === item.sessionId);
+                        const itemCourseId = item.courseId || ses?.courseId;
+                        if (itemCourseId !== checkinCourseFilter) return false;
+                      }
+
+                      if (!checkinSearchQuery.trim()) return true;
+                      const q = checkinSearchQuery.toLowerCase().trim();
+                      const str = JSON.stringify(item).toLowerCase();
+                      return str.includes(q);
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={8} className="p-8 text-center text-slate-400 font-medium">
+                            {loadingOverrideData ? 'กำลังโหลดรายการเช็กชื่อ...' : 'ไม่พบรายการเช็กชื่อตรงตามเงื่อนไขที่กำหนด'}
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return filtered.map((item, idx) => {
+                      const ses = allSessions.find((s) => s.id === item.sessionId);
+                      const crs = allCourses.find((c) => c.id === (item.courseId || ses?.courseId));
+
+                      const isStudent = item.__type === 'STUDENT';
+                      const userObj = isStudent
+                        ? allUsersList.find((u) => u.id === item.studentId || (item.studentUniversityId && u.universityId === item.studentUniversityId))
+                        : allUsersList.find((u) => u.id === item.teacherId);
+
+                      const formattedNameFromUser = userObj
+                        ? `${userObj.title || ''}${userObj.firstNameTh || ''} ${userObj.lastNameTh || ''}`.trim()
+                        : '';
+
+                      const displayName = formattedNameFromUser || (isStudent
+                        ? item.studentNameTh || item.studentNameEn || 'นักศึกษา'
+                        : item.teacherName || 'อาจารย์');
+                      const idText = isStudent
+                        ? item.studentUniversityId || item.studentId
+                        : item.teacherId;
+
+                      const statusVal = item.status || 'PRESENT';
+
+                      return (
+                        <tr key={item.id} className={`hover:bg-sky-500/5 transition ${isDarkMode ? '' : 'even:bg-slate-50/50'}`}>
+                          <td className="p-3 font-mono opacity-60 text-[11px]">{idx + 1}</td>
+                          <td className="p-3">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                                isStudent
+                                  ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20'
+                                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                              }`}
+                            >
+                              {isStudent ? '🎓 นักศึกษา' : '👨‍🏫 อาจารย์'}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <div className="font-bold text-slate-900 dark:text-white">{displayName}</div>
+                            <div className="text-[10px] font-mono text-slate-400">{idText}</div>
+                          </td>
+                          <td className="p-3">
+                            <div className="font-semibold text-slate-800 dark:text-slate-200">
+                              {crs ? `[${crs.courseCode}] ${crs.courseName}` : item.courseCode || 'วิชาส่วนกลาง / Quick Event'}
+                            </div>
+                            {ses && (
+                              <div className="text-[10px] text-slate-400">
+                                สัปดาห์ที่ {ses.weekNumber}: {ses.topic || 'เรียนปกติ'}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3 font-mono text-[11px]">
+                            {item.timestamp ? new Date(item.timestamp).toLocaleString('th-TH') : '-'}
+                          </td>
+                          <td className="p-3">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                                statusVal === 'PRESENT'
+                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                  : statusVal === 'LATE'
+                                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                                  : statusVal === 'ABSENT'
+                                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                                  : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20'
+                              }`}
+                            >
+                              {statusVal === 'PRESENT' && '🟢 PRESENT'}
+                              {statusVal === 'LATE' && '🟡 LATE'}
+                              {statusVal === 'ABSENT' && '🔴 ABSENT'}
+                              {['SICK_LEAVE', 'PERSONAL_LEAVE', 'LEAVE'].includes(statusVal) && `📄 ${statusVal}`}
+                              {!['PRESENT', 'LATE', 'ABSENT', 'SICK_LEAVE', 'PERSONAL_LEAVE', 'LEAVE'].includes(statusVal) && statusVal}
+                            </span>
+                          </td>
+                          <td className="p-3 text-[11px] font-mono opacity-80">
+                            {item.checkinMethod || 'HYBRID'}
+                          </td>
+                          <td className="p-3 text-right">
+                            <button
+                              onClick={() => handleDeleteCheckinRecord(item, item.__type)}
+                              className={`px-2.5 py-1 rounded-xl border text-[11px] font-bold transition cursor-pointer flex items-center space-x-1 ml-auto ${
+                                isDarkMode
+                                  ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                  : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                              }`}
+                              title="ลบรายการเช็กชื่อนี้"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                              <span>ลบ</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -2036,7 +2617,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>Latitude (พิกัดสถานที่):</label>
                   <input
@@ -2057,6 +2638,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     step="0.0001"
                     value={editingCourseData.defaultLng || 100.5018}
                     onChange={(e) => setEditingCourseData({ ...editingCourseData, defaultLng: parseFloat(e.target.value) || 0 })}
+                    className={`w-full p-2.5 rounded-xl border font-mono ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900 font-semibold'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>รัศมี GPS อนุญาต (เมตร):</label>
+                  <input
+                    type="number"
+                    min="10"
+                    max="5000"
+                    value={editingCourseData.allowedGpsRadius || 200}
+                    onChange={(e) => setEditingCourseData({ ...editingCourseData, allowedGpsRadius: Math.max(1, parseInt(e.target.value, 10) || 200) })}
                     className={`w-full p-2.5 rounded-xl border font-mono ${
                       isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900 font-semibold'
                     }`}
