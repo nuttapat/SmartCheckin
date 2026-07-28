@@ -73,6 +73,50 @@
         "method": { "type": "string" }
       },
       "required": ["id", "sessionId", "courseId", "studentId", "status"]
+    },
+    "courseMembers": {
+      "title": "courseMembers",
+      "description": "Memberships of students/teachers in courses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "userId": { "type": "string" },
+        "role": { "type": "string" },
+        "joinedAt": { "type": "string" }
+      }
+    },
+    "quickEvents": {
+      "title": "quickEvents",
+      "description": "Quick attendance check-in events",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherLat": { "type": "number" },
+        "teacherLng": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "leaveRequests": {
+      "title": "leaveRequests",
+      "description": "Student leave/sick leave requests with attached evidence",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "universityId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "leaveType": { "type": "string" },
+        "reason": { "type": "string" },
+        "evidenceUrl": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      }
     }
   }
 }

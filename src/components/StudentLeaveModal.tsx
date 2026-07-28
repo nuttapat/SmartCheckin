@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { User, Course, LeaveRequest, LeaveType, LeaveStatus } from '../types';
-import { submitLeaveRequest, fetchStudentLeaveRequests, cancelLeaveRequest } from '../services/api';
-import { FileText, Calendar, Clock, AlertCircle, CheckCircle, XCircle, Upload, Plus, Trash2, X, Eye, FileCheck, ShieldAlert, Sparkles } from 'lucide-react';
+import { submitLeaveRequest, fetchStudentLeaveRequests, cancelLeaveRequest, fetchCourseDetails } from '../services/api';
+import { FileText, Calendar, Clock, AlertCircle, CheckCircle, XCircle, Upload, Plus, Trash2, X, Eye, FileCheck, ShieldAlert, Sparkles, CalendarDays } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 
 interface StudentLeaveModalProps {
   isOpen: boolean;
@@ -16,8 +17,11 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
   onClose,
   student,
   courses,
-  isDarkMode = true,
+  isDarkMode: propIsDarkMode,
 }) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
+
   const [activeTab, setActiveTab] = useState<'NEW' | 'HISTORY'>('NEW');
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -25,16 +29,23 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
 
   // Form states
   const [selectedCourseId, setSelectedCourseId] = useState<string>(courses[0]?.id || '');
+  const [leaveRangeMode, setLeaveRangeMode] = useState<'SINGLE' | 'MULTI'>('SINGLE');
   const [weekNumber, setWeekNumber] = useState<string>('');
   const [leaveType, setLeaveType] = useState<LeaveType>(LeaveType.SICK);
   const [leaveDate, setLeaveDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [reason, setReason] = useState<string>('');
   const [attachmentName, setAttachmentName] = useState<string>('');
   const [attachmentUrl, setAttachmentUrl] = useState<string>('');
   const [selectedImagePreview, setSelectedImagePreview] = useState<string | null>(null);
 
+  const [courseSessions, setCourseSessions] = useState<any[]>([]);
+  const [classCheckWarning, setClassCheckWarning] = useState<string>('');
+
   const [formError, setFormError] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string>('');
+
+  const selectedCourse = courses.find((c) => c.id === selectedCourseId);
 
   useEffect(() => {
     if (isOpen) {
@@ -44,6 +55,85 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
       }
     }
   }, [isOpen, student.id]);
+
+  useEffect(() => {
+    if (selectedCourseId) {
+      fetchCourseDetails(selectedCourseId)
+        .then((data) => {
+          if (data && data.sessions) {
+            setCourseSessions(data.sessions);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [selectedCourseId]);
+
+  // Sync logic when Week Number changes
+  const handleWeekChange = (selectedWk: string) => {
+    setWeekNumber(selectedWk);
+    if (!selectedWk) {
+      setClassCheckWarning('');
+      return;
+    }
+    const wkNum = parseInt(selectedWk, 10);
+    const foundWeek = selectedCourse?.weeks?.find((w) => w.weekNumber === wkNum);
+    if (foundWeek && foundWeek.date) {
+      setLeaveDate(foundWeek.date);
+      if (leaveRangeMode === 'MULTI' && endDate < foundWeek.date) {
+        setEndDate(foundWeek.date);
+      }
+      setClassCheckWarning('');
+    } else {
+      const foundSession = courseSessions.find((s) => s.weekNumber === wkNum);
+      if (foundSession && foundSession.createdAt) {
+        const sDate = foundSession.createdAt.split('T')[0];
+        setLeaveDate(sDate);
+        if (leaveRangeMode === 'MULTI' && endDate < sDate) {
+          setEndDate(sDate);
+        }
+        setClassCheckWarning('');
+      } else {
+        setClassCheckWarning(`ไม่มีการเรียนของรายวิชา ${selectedCourse?.courseCode || ''} ในสัปดาห์ที่เลือก (สัปดาห์ที่ ${selectedWk})`);
+      }
+    }
+  };
+
+  // Sync logic when Leave Date changes
+  const handleLeaveDateChange = (newDate: string) => {
+    setLeaveDate(newDate);
+    if (leaveRangeMode === 'MULTI' && endDate < newDate) {
+      setEndDate(newDate);
+    }
+    if (!newDate) return;
+
+    let matchedWeek: number | undefined;
+
+    if (selectedCourse?.weeks && selectedCourse.weeks.length > 0) {
+      const foundWk = selectedCourse.weeks.find((w) => w.date === newDate);
+      if (foundWk) {
+        matchedWeek = foundWk.weekNumber;
+      }
+    }
+
+    if (!matchedWeek && courseSessions.length > 0) {
+      const foundSes = courseSessions.find((s) => s.createdAt && s.createdAt.startsWith(newDate));
+      if (foundSes) {
+        matchedWeek = foundSes.weekNumber;
+      }
+    }
+
+    if (matchedWeek) {
+      setWeekNumber(matchedWeek.toString());
+      setClassCheckWarning('');
+    } else {
+      setWeekNumber('');
+      if (selectedCourse?.weeks && selectedCourse.weeks.length > 0) {
+        setClassCheckWarning(`ไม่มีการเรียนของรายวิชา ${selectedCourse?.courseCode || ''} ในสัปดาห์ที่เลือก (หรือวันที่เลือกไม่มีคลาสเรียนของวิชานี้)`);
+      } else {
+        setClassCheckWarning('');
+      }
+    }
+  };
 
   const loadHistory = async () => {
     try {
@@ -57,7 +147,34 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const openDocumentPreview = (url: string) => {
+    if (!url) return;
+    if (url.startsWith('data:image/')) {
+      setSelectedImagePreview(url);
+    } else {
+      try {
+        const parts = url.split(',');
+        if (parts.length === 2) {
+          const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/pdf';
+          const bstr = atob(parts[1]);
+          let n = bstr.length;
+          const u8arr = new Uint8Array(n);
+          while (n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+          }
+          const blob = new Blob([u8arr], { type: mime });
+          const blobUrl = URL.createObjectURL(blob);
+          window.open(blobUrl, '_blank');
+        } else {
+          window.open(url, '_blank');
+        }
+      } catch (err) {
+        window.open(url, '_blank');
+      }
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -69,12 +186,43 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
 
     setAttachmentName(file.name);
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result as string;
-      setAttachmentUrl(result);
-    };
-    reader.readAsDataURL(file);
+    if (file.type.startsWith('image/')) {
+      // Compress image to fit within safe storage limits
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 1200;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          setAttachmentUrl(canvas.toDataURL('image/jpeg', 0.95));
+        };
+        img.onerror = () => setAttachmentUrl(event.target?.result as string);
+      };
+    } else {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        setAttachmentUrl(result);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -92,6 +240,17 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
       return;
     }
 
+    if (leaveRangeMode === 'MULTI') {
+      if (!endDate) {
+        setFormError('กรุณาระบุวันที่สิ้นสุดการลา');
+        return;
+      }
+      if (endDate < leaveDate) {
+        setFormError('วันที่สิ้นสุดการลาต้องไม่น้อยกว่าวันที่เริ่มต้น');
+        return;
+      }
+    }
+
     if (!reason.trim()) {
       setFormError('กรุณาระบุเหตุผลการลา');
       return;
@@ -105,6 +264,8 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
         weekNumber: weekNumber ? parseInt(weekNumber, 10) : undefined,
         leaveType,
         leaveDate,
+        endDate: leaveRangeMode === 'MULTI' ? endDate : undefined,
+        isMultiDay: leaveRangeMode === 'MULTI',
         reason: reason.trim(),
         attachmentUrl: attachmentUrl || undefined,
         attachmentName: attachmentName || undefined,
@@ -116,6 +277,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
       setAttachmentName('');
       setAttachmentUrl('');
       setWeekNumber('');
+      setClassCheckWarning('');
       
       // Reload history and switch tab
       await loadHistory();
@@ -141,8 +303,6 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
   };
 
   if (!isOpen) return null;
-
-  const selectedCourse = courses.find((c) => c.id === selectedCourseId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
@@ -250,6 +410,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                     onChange={(e) => {
                       setSelectedCourseId(e.target.value);
                       setWeekNumber('');
+                      setClassCheckWarning('');
                     }}
                     className={`w-full p-3 rounded-2xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
                       isDarkMode
@@ -264,6 +425,50 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                     ))}
                   </select>
                 )}
+              </div>
+
+              {/* Leave Duration Range Selector */}
+              <div>
+                <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  รูปแบบระยะเวลาการลา <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLeaveRangeMode('SINGLE');
+                      setClassCheckWarning('');
+                    }}
+                    className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-center space-x-2 transition ${
+                      leaveRangeMode === 'SINGLE'
+                        ? 'bg-sky-600 text-white border-sky-500 shadow-md'
+                        : isDarkMode
+                        ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                        : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Calendar className="w-4 h-4" />
+                    <span>ลาคาบเดียว / 1 วัน</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLeaveRangeMode('MULTI');
+                      if (endDate < leaveDate) setEndDate(leaveDate);
+                      setClassCheckWarning('');
+                    }}
+                    className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-center space-x-2 transition ${
+                      leaveRangeMode === 'MULTI'
+                        ? 'bg-sky-600 text-white border-sky-500 shadow-md'
+                        : isDarkMode
+                        ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                        : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                    }`}
+                  >
+                    <CalendarDays className="w-4 h-4" />
+                    <span>ลาหลายวัน / ช่วงวันที่</span>
+                  </button>
+                </div>
               </div>
 
               {/* Leave Type and Date Grid */}
@@ -288,15 +493,16 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                   </select>
                 </div>
 
-                {/* Leave Date */}
+                {/* Leave Date or Start Date */}
                 <div>
                   <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                    วันที่ขอลา <span className="text-rose-500">*</span>
+                    {leaveRangeMode === 'MULTI' ? 'วันที่เริ่มต้นลา ' : 'วันที่ขอลา '}
+                    <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="date"
                     value={leaveDate}
-                    onChange={(e) => setLeaveDate(e.target.value)}
+                    onChange={(e) => handleLeaveDateChange(e.target.value)}
                     className={`w-full p-3 rounded-2xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
                       isDarkMode
                         ? 'bg-slate-800 border-slate-700 text-white'
@@ -305,31 +511,58 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                   />
                 </div>
 
-                {/* Optional Teaching Week */}
-                <div>
-                  <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                    สัปดาห์เรียน (ถ้าทราบ)
-                  </label>
-                  <select
-                    value={weekNumber}
-                    onChange={(e) => setWeekNumber(e.target.value)}
-                    className={`w-full p-3 rounded-2xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
-                      isDarkMode
-                        ? 'bg-slate-800 border-slate-700 text-white'
-                        : 'bg-slate-50 border-slate-300 text-slate-900'
-                    }`}
-                  >
-                    <option value="">-- ไม่ระบุ --</option>
-                    {selectedCourse?.weeks?.map((w) => (
-                      <option key={w.weekNumber} value={w.weekNumber}>
-                        สัปดาห์ที่ {w.weekNumber}: {w.topic}
-                      </option>
-                    )) || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((w) => (
-                      <option key={w} value={w}>สัปดาห์ที่ {w}</option>
-                    ))}
-                  </select>
-                </div>
+                {/* End Date (Multi-Day) OR Week Number (Single-Day) */}
+                {leaveRangeMode === 'MULTI' ? (
+                  <div>
+                    <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      วันที่สิ้นสุดการลา <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      min={leaveDate}
+                      className={`w-full p-3 rounded-2xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                        isDarkMode
+                          ? 'bg-slate-800 border-slate-700 text-white'
+                          : 'bg-slate-50 border-slate-300 text-slate-900'
+                      }`}
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      สัปดาห์เรียน
+                    </label>
+                    <select
+                      value={weekNumber}
+                      onChange={(e) => handleWeekChange(e.target.value)}
+                      className={`w-full p-3 rounded-2xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                        isDarkMode
+                          ? 'bg-slate-800 border-slate-700 text-white'
+                          : 'bg-slate-50 border-slate-300 text-slate-900'
+                      }`}
+                    >
+                      <option value="">-- ไม่ระบุ / Sync ตามวันที่ --</option>
+                      {selectedCourse?.weeks?.map((w) => (
+                        <option key={w.weekNumber} value={w.weekNumber}>
+                          สัปดาห์ที่ {w.weekNumber}: {w.topic} {w.date ? `(${w.date})` : ''}
+                        </option>
+                      )) || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((w) => (
+                        <option key={w} value={w}>สัปดาห์ที่ {w}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
+
+              {/* Class Existence Warning Banner */}
+              {classCheckWarning && (
+                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium flex items-center space-x-2.5">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                  <span>{classCheckWarning}</span>
+                </div>
+              )}
 
               {/* Reason */}
               <div>
@@ -368,14 +601,15 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                         <span className="text-xs font-medium truncate">{attachmentName}</span>
                       </div>
                       <div className="flex items-center space-x-2 shrink-0">
-                        {attachmentUrl.startsWith('data:image/') && (
+                        {attachmentUrl && (
                           <button
                             type="button"
-                            onClick={() => setSelectedImagePreview(attachmentUrl)}
-                            className="p-1 hover:bg-sky-500/20 rounded-lg text-sky-400 transition"
-                            title="ดูตัวอย่างรูปภาพ"
+                            onClick={() => openDocumentPreview(attachmentUrl)}
+                            className="p-1.5 hover:bg-sky-500/20 rounded-lg text-sky-400 font-bold text-xs flex items-center space-x-1 transition cursor-pointer"
+                            title="ดูตัวอย่างเอกสาร"
                           >
                             <Eye className="w-4 h-4" />
+                            <span>ดูไฟล์</span>
                           </button>
                         )}
                         <button
@@ -488,7 +722,11 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                             <div className="text-xs text-slate-400 mt-1 flex items-center space-x-3">
                               <span>{typeLabel}</span>
                               <span>•</span>
-                              <span>วันที่ลา: {leave.leaveDate}</span>
+                              <span>
+                                {leave.isMultiDay && leave.endDate
+                                  ? `ช่วงวันที่ลา: ${leave.leaveDate} ถึง ${leave.endDate}`
+                                  : `วันที่ลา: ${leave.leaveDate}`}
+                              </span>
                               {leave.weekNumber && (
                                 <>
                                   <span>•</span>
@@ -528,14 +766,14 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                             <div className="flex items-center space-x-2 pt-1">
                               <FileCheck className="w-4 h-4 text-sky-400 shrink-0" />
                               <span className="text-sky-400 font-medium">เอกสารประกอบ: {leave.attachmentName}</span>
-                              {leave.attachmentUrl && leave.attachmentUrl.startsWith('data:image/') && (
+                              {leave.attachmentUrl && (
                                 <button
                                   type="button"
-                                  onClick={() => setSelectedImagePreview(leave.attachmentUrl!)}
-                                  className="text-sky-400 hover:underline flex items-center space-x-1 font-bold ml-2"
+                                  onClick={() => openDocumentPreview(leave.attachmentUrl!)}
+                                  className="text-sky-400 hover:underline flex items-center space-x-1 font-bold ml-2 cursor-pointer"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
-                                  <span>ดูรูปภาพ</span>
+                                  <span>เปิดดูเอกสาร</span>
                                 </button>
                               )}
                             </div>

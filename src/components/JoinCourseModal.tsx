@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { joinCourseByInvite } from '../services/api';
 import { X, KeyRound, CheckCircle2 } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 
 interface JoinCourseModalProps {
   isOpen: boolean;
@@ -15,8 +16,10 @@ export const JoinCourseModal: React.FC<JoinCourseModalProps> = ({
   onClose,
   userId,
   onSuccess,
-  isDarkMode = true,
+  isDarkMode: propIsDarkMode,
 }) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [code, setCode] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -64,7 +67,7 @@ export const JoinCourseModal: React.FC<JoinCourseModalProps> = ({
 
           <div>
             <label className={`block text-xs font-semibold mb-1.5 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-              ป้อนรหัสเชิญชวนจากอาจารย์ (Invite Code)
+              ป้อนรหัสเชิญชวนจากอาจารย์ (Invite Code) <span className="text-rose-500">*</span>
             </label>
             <input
               type="text"

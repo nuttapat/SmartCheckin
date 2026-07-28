@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { fetchCurrentUser, fetchCourses, createCourse } from '../services/api';
+import { useTheme } from '../context/ThemeContext';
 
 interface TestingAgentModalProps {
   isOpen: boolean;
@@ -40,8 +41,10 @@ export const TestingAgentModal: React.FC<TestingAgentModalProps> = ({
   isOpen,
   onClose,
   currentUser,
-  isDarkMode = true,
+  isDarkMode: propIsDarkMode,
 }) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [activeTab, setActiveTab] = useState<'auto' | 'checklist' | 'google_sim' | 'report'>('auto');
   const [isRunningAll, setIsRunningAll] = useState<boolean>(false);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
@@ -268,9 +271,9 @@ export const TestingAgentModal: React.FC<TestingAgentModalProps> = ({
         const distanceMeters = Math.round(R * c);
 
         logMessages.push(`Calculated distance: ${distanceMeters} meters.`);
-        logMessages.push(`Geofence Radius Limit: 50 meters.`);
-        logMessages.push(`Result: ${distanceMeters <= 50 ? 'WITHIN GEOFENCE (PRESENT)' : 'OUTSIDE GEOFENCE'}`);
-        passed = distanceMeters <= 50;
+        logMessages.push(`Geofence Radius Limit: 200 meters.`);
+        logMessages.push(`Result: ${distanceMeters <= 200 ? 'WITHIN GEOFENCE (PRESENT)' : 'OUTSIDE GEOFENCE'}`);
+        passed = distanceMeters <= 200;
       } else if (tcId === 'tc_device_binding_anti_proxy') {
         logMessages.push('Testing Anti-Proxy Device Binding key generation...');
         const mockDevice1 = 'dev_student_66010012';

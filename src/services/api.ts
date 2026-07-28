@@ -88,7 +88,7 @@ export async function googleLogin(
   firstNameEn?: string,
   lastNameEn?: string,
   password?: string
-): Promise<{ message: string; user?: User; requiresOnboarding?: boolean; email?: string; name?: string; picture?: string }> {
+): Promise<{ message: string; user?: User; requiresOnboarding?: boolean; forcedRole?: string | null; email?: string; name?: string; picture?: string }> {
   const res = await fetch(`${API_BASE}/auth/google`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -158,11 +158,20 @@ export async function fetchCourseDetails(courseId: string) {
   return res.json();
 }
 
-export async function activateSession(sessionId: string, lat: number, lng: number) {
+export async function activateSession(sessionId: string, lat: number, lng: number, isGpsCheckEnabled: boolean = true) {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/activate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ teacherLat: lat, teacherLng: lng }),
+    body: JSON.stringify({ teacherLat: lat, teacherLng: lng, isGpsCheckEnabled }),
+  });
+  return res.json();
+}
+
+export async function toggleGpsCheck(targetId: string, isGpsCheckEnabled: boolean) {
+  const res = await fetch(`${API_BASE}/sessions/${targetId}/gps-toggle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ isGpsCheckEnabled }),
   });
   return res.json();
 }
@@ -207,11 +216,11 @@ export async function submitCheckin(params: {
   return data;
 }
 
-export async function createQuickEvent(title: string, lat: number, lng: number, teacherId: string): Promise<QuickEvent> {
+export async function createQuickEvent(title: string, lat: number, lng: number, teacherId: string, isGpsCheckEnabled: boolean = true): Promise<QuickEvent> {
   const res = await fetch(`${API_BASE}/quick-events`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, teacherLat: lat, teacherLng: lng, teacherId }),
+    body: JSON.stringify({ title, teacherLat: lat, teacherLng: lng, teacherId, isGpsCheckEnabled }),
   });
   return res.json();
 }
@@ -220,6 +229,23 @@ export async function fetchTeachers(): Promise<User[]> {
   const res = await fetch(`${API_BASE}/teachers`);
   if (!res.ok) throw new Error('Failed to fetch teachers list');
   return res.json();
+}
+
+export async function fetchStudents(): Promise<User[]> {
+  const res = await fetch(`${API_BASE}/students`);
+  if (!res.ok) throw new Error('Failed to fetch students list');
+  return res.json();
+}
+
+export async function inviteStudentToCourse(courseId: string, studentUserId: string) {
+  const res = await fetch(`${API_BASE}/courses/${courseId}/members/invite-student`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ studentUserId }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to invite student');
+  return data;
 }
 
 export async function inviteTeacherToCourse(courseId: string, teacherUserId: string, role: string) {
@@ -318,6 +344,8 @@ export async function submitLeaveRequest(params: {
   weekNumber?: number;
   leaveType: LeaveType;
   leaveDate: string;
+  endDate?: string;
+  isMultiDay?: boolean;
   reason: string;
   attachmentUrl?: string;
   attachmentName?: string;

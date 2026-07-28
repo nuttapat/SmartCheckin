@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Course, LeaveRequest, LeaveStatus, LeaveType } from '../types';
 import { fetchTeacherLeaveRequests, updateLeaveRequestStatus } from '../services/api';
 import { FileText, CheckCircle, XCircle, Clock, Search, Filter, Eye, X, MessageSquare, AlertCircle, Sparkles, UserCheck } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 
 interface TeacherLeaveManagementModalProps {
   isOpen: boolean;
@@ -16,8 +17,11 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
   onClose,
   teacher,
   courses,
-  isDarkMode = true,
+  isDarkMode: propIsDarkMode,
 }) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
+
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [statusFilter, setStatusFilter] = useState<'ALL' | LeaveStatus>('ALL');
@@ -30,6 +34,33 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
   const [teacherComment, setTeacherComment] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+
+  const openDocumentPreview = (url: string) => {
+    if (!url) return;
+    if (url.startsWith('data:image/')) {
+      setImagePreviewUrl(url);
+    } else {
+      try {
+        const parts = url.split(',');
+        if (parts.length === 2) {
+          const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/pdf';
+          const bstr = atob(parts[1]);
+          let n = bstr.length;
+          const u8arr = new Uint8Array(n);
+          while (n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+          }
+          const blob = new Blob([u8arr], { type: mime });
+          const blobUrl = URL.createObjectURL(blob);
+          window.open(blobUrl, '_blank');
+        } else {
+          window.open(url, '_blank');
+        }
+      } catch (err) {
+        window.open(url, '_blank');
+      }
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -245,7 +276,11 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
                       <div className="text-xs text-slate-400 mt-1 flex items-center space-x-3">
                         <span>{typeLabel}</span>
                         <span>•</span>
-                        <span>วันที่ลา: {item.leaveDate}</span>
+                        <span>
+                          {item.isMultiDay && item.endDate
+                            ? `ช่วงวันที่ลา: ${item.leaveDate} ถึง ${item.endDate}`
+                            : `วันที่ลา: ${item.leaveDate}`}
+                        </span>
                         {item.weekNumber && (
                           <>
                             <span>•</span>
@@ -291,14 +326,14 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
                       <div className="flex items-center space-x-2 pt-1">
                         <FileText className="w-4 h-4 text-sky-400 shrink-0" />
                         <span className="text-sky-400 font-medium">หลักฐานประกอบ: {item.attachmentName}</span>
-                        {item.attachmentUrl && item.attachmentUrl.startsWith('data:image/') && (
+                        {item.attachmentUrl && (
                           <button
                             type="button"
-                            onClick={() => setImagePreviewUrl(item.attachmentUrl!)}
+                            onClick={() => openDocumentPreview(item.attachmentUrl!)}
                             className="text-sky-400 hover:underline flex items-center space-x-1 font-bold ml-2 cursor-pointer"
                           >
                             <Eye className="w-3.5 h-3.5" />
-                            <span>ดูรูปภาพหลักฐาน</span>
+                            <span>เปิดดูเอกสารหลักฐาน</span>
                           </button>
                         )}
                       </div>
@@ -344,7 +379,12 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
             <div className="text-xs space-y-1 text-slate-300">
               <p><span className="font-bold text-slate-400">นักศึกษา:</span> {actionItem.studentNameTh} ({actionItem.studentUniversityId})</p>
               <p><span className="font-bold text-slate-400">วิชา:</span> [{actionItem.courseCode}] {actionItem.courseName}</p>
-              <p><span className="font-bold text-slate-400">วันที่ลา:</span> {actionItem.leaveDate}</p>
+              <p>
+                <span className="font-bold text-slate-400">วันที่ลา:</span>{' '}
+                {actionItem.isMultiDay && actionItem.endDate
+                  ? `${actionItem.leaveDate} ถึง ${actionItem.endDate}`
+                  : actionItem.leaveDate}
+              </p>
             </div>
 
             <div>

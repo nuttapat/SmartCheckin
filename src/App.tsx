@@ -12,6 +12,7 @@ import { UserSettingsModal } from './components/UserSettingsModal';
 import { LoginPage } from './components/LoginPage';
 import { TestingAgentModal } from './components/TestingAgentModal';
 import { AdminDashboard } from './components/AdminDashboard';
+import { useTheme } from './context/ThemeContext';
 
 // Sample pre-seeded users for instant testing
 const INITIAL_USERS: User[] = [
@@ -98,7 +99,7 @@ export default function App() {
     return null;
   });
 
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
+  const { isDarkMode, toggleTheme } = useTheme();
 
   // Modals
   const [isRegisterOpen, setIsRegisterOpen] = useState<boolean>(false);
@@ -172,7 +173,7 @@ export default function App() {
           onOpenRegister={() => setIsRegisterOpen(true)}
           allUsers={allUsers}
           isDarkMode={isDarkMode}
-          onToggleTheme={() => setIsDarkMode(!isDarkMode)}
+          onToggleTheme={toggleTheme}
           onOpenTestingAgent={() => setIsTestingAgentOpen(true)}
         />
         <RegisterModal
@@ -217,7 +218,7 @@ export default function App() {
         onOpenTestingAgent={() => setIsTestingAgentOpen(true)}
         onLogout={handleLogout}
         isDarkMode={isDarkMode}
-        onToggleTheme={() => setIsDarkMode(!isDarkMode)}
+        onToggleTheme={toggleTheme}
       />
 
       {/* Main Content View */}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { User, Course, Session, AttendanceRecord, TeacherAttendanceRecord, QuickEvent, InviteLink, CourseMember, CourseMemberRole } from '../types';
-import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, createQuickEvent, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests } from '../services/api';
-import { QrCode, Users, Download, Sparkles, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown } from 'lucide-react';
+import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, createQuickEvent, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck } from '../services/api';
+import { QrCode, Users, Download, Sparkles, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
@@ -9,6 +9,8 @@ import { TeacherCourseEditModal } from './TeacherCourseEditModal';
 import { TeacherLeaveManagementModal } from './TeacherLeaveManagementModal';
 import { DeleteCourseConfirmModal } from './DeleteCourseConfirmModal';
 import { TeacherInviteModal } from './TeacherInviteModal';
+import { StudentInviteModal } from './StudentInviteModal';
+import { useTheme } from '../context/ThemeContext';
 
 interface TeacherDashboardProps {
   teacher: User;
@@ -23,8 +25,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onOpenCreateCourse,
   onOpenQuickEvent,
   quickEventTrigger,
-  isDarkMode = true,
+  isDarkMode: propIsDarkMode,
 }) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
@@ -34,6 +38,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
   const [isDeleteCourseModalOpen, setIsDeleteCourseModalOpen] = useState<boolean>(false);
   const [isInviteTeacherModalOpen, setIsInviteTeacherModalOpen] = useState<boolean>(false);
+  const [isInviteStudentModalOpen, setIsInviteStudentModalOpen] = useState<boolean>(false);
   const [isLeaveManagementOpen, setIsLeaveManagementOpen] = useState<boolean>(false);
   const [pendingLeaveCount, setPendingLeaveCount] = useState<number>(0);
 
@@ -518,7 +523,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         }
       }
 
-      const res = await activateSession(session.id, currentLat, currentLng);
+      const res = await activateSession(session.id, currentLat, currentLng, isGpsCheckEnabled);
 
       // Render initial QR
       const initialText = `SES:${session.id}:${res.qrToken || 'active'}`;
@@ -548,10 +553,24 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
   };
 
+  // Toggle GPS Geofence Check and Sync with Server
+  const handleToggleGps = async () => {
+    const nextVal = !isGpsCheckEnabled;
+    setIsGpsCheckEnabled(nextVal);
+    const targetId = activeSession?.id || quickEventModal?.id;
+    if (targetId) {
+      try {
+        await toggleGpsCheck(targetId, nextVal);
+      } catch (err) {
+        console.error('Failed to sync GPS toggle with server:', err);
+      }
+    }
+  };
+
   // Launch Quick Check-in (Ad-hoc Event)
   const handleLaunchQuickEvent = async () => {
     try {
-      const qEvt = await createQuickEvent('การเช็คชื่อด่วน (Quick Event)', teacherCoords.lat, teacherCoords.lng, teacher.id);
+      const qEvt = await createQuickEvent('การเช็คชื่อด่วน (Quick Event)', teacherCoords.lat, teacherCoords.lng, teacher.id, isGpsCheckEnabled);
       setQuickEventModal(qEvt);
       setLiveCheckins([]);
 
@@ -784,14 +803,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 </p>
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <button
-                    onClick={() => handleGenerateInvite('STUDENT')}
-                    className="py-2 px-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-xs font-bold transition"
+                    onClick={() => setIsInviteStudentModalOpen(true)}
+                    className="py-2 px-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-xs font-bold transition cursor-pointer"
                   >
                     เชิญนักศึกษา (Student)
                   </button>
                   <button
-                    onClick={() => handleGenerateInvite('CO_TEACHER')}
-                    className="py-2 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold transition"
+                    onClick={() => setIsInviteTeacherModalOpen(true)}
+                    className="py-2 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold transition cursor-pointer"
                   >
                     เชิญอาจารย์ผู้สอนร่วม
                   </button>
@@ -837,18 +856,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto ml-auto">
-                    {/* Invite Teachers button - Available for Course Coordinators & Owners */}
-                    {teacherRoleInfo.isCoordinator && (
-                      <button
-                        onClick={() => setIsInviteTeacherModalOpen(true)}
-                        className="px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-500/15 hover:bg-purple-500/25 text-purple-600 dark:text-purple-300 border border-purple-500/30 flex items-center space-x-1.5 transition active:scale-95 cursor-pointer shadow-xs"
-                        title="เชิญอาจารย์และจัดการสิทธิ์รายวิชา"
-                      >
-                        <UserPlus className="w-3.5 h-3.5" />
-                        <span>เชิญอาจารย์ผู้สอน</span>
-                      </button>
-                    )}
-
                     <button
                       onClick={() => {
                         if (teacherRoleInfo.canEdit) {
@@ -866,25 +873,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     >
                       <Edit3 className="w-3.5 h-3.5" />
                       <span>แก้ไขวิชา / เพิ่มลดสัปดาห์</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        if (teacherRoleInfo.canEdit) {
-                          setIsDeleteCourseModalOpen(true);
-                        } else {
-                          alert("สิทธิ์ไม่เพียงพอ: เฉพาะผู้รับผิดชอบรายวิชา (Course Coordinator) และเจ้าของรายวิชาเท่านั้นที่มีสิทธิ์ลบรายวิชา\n\nสิทธิ์ของคุณ: " + (teacherRoleInfo.isCoCoordinator ? "ผู้ร่วมรับผิดชอบรายวิชา" : "อาจารย์ผู้สอน"));
-                        }
-                      }}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition active:scale-95 cursor-pointer ${
-                        teacherRoleInfo.canEdit
-                          ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30'
-                          : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 opacity-70'
-                      }`}
-                      title={teacherRoleInfo.canEdit ? "ลบรายวิชานี้ถาวร" : "เฉพาะผู้รับผิดชอบรายวิชาเท่านั้นที่ลบรายวิชาได้"}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>ลบรายวิชา</span>
                     </button>
 
                     {/* Export Student Attendance CSV Button */}
@@ -1857,23 +1845,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
       {/* DYNAMIC QR DISPLAY MODAL / SCREEN (Active QR Session or Quick Event) */}
       {(activeSession || quickEventModal) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto">
-          <div className={`border rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden my-6 ${
+        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
+          <div className={`border rounded-2xl sm:rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
           }`}>
             {/* Modal Header */}
-            <div className={`px-6 py-4 border-b flex items-center justify-between ${
+            <div className={`px-4 sm:px-6 py-3 sm:py-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 ${
               isDarkMode ? 'bg-slate-800/80 border-slate-800' : 'bg-slate-50 border-slate-100'
             }`}>
               <div className="flex items-center space-x-3">
-                <div className="w-3 h-3 rounded-full bg-emerald-500 animate-ping"></div>
+                <div className="w-3 h-3 rounded-full bg-emerald-500 animate-ping shrink-0"></div>
                 <div>
-                  <h3 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                  <h3 className={`text-sm sm:text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                     {quickEventModal
                       ? 'โหมดเช็คชื่อด่วน (Quick Check-in Mode)'
                       : `กำลังเปิดสแกน: ${selectedCourse?.courseCode} - สัปดาห์ที่ ${activeSession?.weekNumber}`}
                   </h3>
-                  <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <p className={`text-[11px] sm:text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     Dynamic QR Code เปลี่ยนรหัสอัตโนมัติทุก 30 วินาที • ป้องกันการถ่ายรูปส่งให้เพื่อน
                   </p>
                 </div>
@@ -1881,7 +1869,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
               <button
                 onClick={handleStopSessionQR}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 transition shadow-sm active:scale-95"
+                className="w-full sm:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition shadow-sm active:scale-95 shrink-0"
               >
                 <Square className="w-3.5 h-3.5 fill-current" />
                 <span>ปิดหน้าจอรับเช็คชื่อ</span>
@@ -1889,16 +1877,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </div>
 
             {/* Modal Body Grid */}
-            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+            <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 items-start overflow-y-auto">
               {/* Dynamic QR Code Canvas Display */}
-              <div className={`flex flex-col items-center justify-center p-6 rounded-2xl border space-y-4 ${
+              <div className={`flex flex-col items-center justify-center p-4 sm:p-6 rounded-2xl border space-y-4 ${
                 isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-100/70 border-slate-200'
               }`}>
-                <div className="relative p-4 bg-white rounded-2xl shadow-xl border border-slate-100">
+                <div className="relative p-3 sm:p-4 bg-white rounded-2xl shadow-xl border border-slate-100">
                   {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="Dynamic Attendance QR" className="w-60 h-60 object-contain" />
+                    <img src={qrDataUrl} alt="Dynamic Attendance QR" className="w-48 h-48 sm:w-60 sm:h-60 object-contain" />
                   ) : (
-                    <div className="w-60 h-60 flex items-center justify-center text-slate-500">
+                    <div className="w-48 h-48 sm:w-60 sm:h-60 flex items-center justify-center text-slate-500 text-xs">
                       กำลังสร้าง QR Code...
                     </div>
                   )}
@@ -1913,7 +1901,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     🔑 รหัส Token 6 ตัวอักษร (สำหรับป้อนด้วยตนเอง):
                   </div>
                   <div className="flex items-center justify-center space-x-3">
-                    <span className="font-mono text-2xl font-black tracking-widest text-emerald-400">
+                    <span className="font-mono text-xl sm:text-2xl font-black tracking-widest text-emerald-400">
                       {qrToken || '------'}
                     </span>
                     <button
@@ -1952,7 +1940,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 <div className="w-full pt-1">
                   <button
                     type="button"
-                    onClick={() => setIsGpsCheckEnabled(!isGpsCheckEnabled)}
+                    onClick={handleToggleGps}
                     className={`w-full py-2.5 px-3 rounded-2xl border text-xs font-bold flex items-center justify-between transition ${
                       isGpsCheckEnabled
                         ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
@@ -1966,7 +1954,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase ${
                       isGpsCheckEnabled ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500 text-white'
                     }`}>
-                      {isGpsCheckEnabled ? '🟢 เปิดตรวจ GPS (Geofence 50m)' : '🔴 ปิดตรวจ GPS (QR อย่างเดียว)'}
+                      {isGpsCheckEnabled ? '🟢 เปิดตรวจ GPS (Geofence 200m)' : '🔴 ปิดตรวจ GPS (QR อย่างเดียว)'}
                     </span>
                   </button>
                 </div>
@@ -1989,9 +1977,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     </span>
                   </div>
 
-                  <div className="mt-3 space-y-2 max-h-64 overflow-y-auto pr-1">
+                  <div className="mt-3 space-y-2 max-h-48 sm:max-h-64 overflow-y-auto pr-1">
                     {liveCheckins.length === 0 ? (
-                      <div className="text-center py-12 text-slate-400 text-xs space-y-2">
+                      <div className="text-center py-8 sm:py-12 text-slate-400 text-xs space-y-2">
                         <Clock className="w-8 h-8 text-slate-400 mx-auto animate-bounce" />
                         <p>กำลังรอการสแกนจากนักศึกษา...</p>
                       </div>
@@ -2048,31 +2036,44 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
           }`}>
             <div className={`flex items-center justify-between border-b pb-3 ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
-              <h3 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>รหัสเชิญชวน (Invite Code)</h3>
+              <h3 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>รหัสเชิญชวนประจำรายวิชา (Static Code)</h3>
               <button onClick={() => setInviteModalCode(null)} className={`p-1 rounded-lg ${isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}>
                 ✕
               </button>
             </div>
-            <div className="text-center space-y-2 py-4">
+            <div className="text-center space-y-2 py-3">
               <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                ส่งรหัสนี้ให้กับ {inviteModalCode.role === 'STUDENT' ? 'นักศึกษา' : 'อาจารย์ผู้ร่วมสอน'} เพื่อลงทะเบียนเข้าวิชา
+                ส่งรหัสเชิญชวน 4 หลักนี้ หรือลิงก์ให้นักศึกษาเพื่อลงทะเบียนเข้าเรียน (รหัสแบบคงที่ไม่เปลี่ยนแปลง)
               </p>
-              <div className={`text-3xl font-black font-mono text-emerald-600 dark:text-emerald-400 tracking-widest p-4 rounded-2xl border ${
+              <div className={`text-4xl font-black font-mono text-emerald-600 dark:text-emerald-400 tracking-widest p-4 rounded-2xl border ${
                 isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
               }`}>
                 {inviteModalCode.code}
               </div>
             </div>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(inviteModalCode.code);
-                alert('คัดลอกรหัสเชิญเรียบร้อยแล้ว!');
-              }}
-              className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-sm active:scale-95 flex items-center justify-center space-x-2"
-            >
-              <Copy className="w-4 h-4" />
-              <span>คัดลอกรหัสเชิญชวน</span>
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(inviteModalCode.code);
+                  alert('คัดลอกรหัส 4 หลักเรียบร้อยแล้ว!');
+                }}
+                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition shadow-sm active:scale-95 flex items-center justify-center space-x-1.5 cursor-pointer"
+              >
+                <Copy className="w-4 h-4" />
+                <span>คัดลอกรหัส 4 หลัก</span>
+              </button>
+              <button
+                onClick={() => {
+                  const url = `${window.location.origin}?join=${inviteModalCode.code}`;
+                  navigator.clipboard.writeText(url);
+                  alert('คัดลอกลิงก์เชิญชวนเรียบร้อยแล้ว!');
+                }}
+                className="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-sm active:scale-95 flex items-center justify-center space-x-1.5 cursor-pointer"
+              >
+                <Link className="w-4 h-4" />
+                <span>คัดลอกลิงก์เต็ม</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2603,9 +2604,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   </div>
                 </div>
                 <div className={`p-3 rounded-2xl border ${isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase">ยังไม่ได้เข้าเรียน (ขาดเรียน)</div>
-                  <div className="text-lg sm:text-xl font-black text-rose-500 mt-0.5">
-                    {selectedSessionModal.absentStudents?.length || 0} คน
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">ขาด / ลาเรียน</div>
+                  <div className="text-lg sm:text-xl font-black text-rose-500 mt-0.5 flex items-baseline gap-1.5 flex-wrap">
+                    <span>{selectedSessionModal.absentStudents?.length || 0} คน</span>
+                    {(() => {
+                      const leavesCount = (selectedSessionModal.absentStudents || []).filter((s: any) => s.isOnLeave).length;
+                      return leavesCount > 0 ? (
+                        <span className="text-xs font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                          (ลาเรียน {leavesCount} คน)
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                 </div>
                 <div className={`p-3 rounded-2xl border col-span-2 sm:col-span-1 ${isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
@@ -2642,7 +2651,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     }`}
                   >
                     <AlertCircle className="w-4 h-4 text-rose-500" />
-                    <span>ขาดเรียน ({selectedSessionModal.absentStudents?.length || 0})</span>
+                    <span>ขาด / ลาเรียน ({selectedSessionModal.absentStudents?.length || 0})</span>
                   </button>
                 </div>
 
@@ -2811,7 +2820,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                 {st.avatarUrl ? (
                                   <img src={st.avatarUrl} alt="" className="w-7 h-7 rounded-full object-cover border border-slate-700 shrink-0" />
                                 ) : (
-                                  <div className="w-7 h-7 rounded-full bg-rose-500/10 text-rose-500 font-bold flex items-center justify-center text-[10px] shrink-0">
+                                  <div className={`w-7 h-7 rounded-full font-bold flex items-center justify-center text-[10px] shrink-0 ${
+                                    st.isOnLeave ? 'bg-amber-500/10 text-amber-500' : 'bg-rose-500/10 text-rose-500'
+                                  }`}>
                                     {st.studentName.charAt(0)}
                                   </div>
                                 )}
@@ -2821,9 +2832,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                 </div>
                               </div>
 
-                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500/15 text-rose-500 border border-rose-500/30 shrink-0">
-                                ✕ ขาดเรียน
-                              </span>
+                              {st.isOnLeave ? (
+                                <div className="flex flex-col items-end shrink-0">
+                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                                    📄 {st.leaveTypeLabel || st.statusText || 'ลาเรียน'}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500/15 text-rose-500 border border-rose-500/30 shrink-0">
+                                  ✕ ขาดเรียน
+                                </span>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -2859,9 +2878,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                   </td>
                                   <td className="p-3 text-slate-400 font-mono text-[11px] whitespace-nowrap">{st.email}</td>
                                   <td className="p-3 text-center whitespace-nowrap">
-                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500/15 text-rose-500 border border-rose-500/30">
-                                      ✕ ขาดเรียน
-                                    </span>
+                                    {st.isOnLeave ? (
+                                      <div className="inline-flex flex-col items-center">
+                                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                                          📄 {st.leaveTypeLabel || st.statusText || 'ลาเรียน'}
+                                        </span>
+                                        {st.leaveReason && (
+                                          <span className="text-[10px] text-slate-400 mt-0.5 max-w-xs truncate">
+                                            เหตุผล: {st.leaveReason}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500/15 text-rose-500 border border-rose-500/30">
+                                        ✕ ขาดเรียน
+                                      </span>
+                                    )}
                                   </td>
                                 </tr>
                               ))}
@@ -2883,6 +2915,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         onClose={() => {
           setIsLeaveManagementOpen(false);
           loadPendingLeaveCount();
+          loadOverviewData();
         }}
         teacher={teacher}
         courses={courses}
@@ -2896,6 +2929,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           onClose={() => setIsInviteTeacherModalOpen(false)}
           course={selectedCourse}
           currentUserId={teacher.id}
+          courseMembers={currentCourseMembers || []}
+          isDarkMode={isDarkMode}
+          onMembersUpdated={handleRefreshCourseMembers}
+          onRefresh={handleRefreshCourseMembers}
+        />
+      )}
+
+      {/* Student Invite & Enrolled Students Modal */}
+      {selectedCourse && (
+        <StudentInviteModal
+          isOpen={isInviteStudentModalOpen}
+          onClose={() => setIsInviteStudentModalOpen(false)}
+          course={selectedCourse}
           courseMembers={currentCourseMembers || []}
           isDarkMode={isDarkMode}
           onMembersUpdated={handleRefreshCourseMembers}

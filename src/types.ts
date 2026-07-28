@@ -52,6 +52,8 @@ export interface LeaveRequest {
   weekNumber?: number; // สัปดาห์ที่ขอลาเรียน (ถ้ามี)
   leaveType: LeaveType;
   leaveDate: string; // YYYY-MM-DD หรือระบุวันที่ลา
+  endDate?: string; // YYYY-MM-DD (กรณีลาหลายวัน/ช่วงวันที่)
+  isMultiDay?: boolean; // ธงระบุว่าเป็นการลาหลายวันหรือไม่
   reason: string; // เหตุผลการลา
   attachmentUrl?: string; // เอกสารประกอบ / ใบรับรองแพทย์ / รูปภาพ (Data URL)
   attachmentName?: string;
@@ -132,6 +134,7 @@ export interface Session {
   qrSecretToken?: string;
   qrExpiresAt?: number;
   createdAt: string;
+  isGpsCheckEnabled?: boolean;
 }
 
 export interface AttendanceRecord {
@@ -178,6 +181,7 @@ export interface QuickEvent {
   teacherLng: number;
   isActive: boolean;
   createdAt: string;
+  isGpsCheckEnabled?: boolean;
 }
 
 export interface InviteLink {

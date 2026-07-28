@@ -6,6 +6,7 @@ import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
 import { getDeviceInfo } from '../utils/deviceHelper';
 import { StudentLeaveModal } from './StudentLeaveModal';
+import { useTheme } from '../context/ThemeContext';
 
 interface StudentDashboardProps {
   student: User;
@@ -26,7 +27,9 @@ interface StudentCourseItem {
   pastCheckins: AttendanceRecord[];
 }
 
-export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onOpenJoinCourse, isDarkMode = true }) => {
+export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onOpenJoinCourse, isDarkMode: propIsDarkMode }) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [coursesStats, setCoursesStats] = useState<StudentCourseItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [selectedCourseHistory, setSelectedCourseHistory] = useState<StudentCourseItem | null>(null);
@@ -493,63 +496,70 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
 
       {/* History Modal */}
       {selectedCourseHistory && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto animate-fadeIn">
           <div className={`border rounded-2xl w-full max-w-xl shadow-2xl p-4 sm:p-6 space-y-4 my-auto max-h-[88vh] overflow-y-auto ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
           }`}>
-            <div className={`flex items-center justify-between border-b pb-3 ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
-              <div>
-                <h3 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                  ประวัติการเช็คชื่อ: {selectedCourseHistory.course.courseCode}
-                </h3>
-                <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{selectedCourseHistory.course.courseName}</p>
+            <div className={`flex items-center justify-between border-b pb-3 ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+              <div className="flex items-center space-x-2.5">
+                <span className="px-2.5 py-1 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 text-xs font-mono font-black">
+                  {selectedCourseHistory.course.courseCode}
+                </span>
+                <div>
+                  <h3 className={`text-sm sm:text-base font-extrabold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                    ประวัติการเช็คชื่อ
+                  </h3>
+                  <p className={`text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{selectedCourseHistory.course.courseName}</p>
+                </div>
               </div>
               <button
                 onClick={() => setSelectedCourseHistory(null)}
-                className={`p-1 rounded-lg ${isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}
+                className={`p-1.5 rounded-xl transition cursor-pointer ${
+                  isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                }`}
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+            <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
               {selectedCourseHistory.pastCheckins.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-6">ยังไม่มีประวัติการเช็คชื่อในวิชานี้</p>
+                <div className={`p-8 rounded-2xl border text-center ${isDarkMode ? 'bg-slate-950/40 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                  <p className="text-xs font-semibold">ยังไม่มีประวัติการเช็คชื่อในวิชานี้</p>
+                </div>
               ) : (
                 selectedCourseHistory.pastCheckins.map((rec) => (
                   <div
                     key={rec.id}
-                    className={`p-3 border rounded-xl flex items-center justify-between ${
-                      isDarkMode ? 'bg-slate-800/80 border-slate-700/80' : 'bg-slate-50 border-slate-200'
+                    className={`p-3.5 border rounded-2xl flex items-center justify-between transition ${
+                      isDarkMode ? 'bg-slate-950/60 border-slate-800 hover:border-sky-500/30' : 'bg-slate-50 border-slate-200 hover:border-sky-500/30'
                     }`}
                   >
-                    <div className="space-y-0.5">
-                      <div className="flex items-center space-x-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                        <span className={`text-xs font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>เช็คชื่อสำเร็จ (PRESENT)</span>
+                    <div className="space-y-1">
+                      <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>เช็คชื่อสำเร็จ (PRESENT)</span>
                       </div>
                       <p className={`text-[11px] font-mono ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                         {new Date(rec.timestamp).toLocaleString('th-TH')}
                       </p>
                     </div>
-                    <div className="text-right text-[11px]">
-                      <div className="text-sky-600 dark:text-sky-400 font-semibold flex items-center space-x-1">
+                    <div className="text-right text-[11px] space-y-0.5">
+                      <div className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 font-bold">
                         <MapPin className="w-3 h-3" />
                         <span>ระยะห่าง: {rec.distanceMeters} เมตร</span>
                       </div>
-                      <div className="text-slate-400 text-[10px]">Anti-Proxy Verified</div>
+                      <div className="text-slate-400 text-[10px] font-semibold">Anti-Proxy Verified</div>
                     </div>
                   </div>
                 ))
               )}
             </div>
 
-            <div className="pt-2 text-right">
+            <div className="pt-2 flex justify-end">
               <button
                 onClick={() => setSelectedCourseHistory(null)}
-                className={`px-4 py-2 text-xs font-semibold rounded-xl cursor-pointer ${
-                  isDarkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
-                }`}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs transition shadow-md shadow-sky-600/20 active:scale-95 cursor-pointer"
               >
                 ปิดหน้าต่าง
               </button>

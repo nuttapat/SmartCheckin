@@ -9,7 +9,9 @@ import {
   resetUserDevice,
   overrideAttendanceRecord,
   updateLeaveRequestStatus,
+  fetchTeachers,
 } from '../services/api';
+import { useTheme } from '../context/ThemeContext';
 import {
   Database,
   Users,
@@ -98,8 +100,10 @@ const FIELD_LABELS: Record<string, string> = {
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   adminUser,
   onSwitchUserRole,
-  isDarkMode = true,
+  isDarkMode: propIsDarkMode,
 }) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [activeTab, setActiveTab] = useState<'DATABASE' | 'USERS' | 'COURSES' | 'OVERRIDE' | 'SYSTEM'>('DATABASE');
   const [overview, setOverview] = useState<any>(null);
   const [loadingOverview, setLoadingOverview] = useState<boolean>(true);
@@ -248,6 +252,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // User Management state
   const [userSearchQuery, setUserSearchQuery] = useState<string>('');
   const [userRoleFilter, setUserRoleFilter] = useState<string>('ALL');
+  const [userTableSortField, setUserTableSortField] = useState<'name' | 'email' | 'role' | null>(null);
+  const [userTableSortDir, setUserTableSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const handleUserTableSort = (field: 'name' | 'email' | 'role') => {
+    if (userTableSortField === field) {
+      if (userTableSortDir === 'asc') setUserTableSortDir('desc');
+      else { setUserTableSortField(null); setUserTableSortDir('asc'); }
+    } else {
+      setUserTableSortField(field);
+      setUserTableSortDir('asc');
+    }
+  };
+
+  // Course & Session Sorting state
+  const [courseSortField, setCourseSortField] = useState<'code' | 'year' | 'coordinator' | 'weeks' | 'sessions' | null>(null);
+  const [courseSortDir, setCourseSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const handleCourseSort = (field: 'code' | 'year' | 'coordinator' | 'weeks' | 'sessions') => {
+    if (courseSortField === field) {
+      if (courseSortDir === 'asc') setCourseSortDir('desc');
+      else { setCourseSortField(null); setCourseSortDir('asc'); }
+    } else {
+      setCourseSortField(field);
+      setCourseSortDir('asc');
+    }
+  };
+
+  const [sessionSortField, setSessionSortField] = useState<'week' | 'topic' | 'status' | null>(null);
+  const [sessionSortDir, setSessionSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const handleSessionSort = (field: 'week' | 'topic' | 'status') => {
+    if (sessionSortField === field) {
+      if (sessionSortDir === 'asc') setSessionSortDir('desc');
+      else { setSessionSortField(null); setSessionSortDir('asc'); }
+    } else {
+      setSessionSortField(field);
+      setSessionSortDir('asc');
+    }
+  };
 
   // Attendance Override Form state
   const [overrideStudentId, setOverrideStudentId] = useState<string>('');
@@ -258,6 +301,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Course & Weekly Session Management state
   const [allCourses, setAllCourses] = useState<any[]>([]);
   const [allSessions, setAllSessions] = useState<any[]>([]);
+  const [teachersList, setTeachersList] = useState<User[]>([]);
   const [selectedCourseForSessions, setSelectedCourseForSessions] = useState<string>('ALL');
   const [courseSearchQuery, setCourseSearchQuery] = useState<string>('');
   const [loadingCoursesData, setLoadingCoursesData] = useState<boolean>(false);
@@ -269,6 +313,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [sessionModalOpen, setSessionModalOpen] = useState<boolean>(false);
   const [editingSessionData, setEditingSessionData] = useState<any | null>(null);
 
+  // Custom Delete Confirm Modal State
+  const [deleteConfirmItem, setDeleteConfirmItem] = useState<{
+    type: 'course' | 'session' | 'document' | 'device';
+    id: string;
+    title: string;
+    subtitle?: string;
+    action: () => Promise<void>;
+  } | null>(null);
+  const [isDeletingLoading, setIsDeletingLoading] = useState<boolean>(false);
+
   // Toast / Status Feedback
   const [toastMessage, setToastMessage] = useState<string>('');
 
@@ -276,16 +330,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     loadOverview();
   }, []);
 
-  // Load Courses and Weekly Sessions
+  // Load Courses, Weekly Sessions, and Teachers list
   const loadCoursesAndSessionsData = async (silent = false) => {
     try {
       if (!silent) setLoadingCoursesData(true);
-      const [coursesRes, sessionsRes] = await Promise.all([
+      const [coursesRes, sessionsRes, teachersRes] = await Promise.all([
         fetchAdminCollection('courses'),
         fetchAdminCollection('sessions'),
+        fetchTeachers().catch(() => []),
       ]);
       setAllCourses(coursesRes.documents || []);
       setAllSessions(sessionsRes.documents || []);
+      if (Array.isArray(teachersRes) && teachersRes.length > 0) {
+        setTeachersList(teachersRes);
+      }
     } catch (err) {
       console.error('Failed to load courses & sessions:', err);
     } finally {
@@ -318,15 +376,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [selectedCollection, activeTab]);
 
   // Handlers for Course CRUD
-  const handleOpenCreateCourse = () => {
+  const handleOpenCreateCourse = async () => {
+    if (teachersList.length === 0) {
+      const tData = await fetchTeachers().catch(() => []);
+      if (tData.length > 0) setTeachersList(tData);
+    }
+    const defaultOwner = adminUser || {};
     const newCourseDoc = {
       id: `crs_${Date.now()}`,
       courseCode: '',
       courseName: '',
       academicYear: 2569,
       semester: '1',
-      coordinatorName: `${adminUser.firstNameTh || ''} ${adminUser.lastNameTh || ''}`.trim() || 'อาจารย์ผู้รับผิดชอบ',
-      ownerId: adminUser.id,
+      coordinatorName: `${defaultOwner.title || ''}${defaultOwner.firstNameTh || ''} ${defaultOwner.lastNameTh || ''}`.trim() || 'อาจารย์ผู้รับผิดชอบ',
+      ownerId: defaultOwner.id || '',
       defaultLat: 13.7563,
       defaultLng: 100.5018,
       weeks: Array.from({ length: 15 }, (_, i) => ({
@@ -340,7 +403,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setCourseModalOpen(true);
   };
 
-  const handleOpenEditCourse = (course: any) => {
+  const handleOpenEditCourse = async (course: any) => {
+    if (teachersList.length === 0) {
+      const tData = await fetchTeachers().catch(() => []);
+      if (tData.length > 0) setTeachersList(tData);
+    }
     setEditingCourseData(JSON.parse(JSON.stringify(course)));
     setCourseModalOpen(true);
   };
@@ -362,16 +429,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleDeleteCourseSubmit = async (courseId: string, courseCode: string) => {
-    if (!confirm(`คุณต้องการลบรายวิชา "${courseCode}" และข้อมูลที่เกี่ยวข้องออกจากฐานข้อมูลใช่หรือไม่?`)) return;
-    try {
-      await deleteAdminDocument('courses', courseId);
-      showToast(`ลบวิชา ${courseCode} เรียบร้อยแล้ว`);
-      await loadCoursesAndSessionsData();
-      await loadOverview(true);
-    } catch (err: any) {
-      alert(err.message || 'เกิดข้อผิดพลาดในการลบรายวิชา');
-    }
+  const handleDeleteCourseSubmit = (courseId: string, courseCode: string) => {
+    setDeleteConfirmItem({
+      type: 'course',
+      id: courseId,
+      title: `คุณต้องการลบรายวิชา "${courseCode}" ใช่หรือไม่?`,
+      subtitle: 'การลบรายวิชานี้จะทำการลบสัปดาห์สอน สมาชิก ประวัติการเช็คชื่อ และใบลาที่เกี่ยวข้องทั้งหมดออกจากฐานข้อมูลถาวร',
+      action: async () => {
+        await deleteAdminDocument('courses', courseId);
+        showToast(`ลบวิชา ${courseCode} เรียบร้อยแล้ว`);
+        await loadCoursesAndSessionsData();
+        await loadOverview(true);
+      },
+    });
   };
 
   // Handlers for Weekly Sessions CRUD
@@ -433,16 +503,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleDeleteSessionSubmit = async (sessionId: string, weekNum: number) => {
-    if (!confirm(`คุณต้องการลบ Session สัปดาห์ที่ ${weekNum} ใช่หรือไม่?`)) return;
-    try {
-      await deleteAdminDocument('sessions', sessionId);
-      showToast(`ลบ Session สัปดาห์ที่ ${weekNum} เรียบร้อยแล้ว`);
-      await loadCoursesAndSessionsData();
-      await loadOverview(true);
-    } catch (err: any) {
-      alert(err.message || 'เกิดข้อผิดพลาดในการลบ Session');
-    }
+  const handleDeleteSessionSubmit = (sessionId: string, weekNum: number) => {
+    setDeleteConfirmItem({
+      type: 'session',
+      id: sessionId,
+      title: `คุณต้องการลบ Session สัปดาห์ที่ ${weekNum} ใช่หรือไม่?`,
+      subtitle: 'การลบ Session นี้จะลบประวัติการเข้าเรียนในสัปดาห์นี้ถาวร',
+      action: async () => {
+        await deleteAdminDocument('sessions', sessionId);
+        showToast(`ลบ Session สัปดาห์ที่ ${weekNum} เรียบร้อยแล้ว`);
+        await loadCoursesAndSessionsData();
+        await loadOverview(true);
+      },
+    });
   };
 
   const handleGenerateSessionsFromWeeks = async (course: any) => {
@@ -547,16 +620,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleDeleteDoc = async (docId: string) => {
-    if (!confirm(`คุณต้องการลบเอกสาร ID "${docId}" ออกจากฐานข้อมูลใช่หรือไม่?`)) return;
-    try {
-      await deleteAdminDocument(selectedCollection, docId);
-      showToast(`ลบเอกสาร ${docId} เรียบร้อยแล้ว`);
-      await loadCollectionDocs(selectedCollection);
-      await loadOverview(true);
-    } catch (err: any) {
-      alert(err.message || 'เกิดข้อผิดพลาดในการลบเอกสาร');
-    }
+  const handleDeleteDoc = (docId: string) => {
+    setDeleteConfirmItem({
+      type: 'document',
+      id: docId,
+      title: `คุณต้องการลบเอกสาร ID "${docId}" ใช่หรือไม่?`,
+      subtitle: `การลบเอกสารออกจากคอลเลกชัน ${selectedCollection} ถาวร`,
+      action: async () => {
+        await deleteAdminDocument(selectedCollection, docId);
+        showToast(`ลบเอกสาร ${docId} เรียบร้อยแล้ว`);
+        await loadCollectionDocs(selectedCollection);
+        await loadOverview(true);
+      },
+    });
   };
 
   const handleRoleChange = async (userId: string, newRole: string) => {
@@ -572,17 +648,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleResetDevice = async (userId: string, userName: string) => {
-    if (!confirm(`ยืนยันการปลดล็อกอุปกรณ์ (Reset Device Fingerprint) สำหรับ ${userName}?`)) return;
-    try {
-      await resetUserDevice(userId);
-      showToast(`ปลดล็อกอุปกรณ์ของ ${userName} สำเร็จ!`);
-      if (selectedCollection === 'users') {
-        await loadCollectionDocs('users');
-      }
-    } catch (err: any) {
-      alert(err.message || 'เกิดข้อผิดพลาดในการปลดล็อกอุปกรณ์');
-    }
+  const handleResetDevice = (userId: string, userName: string) => {
+    setDeleteConfirmItem({
+      type: 'device',
+      id: userId,
+      title: `ยืนยันการปลดล็อกอุปกรณ์สำหรับ ${userName}?`,
+      subtitle: 'ผู้ใช้จะสามารถผูกอุปกรณ์เครื่องใหม่เข้ากับบัญชีนี้ได้ในการเข้าใช้งานครั้งถัดไป',
+      action: async () => {
+        await resetUserDevice(userId);
+        showToast(`ปลดล็อกอุปกรณ์ของ ${userName} สำเร็จ!`);
+        if (selectedCollection === 'users') {
+          await loadCollectionDocs('users');
+        }
+      },
+    });
   };
 
   const handleExportJSON = () => {
@@ -1043,13 +1122,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }`}>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className={`border-b font-mono font-bold uppercase ${
+                <thead className={`border-b font-mono font-bold uppercase select-none ${
                   isDarkMode ? 'bg-slate-950/80 border-slate-800 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-900'
                 }`}>
                   <tr>
-                    <th className="p-3">ชื่อ-นามสกุล / รหัส</th>
-                    <th className="p-3">อีเมล & อุปกรณ์</th>
-                    <th className="p-3">สิทธิ์ใช้งาน (Role)</th>
+                    <th
+                      onClick={() => handleUserTableSort('name')}
+                      className="p-3 cursor-pointer hover:text-purple-500 transition"
+                    >
+                      <div className="flex items-center space-x-1.5">
+                        <span>ชื่อ-นามสกุล / รหัส</span>
+                        {userTableSortField === 'name' ? (
+                          userTableSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-500 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-500 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleUserTableSort('email')}
+                      className="p-3 cursor-pointer hover:text-purple-500 transition"
+                    >
+                      <div className="flex items-center space-x-1.5">
+                        <span>อีเมล & อุปกรณ์</span>
+                        {userTableSortField === 'email' ? (
+                          userTableSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-500 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-500 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleUserTableSort('role')}
+                      className="p-3 cursor-pointer hover:text-purple-500 transition"
+                    >
+                      <div className="flex items-center space-x-1.5">
+                        <span>สิทธิ์ใช้งาน (Role)</span>
+                        {userTableSortField === 'role' ? (
+                          userTableSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-500 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-500 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3 text-right">การจัดการ</th>
                   </tr>
                 </thead>
@@ -1065,6 +1180,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         return name.includes(term) || email.includes(term) || uid.includes(term);
                       }
                       return true;
+                    })
+                    .sort((a: User, b: User) => {
+                      if (!userTableSortField) return 0;
+                      const dir = userTableSortDir === 'asc' ? 1 : -1;
+                      if (userTableSortField === 'name') {
+                        const nameA = `${a.firstNameTh || ''} ${a.lastNameTh || ''}`.toLowerCase();
+                        const nameB = `${b.firstNameTh || ''} ${b.lastNameTh || ''}`.toLowerCase();
+                        return nameA.localeCompare(nameB) * dir;
+                      }
+                      if (userTableSortField === 'email') {
+                        return (a.email || '').toLowerCase().localeCompare((b.email || '').toLowerCase()) * dir;
+                      }
+                      if (userTableSortField === 'role') {
+                        return (a.role || '').localeCompare(b.role || '') * dir;
+                      }
+                      return 0;
                     })
                     .map((user: User) => (
                       <tr key={user.id} className={`transition ${
@@ -1137,9 +1268,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }`}>
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h3 className="text-base font-extrabold flex items-center space-x-2">
-                  <BookOpen className={`w-5 h-5 ${isDarkMode ? 'text-purple-400' : 'text-purple-700'}`} />
-                  <span>ฐานข้อมูลรายวิชา & Session สัปดาห์ (Courses & Weekly Sessions)</span>
+                <h3 className="text-base font-extrabold space-y-0.5">
+                  <div className="flex items-center space-x-2">
+                    <BookOpen className={`w-5 h-5 ${isDarkMode ? 'text-purple-400' : 'text-purple-700'}`} />
+                    <span>ฐานข้อมูลรายวิชา & Session สัปดาห์</span>
+                  </div>
+                  <span className={`block text-xs font-semibold ${isDarkMode ? 'text-purple-300/80' : 'text-purple-700/80'}`}>
+                    (Courses & Weekly Sessions)
+                  </span>
                 </h3>
                 <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600 font-medium'}`}>
                   จัดการข้อมูลรายวิชา กำหนดสัปดาห์เรียน เพิ่ม/แก้ไข/ลบ Session และเปิด-ปิดการเช็กชื่อสำหรับนักศึกษา
@@ -1220,16 +1356,76 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className={`border-b font-mono font-bold uppercase ${
+                <thead className={`border-b font-mono font-bold uppercase select-none ${
                   isDarkMode ? 'bg-slate-950/80 border-slate-800 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-900'
                 }`}>
                   <tr>
-                    <th className="p-3">รหัสวิชา / ชื่อวิชา</th>
-                    <th className="p-3">ปีการศึกษา/ภาค</th>
-                    <th className="p-3">อาจารย์ผู้รับผิดชอบ</th>
+                    <th
+                      onClick={() => handleCourseSort('code')}
+                      className="p-3 cursor-pointer hover:text-purple-500 transition"
+                    >
+                      <div className="flex items-center space-x-1.5">
+                        <span>รหัสวิชา / ชื่อวิชา</span>
+                        {courseSortField === 'code' ? (
+                          courseSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-500 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-500 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleCourseSort('year')}
+                      className="p-3 cursor-pointer hover:text-purple-500 transition"
+                    >
+                      <div className="flex items-center space-x-1.5">
+                        <span>ปีการศึกษา/ภาค</span>
+                        {courseSortField === 'year' ? (
+                          courseSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-500 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-500 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleCourseSort('coordinator')}
+                      className="p-3 cursor-pointer hover:text-purple-500 transition"
+                    >
+                      <div className="flex items-center space-x-1.5">
+                        <span>อาจารย์ผู้รับผิดชอบ</span>
+                        {courseSortField === 'coordinator' ? (
+                          courseSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-500 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-500 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3">พิกัด Lat/Lng</th>
-                    <th className="p-3 text-center">สัปดาห์เรียน</th>
-                    <th className="p-3 text-center">Session ที่สร้าง</th>
+                    <th
+                      onClick={() => handleCourseSort('weeks')}
+                      className="p-3 text-center cursor-pointer hover:text-purple-500 transition"
+                    >
+                      <div className="flex items-center justify-center space-x-1.5">
+                        <span>สัปดาห์เรียน</span>
+                        {courseSortField === 'weeks' ? (
+                          courseSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-500 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-500 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleCourseSort('sessions')}
+                      className="p-3 text-center cursor-pointer hover:text-purple-500 transition"
+                    >
+                      <div className="flex items-center justify-center space-x-1.5">
+                        <span>Session ที่สร้าง</span>
+                        {courseSortField === 'sessions' ? (
+                          courseSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-500 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-500 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3 text-right">จัดการ</th>
                   </tr>
                 </thead>
@@ -1243,6 +1439,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         (c.courseName || c.nameTh || '').toLowerCase().includes(q) ||
                         (c.coordinatorName || '').toLowerCase().includes(q)
                       );
+                    })
+                    .sort((a, b) => {
+                      if (!courseSortField) return 0;
+                      const dir = courseSortDir === 'asc' ? 1 : -1;
+                      if (courseSortField === 'code') {
+                        const codeA = (a.courseCode || a.code || '').toLowerCase();
+                        const codeB = (b.courseCode || b.code || '').toLowerCase();
+                        return codeA.localeCompare(codeB) * dir;
+                      }
+                      if (courseSortField === 'year') {
+                        return ((a.academicYear || 0) - (b.academicYear || 0)) * dir;
+                      }
+                      if (courseSortField === 'coordinator') {
+                        const cA = (a.coordinatorName || a.ownerName || '').toLowerCase();
+                        const cB = (b.coordinatorName || b.ownerName || '').toLowerCase();
+                        return cA.localeCompare(cB) * dir;
+                      }
+                      if (courseSortField === 'weeks') {
+                        const wA = a.weeks ? a.weeks.length : 0;
+                        const wB = b.weeks ? b.weeks.length : 0;
+                        return (wA - wB) * dir;
+                      }
+                      if (courseSortField === 'sessions') {
+                        const sA = allSessions.filter((s) => s.courseId === a.id).length;
+                        const sB = allSessions.filter((s) => s.courseId === b.id).length;
+                        return (sA - sB) * dir;
+                      }
+                      return 0;
                     })
                     .map((course) => {
                       const courseCode = course.courseCode || course.code || course.id;
@@ -1260,7 +1484,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             {course.academicYear || 2569} / ภาค {course.semester || '1'}
                           </td>
                           <td className={`p-3 ${isDarkMode ? 'text-slate-300' : 'text-slate-800 font-medium'}`}>
-                            {course.coordinatorName || course.ownerName || 'อ.ผู้รับผิดชอบ'}
+                            <div className="font-extrabold text-xs flex items-center space-x-1.5">
+                              <Shield className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                              <span>{course.coordinatorName || course.ownerName || 'อ.ผู้รับผิดชอบ'}</span>
+                            </div>
+                            {course.ownerId && (
+                              <div className="text-[10px] text-slate-400 font-mono pl-5">
+                                {teachersList.find((t) => t.id === course.ownerId)?.email || `ID: ${course.ownerId}`}
+                              </div>
+                            )}
                           </td>
                           <td className="p-3 font-mono text-[11px]">
                             <div className="flex items-center space-x-1 text-slate-500">
@@ -1288,28 +1520,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <div className="flex items-center justify-end space-x-1.5">
                               <button
                                 onClick={() => setSelectedCourseForSessions(course.id)}
-                                className={`px-2.5 py-1 rounded-lg border transition text-[11px] font-bold cursor-pointer ${
+                                className={`p-1.5 rounded-lg border transition cursor-pointer ${
                                   selectedCourseForSessions === course.id
                                     ? 'bg-purple-600 text-white border-purple-500'
                                     : isDarkMode
                                     ? 'bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 border-purple-500/30'
-                                    : 'bg-purple-50 text-purple-900 hover:bg-purple-100 border-purple-300'
+                                    : 'bg-purple-50 text-purple-900 hover:bg-purple-100 border-purple-300 font-bold'
                                 }`}
                                 title="ดู Session ทั้งหมดของวิชานี้"
                               >
-                                🎯 ดู Session
+                                <Eye className="w-3.5 h-3.5" />
                               </button>
 
                               <button
-                                onClick={() => handleGenerateSessionsFromWeeks(course)}
+                                onClick={() => handleOpenCreateSession(course.id)}
                                 className={`p-1.5 rounded-lg border transition cursor-pointer ${
                                   isDarkMode
                                     ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border-emerald-500/30'
-                                    : 'bg-emerald-50 text-emerald-950 hover:bg-emerald-100 border-emerald-300 font-bold'
+                                    : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border-emerald-300 font-bold'
                                 }`}
-                                title="สร้าง Session อัตโนมัติจากแผนการสอน (Weeks)"
+                                title="เพิ่ม Session ใหม่ในวิชานี้"
                               >
-                                <Sparkles className="w-3.5 h-3.5" />
+                                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                               </button>
 
                               <button
@@ -1399,14 +1631,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className={`border-b font-mono font-bold uppercase ${
+                <thead className={`border-b font-mono font-bold uppercase select-none ${
                   isDarkMode ? 'bg-slate-950/80 border-slate-800 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-900'
                 }`}>
                   <tr>
-                    <th className="p-3">สัปดาห์ / วิชา</th>
-                    <th className="p-3">หัวข้อการเรียน (Topic)</th>
+                    <th
+                      onClick={() => handleSessionSort('week')}
+                      className="p-3 cursor-pointer hover:text-purple-500 transition"
+                    >
+                      <div className="flex items-center space-x-1.5">
+                        <span>สัปดาห์ / วิชา</span>
+                        {sessionSortField === 'week' ? (
+                          sessionSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-500 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-500 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleSessionSort('topic')}
+                      className="p-3 cursor-pointer hover:text-purple-500 transition"
+                    >
+                      <div className="flex items-center space-x-1.5">
+                        <span>หัวข้อการเรียน (Topic)</span>
+                        {sessionSortField === 'topic' ? (
+                          sessionSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-500 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-500 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3">พิกัดสถานที่ (Lat/Lng)</th>
-                    <th className="p-3 text-center">สถานะการเช็กชื่อ</th>
+                    <th
+                      onClick={() => handleSessionSort('status')}
+                      className="p-3 text-center cursor-pointer hover:text-purple-500 transition"
+                    >
+                      <div className="flex items-center justify-center space-x-1.5">
+                        <span>สถานะการเช็กชื่อ</span>
+                        {sessionSortField === 'status' ? (
+                          sessionSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-500 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-500 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3 text-right">การจัดการ</th>
                   </tr>
                 </thead>
@@ -1424,7 +1692,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         String(s.weekNumber).includes(q)
                       );
                     })
-                    .sort((a, b) => Number(a.weekNumber) - Number(b.weekNumber))
+                    .sort((a, b) => {
+                      if (!sessionSortField) return Number(a.weekNumber) - Number(b.weekNumber);
+                      const dir = sessionSortDir === 'asc' ? 1 : -1;
+                      if (sessionSortField === 'week') {
+                        return (Number(a.weekNumber) - Number(b.weekNumber)) * dir;
+                      }
+                      if (sessionSortField === 'topic') {
+                        const tA = (a.topic || '').toLowerCase();
+                        const tB = (b.topic || '').toLowerCase();
+                        return tA.localeCompare(tB) * dir;
+                      }
+                      if (sessionSortField === 'status') {
+                        return ((a.isActive ? 1 : 0) - (b.isActive ? 1 : 0)) * dir;
+                      }
+                      return 0;
+                    })
                     .map((session) => {
                       const matchedCourse = allCourses.find((c) => c.id === session.courseId);
                       const courseCode = matchedCourse ? (matchedCourse.courseCode || matchedCourse.code || 'วิชา') : 'วิชา';
@@ -1669,7 +1952,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>ปีการศึกษา:</label>
                   <input
@@ -1696,14 +1979,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <option value="SUMMER">ภาคฤดูร้อน (Summer)</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Course Owner & Coordinator Selection Block */}
+              <div className="p-3.5 rounded-2xl border bg-purple-500/5 border-purple-500/20 space-y-3">
+                <div>
+                  <label className={`block font-extrabold mb-1.5 flex items-center justify-between ${isDarkMode ? 'text-purple-300' : 'text-purple-900'}`}>
+                    <span>👨‍🏫 อาจารย์เจ้าของรายวิชา (Course Owner):</span>
+                    <span className="text-[10px] font-normal text-purple-400">เลือกอาจารย์ที่มีอยู่ในฐานข้อมูล</span>
+                  </label>
+                  <select
+                    value={editingCourseData.ownerId || ''}
+                    onChange={(e) => {
+                      const selectedId = e.target.value;
+                      const selectedTeacher = teachersList.find((t) => t.id === selectedId);
+                      if (selectedTeacher) {
+                        const autoName = `${selectedTeacher.title || ''}${selectedTeacher.firstNameTh || ''} ${selectedTeacher.lastNameTh || ''}`.trim();
+                        setEditingCourseData({
+                          ...editingCourseData,
+                          ownerId: selectedTeacher.id,
+                          coordinatorName: autoName,
+                        });
+                      } else {
+                        setEditingCourseData({
+                          ...editingCourseData,
+                          ownerId: selectedId,
+                        });
+                      }
+                    }}
+                    className={`w-full p-2.5 rounded-xl border font-bold text-xs ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                    }`}
+                  >
+                    <option value="">-- เลือกอาจารย์ผู้รับผิดชอบจากระบบ --</option>
+                    {teachersList.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title || ''}{t.firstNameTh} {t.lastNameTh} ({t.email})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
                 <div>
-                  <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>ผู้รับผิดชอบ:</label>
+                  <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
+                    ชื่อแสดงอาจารย์ผู้รับผิดชอบ (Coordinator Name):
+                  </label>
                   <input
                     type="text"
+                    placeholder="เช่น อ.ดร.สมชาย ใจดี"
                     value={editingCourseData.coordinatorName || ''}
                     onChange={(e) => setEditingCourseData({ ...editingCourseData, coordinatorName: e.target.value })}
-                    className={`w-full p-2.5 rounded-xl border font-semibold ${
+                    className={`w-full p-2.5 rounded-xl border font-semibold text-xs ${
                       isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
                     }`}
                   />
@@ -1943,6 +2269,70 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-lg shadow-purple-600/30 transition cursor-pointer"
               >
                 บันทึกข้อมูล
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Delete Confirmation Modal */}
+      {deleteConfirmItem && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className={`border rounded-3xl w-full max-w-md p-6 space-y-5 shadow-2xl relative overflow-hidden ${
+            isDarkMode ? 'bg-slate-900 border-rose-500/30 text-slate-100' : 'bg-white border-rose-200 text-slate-900'
+          }`}>
+            <button
+              onClick={() => setDeleteConfirmItem(null)}
+              disabled={isDeletingLoading}
+              className={`absolute right-4 top-4 p-2 rounded-full transition ${
+                isDarkMode ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500'
+              }`}
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center space-x-3 text-rose-500">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6 stroke-[2.2]" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-rose-500">{deleteConfirmItem.title}</h3>
+                <p className={`text-xs mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {deleteConfirmItem.subtitle || 'การดำเนินการนี้จะไม่สามารถกู้คืนข้อมูลกลับมาได้'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-700/30">
+              <button
+                type="button"
+                disabled={isDeletingLoading}
+                onClick={() => setDeleteConfirmItem(null)}
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition border cursor-pointer ${
+                  isDarkMode
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                }`}
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingLoading}
+                onClick={async () => {
+                  setIsDeletingLoading(true);
+                  try {
+                    await deleteConfirmItem.action();
+                    setDeleteConfirmItem(null);
+                  } catch (err: any) {
+                    alert(err.message || 'เกิดข้อผิดพลาดในการดำเนินการ');
+                  } finally {
+                    setIsDeletingLoading(false);
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl font-extrabold text-xs text-white bg-rose-600 hover:bg-rose-500 transition shadow-lg shadow-rose-600/30 disabled:opacity-50 flex items-center space-x-1.5 cursor-pointer"
+              >
+                {isDeletingLoading ? 'กำลังดำเนินการ...' : 'ยืนยันการลบ'}
               </button>
             </div>
           </div>

@@ -1,0 +1,455 @@
+import React, { useState, useEffect } from 'react';
+import { X, UserPlus, Link, Copy, Check, Users, Search, Trash2, GraduationCap, UserCheck } from 'lucide-react';
+import { Course, CourseMember, CourseMemberRole, User as UserType } from '../types';
+import { fetchStudents, inviteStudentToCourse, removeCourseMember, generateInviteLink } from '../services/api';
+import { useTheme } from '../context/ThemeContext';
+
+interface StudentInviteModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  course: Course;
+  courseMembers?: CourseMember[];
+  onRefresh?: () => void;
+  onMembersUpdated?: () => void;
+  isDarkMode?: boolean;
+}
+
+export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
+  isOpen,
+  onClose,
+  course,
+  courseMembers = [],
+  onRefresh,
+  onMembersUpdated,
+  isDarkMode: propIsDarkMode,
+}) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
+  const [activeTab, setActiveTab] = useState<'db' | 'link'>('db');
+  const [students, setStudents] = useState<UserType[]>([]);
+  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [listSearchQuery, setListSearchQuery] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Invite Link State
+  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+  const [copied, setCopied] = useState<boolean>(false);
+
+  const triggerRefresh = () => {
+    if (onRefresh) onRefresh();
+    if (onMembersUpdated) onMembersUpdated();
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      loadStudents();
+      setError(null);
+      setSuccessMsg(null);
+      fetchStudentInviteLink();
+    }
+  }, [isOpen]);
+
+  const fetchStudentInviteLink = async () => {
+    try {
+      setLoading(true);
+      const invite = await generateInviteLink(course.id, CourseMemberRole.STUDENT);
+      setGeneratedCode(invite.code);
+      setCopied(false);
+    } catch (err: any) {
+      console.error('Failed to generate student invite link:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadStudents = async () => {
+    try {
+      setLoading(true);
+      const data = await fetchStudents();
+      setStudents(data);
+    } catch (err: any) {
+      console.error('Failed to load students:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  const handleAddStudent = async () => {
+    if (!selectedStudentId) {
+      setError('กรุณาเลือกนักศึกษาที่ต้องการเพิ่มจากรายชื่อในระบบ');
+      return;
+    }
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      setLoading(true);
+      const res = await inviteStudentToCourse(course.id, selectedStudentId);
+      setSuccessMsg(res.message || 'เพิ่มนักศึกษาเข้าร่วมรายวิชาสำเร็จ');
+      setSelectedStudentId('');
+      triggerRefresh();
+    } catch (err: any) {
+      setError(err.message || 'เกิดข้อผิดพลาดในการเพิ่มนักศึกษา');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveMember = async (memberId: string, name: string) => {
+    if (!confirm(`คุณต้องการลบนักศึกษา ${name} ออกจากรายวิชานี้ใช่หรือไม่?`)) {
+      return;
+    }
+    try {
+      setLoading(true);
+      await removeCourseMember(course.id, memberId);
+      setSuccessMsg(`ลบ ${name} ออกจากรายวิชาเรียบร้อยแล้ว`);
+      triggerRefresh();
+    } catch (err: any) {
+      setError(err.message || 'เกิดข้อผิดพลาดในการลบสมาชิก');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter existing enrolled student members
+  const studentMembersInCourse = (courseMembers || []).filter(
+    (m) => m.courseId === course.id && m.role === CourseMemberRole.STUDENT
+  );
+
+  const enrolledUserIds = new Set(studentMembersInCourse.map((m) => m.userId));
+
+  // Available students not yet enrolled
+  const availableStudents = students.filter((s) => !enrolledUserIds.has(s.id));
+
+  const filteredAvailableStudents = availableStudents.filter((s) => {
+    const q = searchQuery.toLowerCase();
+    const fullName = `${s.title || ''} ${s.firstNameTh || ''} ${s.lastNameTh || ''} ${s.firstNameEn || ''} ${s.lastNameEn || ''}`.toLowerCase();
+    const universityId = (s.universityId || '').toLowerCase();
+    const email = (s.email || '').toLowerCase();
+    return fullName.includes(q) || universityId.includes(q) || email.includes(q);
+  });
+
+  const filteredEnrolledStudents = studentMembersInCourse.filter((m) => {
+    const u = m.user;
+    if (!u) return true;
+    const q = listSearchQuery.toLowerCase();
+    const fullName = `${u.title || ''} ${u.firstNameTh || ''} ${u.lastNameTh || ''} ${u.firstNameEn || ''} ${u.lastNameEn || ''}`.toLowerCase();
+    const universityId = (u.universityId || '').toLowerCase();
+    const email = (u.email || '').toLowerCase();
+    return fullName.includes(q) || universityId.includes(q) || email.includes(q);
+  });
+
+  const courseCodeStr = course.courseCode || course.code || '';
+  const courseNameStr = course.courseName || course.nameTh || '';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
+      <div className={`border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col ${
+        isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+      }`}>
+        {/* Header */}
+        <div className={`px-5 sm:px-6 py-4 sm:py-5 border-b flex items-center justify-between shrink-0 ${
+          isDarkMode ? 'bg-slate-800/60 border-slate-800' : 'bg-sky-50/70 border-sky-100'
+        }`}>
+          <div className="flex items-center space-x-3">
+            <div className={`w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-500/30 flex items-center justify-center shrink-0 ${
+              isDarkMode ? 'text-sky-400' : 'text-sky-600'
+            }`}>
+              <GraduationCap className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className={`text-base sm:text-lg font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                จัดการและเชิญนักศึกษาเข้ารายวิชา
+              </h2>
+              <p className={`text-xs font-bold ${isDarkMode ? 'text-sky-300' : 'text-sky-800'}`}>
+                {courseCodeStr} — {courseNameStr}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className={`p-1.5 rounded-lg transition shrink-0 cursor-pointer ${
+              isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'
+            }`}
+            title="ปิด"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Scrollable Body Content */}
+        <div className={`p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 ${isDarkMode ? 'bg-slate-900' : 'bg-white'}`}>
+          {/* Status Alerts */}
+          {error && (
+            <div className={`p-3 rounded-xl border text-xs font-semibold ${
+              isDarkMode ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-700'
+            }`}>
+              {error}
+            </div>
+          )}
+          {successMsg && (
+            <div className={`p-3 rounded-xl border text-xs font-semibold ${
+              isDarkMode ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+            }`}>
+              {successMsg}
+            </div>
+          )}
+
+          {/* Tab Selection */}
+          <div className={`flex border-b space-x-2 px-1 ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+            <button
+              onClick={() => setActiveTab('db')}
+              className={`pb-2.5 px-3.5 font-bold text-xs transition border-b-2 flex items-center space-x-2 rounded-t-xl cursor-pointer ${
+                activeTab === 'db'
+                  ? 'border-sky-600 text-sky-600 bg-sky-500/10'
+                  : isDarkMode
+                    ? 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/50'
+                    : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <UserCheck className="w-4 h-4 text-sky-500" />
+              <span>เชิญนักศึกษาในระบบ</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('link')}
+              className={`pb-2.5 px-3.5 font-bold text-xs transition border-b-2 flex items-center space-x-2 rounded-t-xl cursor-pointer ${
+                activeTab === 'link'
+                  ? 'border-sky-600 text-sky-600 bg-sky-500/10'
+                  : isDarkMode
+                    ? 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/50'
+                    : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Link className="w-4 h-4 text-sky-500" />
+              <span>สร้างลิงก์/รหัสเชิญ</span>
+            </button>
+          </div>
+
+          {/* Tab 1: Invite from Database */}
+          {activeTab === 'db' && (
+            <div className="space-y-4">
+              <div className={`p-4 rounded-2xl border space-y-3 ${
+                isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <label className={`block text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                  1. ค้นหาและเลือกนักศึกษาที่มีรายชื่ออยู่ในฐานข้อมูล
+                </label>
+
+                {/* Search input */}
+                <div className="relative">
+                  <Search className={`w-4 h-4 absolute left-3 top-2.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="ค้นหานักศึกษาจากชื่อ, รหัสนักศึกษา หรืออีเมล..."
+                    className={`w-full pl-9 pr-3 py-2 text-xs rounded-xl border font-semibold focus:outline-none focus:border-sky-500 transition ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
+                    }`}
+                  />
+                </div>
+
+                {/* Select box */}
+                <select
+                  value={selectedStudentId}
+                  onChange={(e) => setSelectedStudentId(e.target.value)}
+                  className={`w-full p-2.5 text-xs rounded-xl border font-bold focus:outline-none focus:border-sky-500 transition ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                  }`}
+                >
+                  <option value="">-- เลือกนักศึกษาที่ยังไม่ได้เข้าร่วมวิชา ({filteredAvailableStudents.length} คน) --</option>
+                  {filteredAvailableStudents.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.universityId ? `[${s.universityId}] ` : ''}{s.title || ''} {s.firstNameTh} {s.lastNameTh} ({s.email})
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={handleAddStudent}
+                  disabled={loading || !selectedStudentId}
+                  className="w-full mt-2 py-2.5 px-4 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl transition shadow-md shadow-sky-600/20 disabled:opacity-50 cursor-pointer flex items-center justify-center space-x-2 active:scale-95"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>ยืนยันเพิ่มนักศึกษาเข้าร่วมรายวิชา</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 2: Static Invite Link */}
+          {activeTab === 'link' && (
+            <div className="space-y-4">
+              <div className={`p-4 rounded-2xl border space-y-3 ${
+                isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <label className={`block text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                  รหัสเชิญชวนนักศึกษาเข้าร่วมชั้นเรียน
+                </label>
+
+                {generatedCode ? (
+                  <div className={`mt-2 p-4 rounded-2xl border space-y-3 ${
+                    isDarkMode ? 'border-sky-500/30 bg-sky-500/10' : 'border-sky-200 bg-sky-50'
+                  }`}>
+                    <div className={`text-xs font-bold ${isDarkMode ? 'text-sky-300' : 'text-sky-900'}`}>
+                      รหัสเชิญชวนประจำรายวิชา (Static Code 4 ตัวอักษร):
+                    </div>
+                    <div className={`text-2xl sm:text-3xl font-mono font-bold tracking-widest text-center py-2.5 rounded-xl border shadow-inner ${
+                      isDarkMode ? 'bg-slate-900 border-slate-700 text-sky-400' : 'bg-white border-sky-200 text-sky-700'
+                    }`}>
+                      {generatedCode}
+                    </div>
+
+                    <p className={`text-xs text-center font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                      ส่งรหัส 4 หลักนี้ หรือคัดลอกลิงก์ให้นักศึกษาป้อนในหน้ารายวิชาเพื่อลงทะเบียนเข้าเรียน
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(generatedCode);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 2000);
+                        }}
+                        className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 active:scale-95 cursor-pointer ${
+                          isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-white border border-slate-700' : 'bg-slate-800 hover:bg-slate-900 text-white'
+                        }`}
+                      >
+                        <Copy className="w-4 h-4" />
+                        <span>คัดลอกรหัส 4 หลัก</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const url = `${window.location.origin}?join=${generatedCode}`;
+                          navigator.clipboard.writeText(url);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 2000);
+                        }}
+                        className="py-2 px-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 active:scale-95 cursor-pointer shadow-sm"
+                      >
+                        <Link className="w-4 h-4" />
+                        <span>คัดลอกลิงก์เต็ม</span>
+                      </button>
+                    </div>
+
+                    {copied && (
+                      <p className={`text-xs font-bold text-center ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                        ✓ คัดลอกข้อมูลเรียบร้อยแล้ว
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className={`text-center py-6 text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    กำลังดึงรหัสเชิญชวน...
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Current Enrolled Students List - Always visible below tabs */}
+          <div className={`pt-3 border-t space-y-3 ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className={`text-xs font-extrabold flex items-center justify-between uppercase tracking-wider ${
+                isDarkMode ? 'text-slate-300' : 'text-slate-700'
+              }`}>
+                <span>นักศึกษาทั้งหมดในรายวิชา ({studentMembersInCourse.length} คน)</span>
+              </h3>
+
+              {/* Filter enrolled list if needed */}
+              {studentMembersInCourse.length > 5 && (
+                <div className="relative w-full sm:w-56">
+                  <Search className={`w-3.5 h-3.5 absolute left-2.5 top-2.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                  <input
+                    type="text"
+                    value={listSearchQuery}
+                    onChange={(e) => setListSearchQuery(e.target.value)}
+                    placeholder="กรองรายชื่อในรายวิชา..."
+                    className={`w-full pl-8 pr-2.5 py-1.5 text-xs rounded-xl border font-semibold ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
+                    }`}
+                  />
+                </div>
+              )}
+            </div>
+
+            {studentMembersInCourse.length === 0 ? (
+              <div className={`p-6 rounded-2xl text-center text-xs font-semibold border border-dashed ${
+                isDarkMode ? 'border-slate-800 text-slate-400 bg-slate-800/20' : 'border-slate-300 text-slate-500 bg-slate-50'
+              }`}>
+                ยังไม่มีนักศึกษาลงทะเบียนในรายวิชานี้ สามารถเลือกเชิญนักศึกษาจากฐานข้อมูล หรือคัดลอกรหัสเชิญชวนส่งให้นักศึกษาลงทะเบียนได้
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {filteredEnrolledStudents.map((m) => {
+                  const u = m.user;
+                  const displayName = u
+                    ? `${u.title || ''} ${u.firstNameTh || ''} ${u.lastNameTh || ''}`.trim() || u.email
+                    : `นักศึกษา (${m.userId})`;
+                  const codeStr = u?.universityId || '';
+
+                  return (
+                    <div
+                      key={m.id}
+                      className={`p-3 rounded-xl border flex items-center justify-between ${
+                        isDarkMode ? 'bg-slate-800/60 border-slate-700/80' : 'bg-slate-50 border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div className={`w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center font-bold text-sm shrink-0 ${
+                          isDarkMode ? 'text-sky-400' : 'text-sky-600'
+                        }`}>
+                          🎓
+                        </div>
+                        <div className="min-w-0">
+                          <div className={`text-xs sm:text-sm font-bold truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                            {displayName}
+                          </div>
+                          <p className={`text-xs font-medium truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                            {codeStr ? `รหัสนักศึกษา: ${codeStr} • ` : ''}{u?.email || ''}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleRemoveMember(m.id, displayName)}
+                        className={`p-1.5 rounded-lg transition cursor-pointer shrink-0 ${
+                          isDarkMode ? 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/20' : 'text-slate-500 hover:text-rose-600 hover:bg-rose-50'
+                        }`}
+                        title="ลบออกจากรายวิชา"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Modal Footer */}
+        <div className={`px-5 sm:px-6 py-3.5 border-t flex justify-end shrink-0 ${
+          isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-100'
+        }`}>
+          <button
+            onClick={onClose}
+            className={`px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${
+              isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700' : 'bg-slate-200 hover:bg-slate-300 text-slate-800'
+            }`}
+          >
+            ปิดหน้าต่าง
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+

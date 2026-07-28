@@ -27,7 +27,8 @@ const app = express();
 const server = http.createServer(app);
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
 // Health Check Endpoint
 app.get('/api/health', (req, res) => {
@@ -51,6 +52,7 @@ interface ActiveQR {
   expiresAt: number;
   lat: number;
   lng: number;
+  isGpsCheckEnabled?: boolean;
 }
 const activeQRCodes: Map<string, ActiveQR> = new Map();
 
@@ -421,6 +423,7 @@ setInterval(() => {
         expiresAt,
         lat: session.teacherLat,
         lng: session.teacherLng,
+        isGpsCheckEnabled: session.isGpsCheckEnabled !== false,
       };
       activeQRCodes.set(sId, qrData);
 
@@ -443,6 +446,7 @@ setInterval(() => {
         expiresAt,
         lat: qEvent.teacherLat,
         lng: qEvent.teacherLng,
+        isGpsCheckEnabled: qEvent.isGpsCheckEnabled !== false,
       };
       activeQRCodes.set(eId, qrData);
 
@@ -508,6 +512,10 @@ app.post('/api/auth/register', (req, res) => {
   const cleanEmail = (email || '').toString().trim().toLowerCase();
   if (!cleanEmail || !cleanEmail.includes('@')) {
     return res.status(400).json({ error: 'กรุณากรอกอีเมลที่ถูกต้อง (เช่น example@gmail.com)' });
+  }
+
+  if (cleanEmail === 'nuttapat.anu@gmail.com') {
+    return res.status(400).json({ error: 'อีเมล nuttapat.anu@gmail.com ต้องลงทะเบียนและเข้าสู่ระบบด้วย Google Account เท่านั้น' });
   }
 
   const userRole = role || UserRole.STUDENT;
@@ -651,22 +659,46 @@ app.post('/api/auth/google', (req, res) => {
 
   let user = Array.from(users.values()).find((u) => u.email && u.email.toLowerCase() === userEmail);
 
+  // Auto-detect domain rules for Mahidol & Admin
+  const getForcedRole = (emailStr: string): UserRole | null => {
+    if (emailStr === 'nuttapat.anu@gmail.com') {
+      return UserRole.ADMIN;
+    }
+    if (emailStr.endsWith('@student.mahidol.ac.th')) {
+      return UserRole.STUDENT;
+    }
+    if (emailStr.endsWith('@mahidol.ac.th')) {
+      return UserRole.TEACHER;
+    }
+    return null;
+  };
+
+  const forcedRole = getForcedRole(userEmail);
+
   if (!user) {
-    // If user does not exist in system yet and no role is explicitly passed, require onboarding setup
+    // If user does not exist in system yet and no role is explicitly passed
     if (!role) {
       return res.json({
         requiresOnboarding: true,
+        forcedRole: forcedRole,
         email: userEmail,
         name: name || userEmail.split('@')[0],
         picture: picture || 'https://lh3.googleusercontent.com/a/default-user',
-        message: 'ผู้ใช้งานใหม่ กรุณาตั้งค่าประเภทบัญชี กำหนดรหัสผ่าน และระบุข้อมูลประจำตัวเพื่อเริ่มต้นใช้งาน',
+        message: forcedRole === UserRole.STUDENT
+          ? 'พบอีเมลนักศึกษา (@student.mahidol.ac.th) กรุณากรอกข้อมูลสำหรับนักศึกษาเพื่อเริ่มต้นใช้งาน'
+          : forcedRole === UserRole.TEACHER
+          ? 'พบอีเมลอาจารย์ (@mahidol.ac.th) กรุณากรอกข้อมูลสำหรับอาจารย์เพื่อเริ่มต้นใช้งาน'
+          : forcedRole === UserRole.ADMIN
+          ? 'พบอีเมลผู้ดูแลระบบ (nuttapat.anu@gmail.com) กรุณากรอกข้อมูลผู้ดูแลระบบเพื่อเริ่มต้นใช้งาน'
+          : 'ผู้ใช้งานใหม่ กรุณาตั้งค่าประเภทบัญชี กำหนดรหัสผ่าน และระบุข้อมูลประจำตัวเพื่อเริ่มต้นใช้งาน',
       });
     }
 
-    const userRole = role === UserRole.TEACHER ? UserRole.TEACHER : UserRole.STUDENT;
+    // Determine effective user role: forcedRole takes precedence over requested role
+    const effectiveRole = forcedRole || (role === UserRole.TEACHER ? UserRole.TEACHER : role === UserRole.ADMIN ? UserRole.ADMIN : UserRole.STUDENT);
 
     // Validate Student ID if registering as Student
-    if (userRole === UserRole.STUDENT && (!universityId || !universityId.toString().trim())) {
+    if (effectiveRole === UserRole.STUDENT && (!universityId || !universityId.toString().trim())) {
       return res.status(400).json({ error: 'กรุณาระบุรหัสประจำตัวนักศึกษาที่ถูกต้อง' });
     }
 
@@ -678,13 +710,13 @@ app.post('/api/auth/google', (req, res) => {
 
     user = {
       id: `usr_g_${Date.now()}`,
-      role: userRole,
-      title: title ? title.toString().trim() : (userRole === UserRole.TEACHER ? 'อ.ดร.' : 'นาย'),
+      role: effectiveRole,
+      title: title ? title.toString().trim() : (effectiveRole === UserRole.TEACHER ? 'อ.ดร.' : effectiveRole === UserRole.ADMIN ? 'แอดมิน' : 'นาย'),
       firstNameTh: fTh,
       lastNameTh: lTh,
       firstNameEn: fEn,
       lastNameEn: lEn,
-      universityId: universityId ? universityId.toString().trim() : '',
+      universityId: effectiveRole === UserRole.STUDENT ? universityId.toString().trim() : '',
       email: userEmail,
       password: password && password.toString().trim() ? password.toString().trim() : '123456',
       avatarUrl: picture || 'https://lh3.googleusercontent.com/a/default-user',
@@ -700,6 +732,9 @@ app.post('/api/auth/google', (req, res) => {
     if (!user.authProvider) user.authProvider = 'google';
     if (password && password.toString().trim()) {
       user.password = password.toString().trim();
+    }
+    if (userEmail === 'nuttapat.anu@gmail.com') {
+      user.role = UserRole.ADMIN;
     }
     saveToFirestore(COLLECTIONS.USERS, user);
   }
@@ -999,12 +1034,64 @@ app.delete('/api/courses/:id', async (req, res) => {
   res.json({ message: 'ลบรายวิชาและข้อมูลที่เกี่ยวข้องทั้งหมดเรียบร้อยแล้ว', courseId });
 });
 
-// Teacher Directory and Member Management Endpoints
+// Teacher & Student Directory and Member Management Endpoints
 app.get('/api/teachers', (req, res) => {
   const teacherUsers = Array.from(users.values())
     .filter((u) => u.role === UserRole.TEACHER || u.role === UserRole.ADMIN)
-    .map(({ password, ...u }) => u);
+    .map(({ password, ...u }) => ({
+      ...u,
+      role: UserRole.TEACHER, // Mask role as 'teacher' so admin system privileges are not exposed publicly
+    }));
   res.json(teacherUsers);
+});
+
+app.get('/api/students', (req, res) => {
+  const studentUsers = Array.from(users.values())
+    .filter((u) => u.role === UserRole.STUDENT)
+    .map(({ password, ...u }) => u);
+  res.json(studentUsers);
+});
+
+app.post('/api/courses/:id/members/invite-student', (req, res) => {
+  const courseId = req.params.id;
+  const { studentUserId } = req.body;
+
+  const course = courses.get(courseId);
+  if (!course) {
+    return res.status(404).json({ error: 'ไม่พบรายวิชาที่ระบุ' });
+  }
+
+  const targetStudent = users.get(studentUserId);
+  if (!targetStudent) {
+    return res.status(404).json({ error: 'ไม่พบนักศึกษาที่เลือกในระบบ' });
+  }
+
+  const existingMember = courseMembers.find((m) => m.courseId === courseId && m.userId === studentUserId);
+
+  if (existingMember) {
+    existingMember.role = CourseMemberRole.STUDENT;
+    saveToFirestore(COLLECTIONS.COURSE_MEMBERS, existingMember);
+    return res.json({
+      message: `นักศึกษา ${targetStudent.firstNameTh} ${targetStudent.lastNameTh} (${targetStudent.universityId || '-'}) มีชื่อในวิชานี้อยู่แล้ว`,
+      member: { ...existingMember, user: targetStudent },
+    });
+  }
+
+  const newMember: CourseMember = {
+    id: `cm_${Date.now()}`,
+    courseId,
+    userId: studentUserId,
+    role: CourseMemberRole.STUDENT,
+    joinedAt: new Date().toISOString(),
+  };
+
+  courseMembers.push(newMember);
+  saveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMember);
+
+  res.json({
+    message: `เพิ่มนักศึกษา ${targetStudent.firstNameTh} ${targetStudent.lastNameTh} (${targetStudent.universityId || '-'}) เข้าร่วมรายวิชาสำเร็จ`,
+    member: { ...newMember, user: targetStudent },
+  });
 });
 
 app.post('/api/courses/:id/members/invite-teacher', (req, res) => {
@@ -1087,11 +1174,22 @@ app.delete('/api/courses/:id/members/:memberId', async (req, res) => {
   res.json({ message: 'ลบสมาชิกออกจากรายวิชาเรียบร้อยแล้ว', memberId: removed.id });
 });
 
+// Helper for static 4-character invite token generation
+function generateStatic4CharToken(courseId: string, role: string): string {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let code = '';
+  const hash = crypto.createHash('md5').update(`static_course_invite_${courseId}_${role}`).digest('hex');
+  for (let i = 0; i < 4; i++) {
+    const idx = parseInt(hash.substring(i * 2, i * 2 + 2), 16) % chars.length;
+    code += chars[idx];
+  }
+  return code;
+}
+
 // Invite link generation & acceptance
 app.post('/api/courses/:id/invite', (req, res) => {
   const { role } = req.body;
   const courseId = req.params.id;
-  const code = crypto.randomBytes(4).toString('hex').toUpperCase();
 
   let targetRole = CourseMemberRole.STUDENT;
   if (role === 'COORDINATOR' || role === CourseMemberRole.COORDINATOR) {
@@ -1104,12 +1202,21 @@ app.post('/api/courses/:id/invite', (req, res) => {
     targetRole = CourseMemberRole.CO_TEACHER;
   }
 
+  // Check if static invite token already exists in memory map
+  for (const [code, inv] of inviteLinks.entries()) {
+    if (inv.courseId === courseId && inv.role === targetRole) {
+      return res.json(inv);
+    }
+  }
+
+  // Generate deterministic 4-character static token
+  const code = generateStatic4CharToken(courseId, targetRole);
   const invite: InviteLink = {
-    id: `inv_${Date.now()}`,
+    id: `inv_${courseId}_${targetRole}`,
     courseId,
     role: targetRole,
     code,
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    expiresAt: '2099-12-31T23:59:59.000Z',
   };
 
   inviteLinks.set(code, invite);
@@ -1129,6 +1236,32 @@ app.post('/api/invites/join', (req, res) => {
 
   const cleanCode = code.trim().toUpperCase();
   let invite = inviteLinks.get(cleanCode);
+
+  if (!invite) {
+    // Match against static 4-character invite token for any course
+    for (const course of courses.values()) {
+      for (const r of [
+        CourseMemberRole.STUDENT,
+        CourseMemberRole.INSTRUCTOR,
+        CourseMemberRole.CO_COORDINATOR,
+        CourseMemberRole.COORDINATOR,
+        CourseMemberRole.CO_TEACHER,
+      ]) {
+        if (generateStatic4CharToken(course.id, r) === cleanCode) {
+          invite = {
+            id: `inv_${course.id}_${r}`,
+            courseId: course.id,
+            role: r,
+            code: cleanCode,
+            expiresAt: '2099-12-31T23:59:59.000Z',
+          };
+          inviteLinks.set(cleanCode, invite);
+          break;
+        }
+      }
+      if (invite) break;
+    }
+  }
 
   let targetCourseId = invite?.courseId;
   let targetRole = invite?.role || CourseMemberRole.STUDENT;
@@ -1168,7 +1301,7 @@ app.post('/api/invites/join', (req, res) => {
 
 // 3. Active Session & Dynamic QR Management
 app.post('/api/sessions/:id/activate', (req, res) => {
-  const { teacherLat, teacherLng } = req.body;
+  const { teacherLat, teacherLng, isGpsCheckEnabled = true } = req.body;
   const session = sessions.get(req.params.id);
 
   if (!session) {
@@ -1176,6 +1309,7 @@ app.post('/api/sessions/:id/activate', (req, res) => {
   }
 
   session.isActive = true;
+  session.isGpsCheckEnabled = isGpsCheckEnabled !== false;
   if (teacherLat && teacherLng) {
     session.teacherLat = parseFloat(teacherLat);
     session.teacherLng = parseFloat(teacherLng);
@@ -1189,9 +1323,28 @@ app.post('/api/sessions/:id/activate', (req, res) => {
     expiresAt,
     lat: session.teacherLat,
     lng: session.teacherLng,
+    isGpsCheckEnabled: session.isGpsCheckEnabled,
   });
 
   res.json({ message: 'Session QR code activated', session, qrToken: token, expiresAt });
+});
+
+app.post('/api/sessions/:id/gps-toggle', (req, res) => {
+  const { isGpsCheckEnabled } = req.body;
+  const targetId = req.params.id;
+  const session = sessions.get(targetId);
+  if (session) {
+    session.isGpsCheckEnabled = isGpsCheckEnabled !== false;
+  }
+  const qEvt = quickEvents.get(targetId);
+  if (qEvt) {
+    qEvt.isGpsCheckEnabled = isGpsCheckEnabled !== false;
+  }
+  const activeQR = activeQRCodes.get(targetId);
+  if (activeQR) {
+    activeQR.isGpsCheckEnabled = isGpsCheckEnabled !== false;
+  }
+  res.json({ message: 'GPS check status updated', isGpsCheckEnabled: isGpsCheckEnabled !== false });
 });
 
 app.post('/api/sessions/:id/deactivate', (req, res) => {
@@ -1295,17 +1448,21 @@ app.post('/api/checkin', (req, res) => {
 
   let distanceMeters = getHaversineDistance(lat1, lon1, lat2, lon2);
 
-  // Mode validation: GPS_ONLY or HYBRID requires <= 50m geofence radius
-  if (checkinMode === 'GPS_ONLY' || checkinMode === 'HYBRID') {
+  // Determine if GPS Geofence Check is required
+  const sessionGpsEnabled = session.isGpsCheckEnabled !== false;
+  const qrGpsEnabled = activeQR ? activeQR.isGpsCheckEnabled !== false : true;
+  const isGpsCheckRequired = sessionGpsEnabled && qrGpsEnabled && checkinMode !== 'QR_ONLY';
+
+  if (isGpsCheckRequired) {
     // If either device still uses default fallback or distance mismatch > 500m due to laptop lack of GPS
-    if ((isTeacherDefault || isStudentDefault) && distanceMeters > 50) {
+    if ((isTeacherDefault || isStudentDefault) && distanceMeters > 200) {
       // Auto allow with distance set to calibrated distance
       distanceMeters = Math.min(distanceMeters, 15);
-    } else if (distanceMeters > 50) {
+    } else if (distanceMeters > 200) {
       return res.status(400).json({
-        error: `[GPS Geofence] คุณอยู่ห่างจากห้องเรียน ${distanceMeters} เมตร (อนุญาตไม่เกิน 50 เมตร) หากอาจารย์เปิดบน MacBook ให้เปลี่ยนเป็นโหมด 'QR อย่างเดียว' ในหน้าจอผู้สอน`,
+        error: `[GPS Geofence] คุณอยู่ห่างจากห้องเรียน ${distanceMeters} เมตร (อนุญาตไม่เกิน 200 เมตร) หากอาจารย์เปิดบน MacBook ให้เปลี่ยนเป็นโหมด 'QR อย่างเดียว' ในหน้าจอผู้สอน`,
         distanceMeters,
-        allowedRadius: 50,
+        allowedRadius: 200,
       });
     }
   }
@@ -1412,7 +1569,7 @@ app.get('/api/teacher/checkin', (req, res) => {
 
 // 5. Quick Check-In (Event Mode)
 app.post('/api/quick-events', (req, res) => {
-  const { title, teacherId, teacherLat, teacherLng } = req.body;
+  const { title, teacherId, teacherLat, teacherLng, isGpsCheckEnabled = true } = req.body;
   const reqUserId = req.headers['x-user-id'] as string;
   const newEvent: QuickEvent = {
     id: `evt_${Date.now()}`,
@@ -1422,6 +1579,7 @@ app.post('/api/quick-events', (req, res) => {
     teacherLng: parseFloat(teacherLng) || 100.5018,
     isActive: true,
     createdAt: new Date().toISOString(),
+    isGpsCheckEnabled: isGpsCheckEnabled !== false,
   };
 
   quickEvents.set(newEvent.id, newEvent);
@@ -1433,6 +1591,7 @@ app.post('/api/quick-events', (req, res) => {
     expiresAt: Date.now() + 35000,
     lat: newEvent.teacherLat,
     lng: newEvent.teacherLng,
+    isGpsCheckEnabled: newEvent.isGpsCheckEnabled,
   });
 
   res.json(newEvent);
@@ -1487,9 +1646,13 @@ app.post('/api/checkin/quick', (req, res) => {
     parseFloat(scannedLng || activeQR.lng)
   );
 
-  if (distanceMeters > 50) {
+  const eventGpsEnabled = qEvent.isGpsCheckEnabled !== false;
+  const qrGpsEnabled = activeQR ? activeQR.isGpsCheckEnabled !== false : true;
+  const isGpsCheckRequired = eventGpsEnabled && qrGpsEnabled && req.body.checkinMode !== 'QR_ONLY';
+
+  if (isGpsCheckRequired && distanceMeters > 200) {
     return res.status(400).json({
-      error: `[Geofence Violation] Distance: ${distanceMeters}m (Max allowed: 50m).`,
+      error: `[Geofence Violation] Distance: ${distanceMeters}m (Max allowed: 200m).`,
       distanceMeters,
     });
   }
@@ -1540,12 +1703,23 @@ app.get('/api/export-csv/:courseId', (req, res) => {
     let weekCols = '';
 
     courseSessions.forEach((s) => {
-      const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === st.id);
-      if (rec) {
-        attendedCount++;
-        weekCols += `,PRESENT (${new Date(rec.timestamp).toLocaleTimeString()})`;
+      const approvedLeave = getApprovedLeaveForSession(st.id, course.id, s);
+      if (approvedLeave) {
+        const leaveTypeLabel =
+          approvedLeave.leaveType === LeaveType.SICK
+            ? 'ลาป่วย'
+            : approvedLeave.leaveType === LeaveType.PERSONAL
+            ? 'ลากิจ'
+            : 'ลาอื่นๆ';
+        weekCols += `,LEAVE (${leaveTypeLabel})`;
       } else {
-        weekCols += `,ABSENT`;
+        const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === st.id);
+        if (rec) {
+          attendedCount++;
+          weekCols += `,PRESENT (${new Date(rec.timestamp).toLocaleTimeString()})`;
+        } else {
+          weekCols += `,ABSENT`;
+        }
       }
     });
 
@@ -1600,6 +1774,8 @@ app.post('/api/leave-requests', (req, res) => {
     weekNumber,
     leaveType,
     leaveDate,
+    endDate,
+    isMultiDay,
     reason,
     attachmentUrl,
     attachmentName,
@@ -1631,6 +1807,8 @@ app.post('/api/leave-requests', (req, res) => {
     weekNumber: weekNumber ? Number(weekNumber) : undefined,
     leaveType: leaveType as LeaveType,
     leaveDate,
+    endDate: isMultiDay ? endDate : undefined,
+    isMultiDay: Boolean(isMultiDay),
     reason,
     attachmentUrl,
     attachmentName,
@@ -1727,6 +1905,24 @@ app.delete('/api/leave-requests/:id', (req, res) => {
   });
 });
 
+// Helper to check if a student has an APPROVED leave request for a given session
+function getApprovedLeaveForSession(studentId: string, courseId: string, session: Session): LeaveRequest | undefined {
+  return leaveRequests.find((lr) => {
+    if (lr.studentId !== studentId || lr.courseId !== courseId || lr.status !== LeaveStatus.APPROVED) {
+      return false;
+    }
+    if (lr.weekNumber && session.weekNumber && Number(lr.weekNumber) === Number(session.weekNumber)) {
+      return true;
+    }
+    const sDate = session.createdAt ? session.createdAt.split('T')[0] : '';
+    if (sDate && lr.leaveDate) {
+      if (lr.leaveDate === sDate) return true;
+      if (lr.isMultiDay && lr.endDate && sDate >= lr.leaveDate && sDate <= lr.endDate) return true;
+    }
+    return false;
+  });
+}
+
 // Student Dashboard Stats endpoint
 app.get('/api/student/:studentId/stats', (req, res) => {
   const studentId = req.params.studentId;
@@ -1738,12 +1934,22 @@ app.get('/api/student/:studentId/stats', (req, res) => {
 
   const courseStats = studentCourses.map((c) => {
     const cSessions = Array.from(sessions.values()).filter((s) => s.courseId === c.id);
-    const attended = cSessions.filter((s) =>
-      attendanceRecords.some((r) => r.sessionId === s.id && r.studentId === studentId)
-    );
+
+    let attendedCount = 0;
+    let approvedLeaveCount = 0;
+
+    cSessions.forEach((s) => {
+      const approvedLeave = getApprovedLeaveForSession(studentId, c.id, s);
+      if (approvedLeave) {
+        approvedLeaveCount++;
+      } else {
+        const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === studentId);
+        if (rec) attendedCount++;
+      }
+    });
 
     const total = cSessions.length || 1;
-    const percentage = Math.round((attended.length / total) * 100);
+    const percentage = Math.round((attendedCount / total) * 100);
 
     let statusColor: 'GREEN' | 'YELLOW' | 'RED' = 'GREEN';
     if (percentage < 80) statusColor = 'RED';
@@ -1757,9 +1963,10 @@ app.get('/api/student/:studentId/stats', (req, res) => {
       course: c,
       stats: {
         totalSessions: cSessions.length,
-        attendedSessions: attended.length,
+        attendedSessions: attendedCount,
+        approvedLeaveSessions: approvedLeaveCount,
         lateSessions: 0,
-        absentSessions: cSessions.length - attended.length,
+        absentSessions: Math.max(0, cSessions.length - attendedCount - approvedLeaveCount),
         percentage,
         statusColor,
       },
@@ -1793,7 +2000,6 @@ app.get('/api/teacher/courses-overview', (req, res) => {
     const coTeacherMembers = membersInCourse.filter((m) => m.role === CourseMemberRole.CO_TEACHER);
 
     const cSessions = Array.from(sessions.values()).filter((s) => s.courseId === course.id);
-    const cSessionIds = new Set(cSessions.map((s) => s.id));
 
     const studentList = studentMembers.map((m) => {
       const studentUser = users.get(m.userId);
@@ -1802,22 +2008,34 @@ app.get('/api/teacher/courses-overview', (req, res) => {
         : 'นักศึกษา';
       const studentIdNum = studentUser?.universityId || '-';
 
-      const studentCheckins = attendanceRecords.filter(
-        (r) => cSessionIds.has(r.sessionId) && r.studentId === m.userId
-      );
+      let attendedCount = 0;
+      let approvedLeaveCount = 0;
+      let lastCheckinTime: string | null = null;
+      let lastCheckinMethod: string | null = null;
+      const validCheckinTimes: Date[] = [];
+
+      cSessions.forEach((s) => {
+        const approvedLeave = getApprovedLeaveForSession(m.userId, course.id, s);
+        if (approvedLeave) {
+          approvedLeaveCount++;
+        } else {
+          const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === m.userId);
+          if (rec) {
+            attendedCount++;
+            validCheckinTimes.push(new Date(rec.timestamp));
+            lastCheckinTime = rec.timestamp;
+            lastCheckinMethod = rec.checkinMethod;
+          }
+        }
+      });
 
       const totalSessionsCount = cSessions.length || 1;
-      const attendedCount = studentCheckins.length;
       const attendancePercent = Math.round((attendedCount / totalSessionsCount) * 100);
 
-      const checkinTimes = studentCheckins.map((r) => new Date(r.timestamp));
-      const lastCheckinTime = studentCheckins.length > 0 ? studentCheckins[studentCheckins.length - 1].timestamp : null;
-      const lastCheckinMethod = studentCheckins.length > 0 ? studentCheckins[studentCheckins.length - 1].checkinMethod : null;
-
       let avgTimeStr = '-';
-      if (checkinTimes.length > 0) {
-        const totalMinutes = checkinTimes.reduce((acc, dt) => acc + (dt.getHours() * 60 + dt.getMinutes()), 0);
-        const avgMin = Math.round(totalMinutes / checkinTimes.length);
+      if (validCheckinTimes.length > 0) {
+        const totalMinutes = validCheckinTimes.reduce((acc, dt) => acc + (dt.getHours() * 60 + dt.getMinutes()), 0);
+        const avgMin = Math.round(totalMinutes / validCheckinTimes.length);
         const hrs = Math.floor(avgMin / 60).toString().padStart(2, '0');
         const mins = (avgMin % 60).toString().padStart(2, '0');
         avgTimeStr = `${hrs}:${mins} น.`;
@@ -1831,6 +2049,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
         avatarUrl: studentUser?.avatarUrl || '',
         joinedAt: m.joinedAt,
         attendedCount,
+        approvedLeaveCount,
         totalSessionsCount,
         attendancePercent,
         avgTimeStr,
@@ -1842,7 +2061,6 @@ app.get('/api/teacher/courses-overview', (req, res) => {
     const courseSessionsList = Array.from(sessions.values()).filter((s) => s.courseId === course.id);
     const sessionDetailsList = courseSessionsList.map((s) => {
       const recordsForSession = attendanceRecords.filter((r) => r.sessionId === s.id);
-      const checkinCount = recordsForSession.length;
 
       let firstCheckinTimeStr = '-';
       let lastCheckinTimeStr = '-';
@@ -1853,44 +2071,70 @@ app.get('/api/teacher/courses-overview', (req, res) => {
         lastCheckinTimeStr = new Date(sorted[sorted.length - 1].timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
       }
 
-      const checkedInStudentIds = new Set(recordsForSession.map((r) => r.studentId));
+      const attendedStudents: any[] = [];
+      const absentStudents: any[] = [];
 
-      const attendedStudents = studentMembers
-        .filter((m) => checkedInStudentIds.has(m.userId))
-        .map((m) => {
-          const studentUser = users.get(m.userId);
-          const studentName = studentUser
-            ? `${studentUser.title || ''} ${studentUser.firstNameTh || ''} ${studentUser.lastNameTh || ''}`.trim() || studentUser.email
-            : 'นักศึกษา';
-          const studentIdNum = studentUser?.universityId || '-';
+      studentMembers.forEach((m) => {
+        const studentUser = users.get(m.userId);
+        const studentName = studentUser
+          ? `${studentUser.title || ''} ${studentUser.firstNameTh || ''} ${studentUser.lastNameTh || ''}`.trim() || studentUser.email
+          : 'นักศึกษา';
+        const studentIdNum = studentUser?.universityId || '-';
+
+        const matchingLeave = getApprovedLeaveForSession(m.userId, course.id, s);
+
+        if (matchingLeave) {
+          // Approved leave overrides checkin - student is placed in absent (leave) list
+          const leaveTypeLabel =
+            matchingLeave.leaveType === LeaveType.SICK
+              ? 'ลาป่วย'
+              : matchingLeave.leaveType === LeaveType.PERSONAL
+              ? 'ลากิจ'
+              : matchingLeave.leaveType === LeaveType.OTHER
+              ? 'ลาอื่นๆ'
+              : 'ลาเรียน';
+
+          const statusText = leaveTypeLabel;
+
+          absentStudents.push({
+            userId: m.userId,
+            studentName,
+            studentIdNum,
+            email: studentUser?.email || '',
+            avatarUrl: studentUser?.avatarUrl || '',
+            isOnLeave: true,
+            leaveType: matchingLeave.leaveType,
+            leaveTypeLabel,
+            statusText,
+            leaveReason: matchingLeave.reason || '',
+          });
+        } else {
           const rec = recordsForSession.find((r) => r.studentId === m.userId);
-          return {
-            userId: m.userId,
-            studentName,
-            studentIdNum,
-            email: studentUser?.email || '',
-            avatarUrl: studentUser?.avatarUrl || '',
-            checkinTime: rec ? new Date(rec.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.' : '-',
-            checkinMethod: rec?.checkinMethod || 'สแกน QR',
-          };
-        });
+          if (rec) {
+            attendedStudents.push({
+              userId: m.userId,
+              studentName,
+              studentIdNum,
+              email: studentUser?.email || '',
+              avatarUrl: studentUser?.avatarUrl || '',
+              checkinTime: new Date(rec.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
+              checkinMethod: rec.checkinMethod || 'สแกน QR',
+            });
+          } else {
+            absentStudents.push({
+              userId: m.userId,
+              studentName,
+              studentIdNum,
+              email: studentUser?.email || '',
+              avatarUrl: studentUser?.avatarUrl || '',
+              isOnLeave: false,
+              statusText: 'ขาดเรียน',
+            });
+          }
+        }
+      });
 
-      const absentStudents = studentMembers
-        .filter((m) => !checkedInStudentIds.has(m.userId))
-        .map((m) => {
-          const studentUser = users.get(m.userId);
-          const studentName = studentUser
-            ? `${studentUser.title || ''} ${studentUser.firstNameTh || ''} ${studentUser.lastNameTh || ''}`.trim() || studentUser.email
-            : 'นักศึกษา';
-          const studentIdNum = studentUser?.universityId || '-';
-          return {
-            userId: m.userId,
-            studentName,
-            studentIdNum,
-            email: studentUser?.email || '',
-            avatarUrl: studentUser?.avatarUrl || '',
-          };
-        });
+      const checkinCount = attendedStudents.length;
 
       return {
         sessionId: s.id,
@@ -1913,9 +2157,18 @@ app.get('/api/teacher/courses-overview', (req, res) => {
     const totalSessions = courseSessionsList.length;
 
     const totalPossibleCheckins = totalRegisteredCount * (totalSessions || 1);
-    const totalActualCheckins = attendanceRecords.filter((r) =>
-      cSessionIds.has(r.sessionId)
-    ).length;
+    let totalActualCheckins = 0;
+
+    courseSessionsList.forEach((s) => {
+      studentMembers.forEach((m) => {
+        const approvedLeave = getApprovedLeaveForSession(m.userId, course.id, s);
+        if (!approvedLeave) {
+          const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === m.userId);
+          if (rec) totalActualCheckins++;
+        }
+      });
+    });
+
     const courseAvgAttendanceRate = totalPossibleCheckins > 0 ? Math.round((totalActualCheckins / totalPossibleCheckins) * 100) : 0;
 
     return {
@@ -2019,7 +2272,7 @@ app.get('/api/admin/database/collection/:collectionName', (req, res) => {
 
     switch (collectionName) {
       case 'users':
-        data = users ? Array.from(users.values()) : [];
+        data = users ? Array.from(users.values()).map(({ password, ...u }) => u) : [];
         break;
       case 'courses':
         data = courses ? Array.from(courses.values()) : [];
@@ -2075,10 +2328,32 @@ app.post('/api/admin/database/document/:collectionName', async (req, res) => {
         users.set(docData.id, docData);
         await saveToFirestore(COLLECTIONS.USERS, docData);
         break;
-      case 'courses':
+      case 'courses': {
         courses.set(docData.id, docData);
         await saveToFirestore(COLLECTIONS.COURSES, docData);
+
+        // Ensure owner is updated/added in courseMembers
+        if (docData.ownerId) {
+          const existingMember = courseMembers.find(
+            (m) => m.courseId === docData.id && m.userId === docData.ownerId
+          );
+          if (!existingMember) {
+            const newMember: CourseMember = {
+              id: `cm_${docData.id}_${docData.ownerId}`,
+              courseId: docData.id,
+              userId: docData.ownerId,
+              role: CourseMemberRole.COORDINATOR,
+              joinedAt: new Date().toISOString(),
+            };
+            courseMembers.push(newMember);
+            await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMember);
+          } else {
+            existingMember.role = CourseMemberRole.COORDINATOR;
+            await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, existingMember);
+          }
+        }
         break;
+      }
       case 'courseMembers': {
         const idx = courseMembers.findIndex((m) => m.id === docData.id);
         if (idx >= 0) courseMembers[idx] = docData;
@@ -2128,10 +2403,48 @@ app.delete('/api/admin/database/document/:collectionName/:docId', async (req, re
         users.delete(docId);
         await deleteFromFirestore(COLLECTIONS.USERS, docId);
         break;
-      case 'courses':
+      case 'courses': {
         courses.delete(docId);
         await deleteFromFirestore(COLLECTIONS.COURSES, docId);
+
+        // Cascade delete course members
+        for (let i = courseMembers.length - 1; i >= 0; i--) {
+          if (courseMembers[i].courseId === docId) {
+            const member = courseMembers[i];
+            courseMembers.splice(i, 1);
+            await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, member.id);
+          }
+        }
+
+        // Cascade delete sessions associated with this course
+        const deletedSessionIds = new Set<string>();
+        for (const [sesId, ses] of Array.from(sessions.entries())) {
+          if (ses.courseId === docId) {
+            sessions.delete(sesId);
+            deletedSessionIds.add(sesId);
+            await deleteFromFirestore(COLLECTIONS.SESSIONS, sesId);
+          }
+        }
+
+        // Cascade delete attendance records
+        for (let i = attendanceRecords.length - 1; i >= 0; i--) {
+          if (deletedSessionIds.has(attendanceRecords[i].sessionId)) {
+            const att = attendanceRecords[i];
+            attendanceRecords.splice(i, 1);
+            await deleteFromFirestore(COLLECTIONS.ATTENDANCE, att.id);
+          }
+        }
+
+        // Cascade delete leave requests associated with this course
+        for (let i = leaveRequests.length - 1; i >= 0; i--) {
+          if (leaveRequests[i].courseId === docId) {
+            const lr = leaveRequests[i];
+            leaveRequests.splice(i, 1);
+            await deleteFromFirestore(COLLECTIONS.LEAVE_REQUESTS, lr.id);
+          }
+        }
         break;
+      }
       case 'courseMembers': {
         const idx = courseMembers.findIndex((m) => m.id === docId);
         if (idx >= 0) courseMembers.splice(idx, 1);
@@ -2165,6 +2478,103 @@ app.delete('/api/admin/database/document/:collectionName/:docId', async (req, re
     res.json({ message: `ลบเอกสาร ${docId} จาก ${collectionName} เรียบร้อยแล้ว`, docId });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการลบเอกสาร' });
+  }
+});
+
+// Helper to clean orphaned data
+async function cleanOrphanedData() {
+  const deletedSummary = {
+    courseMembers: [] as string[],
+    sessions: [] as string[],
+    attendanceRecords: [] as string[],
+    leaveRequests: [] as string[],
+    quickEvents: [] as string[],
+  };
+
+  // 1. Clean courseMembers
+  for (let i = courseMembers.length - 1; i >= 0; i--) {
+    const cm = courseMembers[i];
+    const courseExists = cm.courseId && courses.has(cm.courseId);
+    const userExists = cm.userId && users.has(cm.userId);
+
+    if (!courseExists || !userExists) {
+      const reason = !courseExists ? `ไม่พบวิชา (${cm.courseId})` : `ไม่พบผู้ใช้ (${cm.userId})`;
+      deletedSummary.courseMembers.push(`ID: ${cm.id} [${reason}]`);
+      courseMembers.splice(i, 1);
+      await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, cm.id);
+    }
+  }
+
+  // 2. Clean sessions
+  for (const [sesId, ses] of Array.from(sessions.entries())) {
+    const courseExists = ses.courseId && courses.has(ses.courseId);
+    if (!courseExists) {
+      deletedSummary.sessions.push(`ID: ${sesId} [ไม่พบวิชา (${ses.courseId})]`);
+      sessions.delete(sesId);
+      await deleteFromFirestore(COLLECTIONS.SESSIONS, sesId);
+    }
+  }
+
+  // 3. Clean attendanceRecords
+  for (let i = attendanceRecords.length - 1; i >= 0; i--) {
+    const att = attendanceRecords[i];
+    const sessionExists = att.sessionId && sessions.has(att.sessionId);
+    const studentExists = att.studentId && users.has(att.studentId);
+
+    if (!sessionExists || !studentExists) {
+      const reason = !sessionExists ? `ไม่พบคาบเรียน (${att.sessionId})` : `ไม่พบนักศึกษา (${att.studentId})`;
+      deletedSummary.attendanceRecords.push(`ID: ${att.id} [${reason}]`);
+      attendanceRecords.splice(i, 1);
+      await deleteFromFirestore(COLLECTIONS.ATTENDANCE, att.id);
+    }
+  }
+
+  // 4. Clean leaveRequests
+  for (let i = leaveRequests.length - 1; i >= 0; i--) {
+    const lr = leaveRequests[i];
+    const courseExists = lr.courseId && courses.has(lr.courseId);
+    const studentExists = lr.studentId && users.has(lr.studentId);
+
+    if (!courseExists || !studentExists) {
+      const reason = !courseExists ? `ไม่พบวิชา (${lr.courseId})` : `ไม่พบนักศึกษา (${lr.studentId})`;
+      deletedSummary.leaveRequests.push(`ID: ${lr.id} [${reason}]`);
+      leaveRequests.splice(i, 1);
+      await deleteFromFirestore(COLLECTIONS.LEAVE_REQUESTS, lr.id);
+    }
+  }
+
+  // 5. Clean quickEvents
+  for (const [qId, qe] of Array.from(quickEvents.entries())) {
+    const teacherExists = !qe.teacherId || users.has(qe.teacherId);
+
+    if (!teacherExists) {
+      deletedSummary.quickEvents.push(`ID: ${qId} [ไม่พบอาจารย์ผู้สร้าง (${qe.teacherId})]`);
+      quickEvents.delete(qId);
+      await deleteFromFirestore(COLLECTIONS.QUICK_EVENTS, qId);
+    }
+  }
+
+  return deletedSummary;
+}
+
+// Endpoint to trigger cleanup of orphaned data
+app.post('/api/admin/clean-orphaned-data', async (req, res) => {
+  try {
+    const summary = await cleanOrphanedData();
+    const totalDeleted =
+      summary.courseMembers.length +
+      summary.sessions.length +
+      summary.attendanceRecords.length +
+      summary.leaveRequests.length +
+      summary.quickEvents.length;
+
+    res.json({
+      message: totalDeleted > 0 ? `ลบข้อมูลตกค้าง (Orphaned Data) ทั้งหมด ${totalDeleted} รายการสำเร็จ` : 'ไม่พบข้อมูลตกค้าง (Orphaned Data) ในระบบ',
+      totalDeleted,
+      summary,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการล้างข้อมูลตกค้าง' });
   }
 });
 
@@ -2460,6 +2870,8 @@ async function syncFromFirestore() {
     }
 
     console.log('[Firestore Sync] Firestore database synchronized successfully.');
+    const orphanSummary = await cleanOrphanedData();
+    console.log('[Firestore Sync] Orphan cleanup summary:', JSON.stringify(orphanSummary));
   } catch (err) {
     console.error('[Firestore Sync Warning] Falling back to initial seed data:', err);
   }

@@ -30,6 +30,11 @@ service cloud.firestore {
     match /quickEvents/{eventId} {
       allow read, write: if true;
     }
+
+    // Leave requests collection
+    match /leaveRequests/{leaveId} {
+      allow read, write: if true;
+    }
   }
 }
 

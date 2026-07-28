@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { User, UserRole, UserDevice } from '../types';
 import { updateUserProfile, getUserDevices, bindUserDeviceApi, deleteUserDeviceApi, resetUserDevice } from '../services/api';
 import { getDeviceInfo, DeviceInfo } from '../utils/deviceHelper';
-import { X, User as UserIcon, Lock, Shield, CheckCircle2, ShieldAlert, Eye, EyeOff, KeyRound, Smartphone, Mail, MapPin, Globe, Tablet, Monitor, Trash2, Plus, RefreshCw, AlertCircle, Check, Info } from 'lucide-react';
+import { X, User as UserIcon, Lock, Shield, CheckCircle2, ShieldAlert, Eye, EyeOff, KeyRound, Smartphone, Mail, MapPin, Globe, Tablet, Monitor, Sun, Moon, Trash2, Plus, RefreshCw, AlertCircle, Check, Info } from 'lucide-react';
 import { MapPicker } from './MapPicker';
+import { useTheme } from '../context/ThemeContext';
 
 interface UserSettingsModalProps {
   isOpen: boolean;
@@ -19,9 +20,11 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   onClose,
   currentUser,
   onUpdateUser,
-  isDarkMode = true,
+  isDarkMode: propIsDarkMode,
   initialTab = 'profile',
 }) => {
+  const { themeMode, setThemeMode, isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'device' | 'gps'>(initialTab);
 
   useEffect(() => {
@@ -531,6 +534,66 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                     }`}
                   />
                 </div>
+              </div>
+
+              {/* Theme Preference Selection */}
+              <div className={`p-3.5 border rounded-2xl ${
+                isDarkMode ? 'bg-slate-800/40 border-slate-700/80' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                  โหมดการแสดงผล (Display Theme Mode)
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setThemeMode('light')}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center space-x-2 transition cursor-pointer ${
+                      themeMode === 'light'
+                        ? 'bg-sky-600 text-white border-sky-500 shadow-md shadow-sky-600/20'
+                        : isDarkMode
+                          ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Sun className="w-4 h-4 text-amber-400" />
+                    <span>สว่าง (Light)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setThemeMode('dark')}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center space-x-2 transition cursor-pointer ${
+                      themeMode === 'dark'
+                        ? 'bg-sky-600 text-white border-sky-500 shadow-md shadow-sky-600/20'
+                        : isDarkMode
+                          ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Moon className="w-4 h-4 text-sky-400" />
+                    <span>มืด (Dark)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setThemeMode('system')}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center space-x-2 transition cursor-pointer ${
+                      themeMode === 'system'
+                        ? 'bg-sky-600 text-white border-sky-500 shadow-md shadow-sky-600/20'
+                        : isDarkMode
+                          ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Monitor className="w-4 h-4 text-slate-400" />
+                    <span>ตามอุปกรณ์ (Auto)</span>
+                  </button>
+                </div>
+                <p className={`text-[10px] mt-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {themeMode === 'system'
+                    ? 'โหมดตามอุปกรณ์จะปรับเปลี่ยนเป็นสว่างหรือมืดโดยอัตโนมัติตามการตั้งค่าเครื่องของคุณ (Auto System)'
+                    : `ล็อกธีมไว้ที่โหมด ${themeMode === 'light' ? 'สว่าง (Light)' : 'มืด (Dark)'} โดยไม่ขึ้นกับธีมเครื่อง`}
+                </p>
               </div>
 
               <div className="pt-2 flex justify-end">

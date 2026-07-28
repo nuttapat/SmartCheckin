@@ -3,6 +3,7 @@ import { Semester, TeachingWeek, Course } from '../types';
 import { createCourse } from '../services/api';
 import { X, Plus, Minus, BookOpen, Calendar, CheckCircle2, MapPin, Globe } from 'lucide-react';
 import { MapPicker } from './MapPicker';
+import { useTheme } from '../context/ThemeContext';
 
 interface TeacherCourseCreationModalProps {
   isOpen: boolean;
@@ -43,8 +44,10 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
   onSuccess,
   ownerId,
   coordinatorDefault,
-  isDarkMode = true,
+  isDarkMode: propIsDarkMode,
 }) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [courseCode, setCourseCode] = useState<string>('');
   const [courseName, setCourseName] = useState<string>('');
   const [academicYear, setAcademicYear] = useState<number>(getCurrentAcademicYear());
@@ -166,11 +169,11 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                รหัสวิชา (Course Code)
+                รหัสวิชา (Course Code) <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"
-                placeholder="เช่น TEST101"
+                placeholder="เช่น MTID204"
                 value={courseCode}
                 onChange={(e) => setCourseCode(e.target.value)}
                 required
@@ -181,7 +184,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
             </div>
             <div className="md:col-span-2">
               <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                ชื่อรายวิชา (Course Name)
+                ชื่อรายวิชา (Course Name) <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"

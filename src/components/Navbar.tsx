@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { User, UserRole } from '../types';
-import { QrCode, User as UserIcon, Plus, Sparkles, Sun, Moon, LogOut, Settings, KeyRound, ChevronDown, MapPin, Bot } from 'lucide-react';
+import { QrCode, User as UserIcon, Plus, Sparkles, Sun, Moon, Monitor, LogOut, Settings, KeyRound, ChevronDown, MapPin, Bot } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 
 interface NavbarProps {
   currentUser: User | null;
@@ -28,10 +29,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenUserSettings,
   onOpenTestingAgent,
   onLogout,
-  isDarkMode = true,
+  isDarkMode: propIsDarkMode,
   onToggleTheme,
 }) => {
+  const { themeMode, setThemeMode, isDarkMode: themeIsDarkMode, toggleTheme } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
+  const handleToggleTheme = onToggleTheme || toggleTheme;
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+  const [isThemeMenuOpen, setIsThemeMenuOpen] = useState<boolean>(false);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleMouseEnter = () => {
@@ -117,11 +122,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <p className="font-semibold">
                     {currentUser ? `${currentUser.title} ${currentUser.firstNameTh}` : 'โปรไฟล์ผู้ใช้'}
                   </p>
-                  {!isAdmin && (
-                    <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                      {currentUser?.role === UserRole.TEACHER ? '👨‍🏫 อาจารย์ (Teacher)' : '🧑‍🎓 นักศึกษา (Student)'}
-                    </p>
-                  )}
                 </div>
                 <ChevronDown className="w-3.5 h-3.5 opacity-60 ml-1 hidden sm:block" />
               </button>
@@ -193,20 +193,66 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
 
-            {/* Theme Switcher Button */}
-            {onToggleTheme && (
+            {/* Theme Switcher 3-Way Control */}
+            <div className="relative">
               <button
-                onClick={onToggleTheme}
-                className={`p-2 rounded-xl transition ${
+                onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
+                className={`p-2 rounded-xl transition cursor-pointer flex items-center space-x-1 ${
                   isDarkMode 
                     ? 'text-slate-300 hover:text-white hover:bg-slate-800' 
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                 }`}
-                title={isDarkMode ? 'เปลี่ยนเป็นธีมสว่าง (Light Theme)' : 'เปลี่ยนเป็นธีมมืด (Dark Theme)'}
+                title={`โหมดธีม: ${themeMode === 'light' ? 'สว่าง (Light)' : themeMode === 'dark' ? 'มืด (Dark)' : 'ตามระบบอุปกรณ์ (System Auto)'}`}
               >
-                {isDarkMode ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-sky-600" />}
+                {themeMode === 'light' && <Sun className="w-5 h-5 text-amber-500" />}
+                {themeMode === 'dark' && <Moon className="w-5 h-5 text-sky-400" />}
+                {themeMode === 'system' && <Monitor className="w-5 h-5 text-slate-400" />}
               </button>
-            )}
+
+              {isThemeMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsThemeMenuOpen(false)} />
+                  <div className={`absolute right-0 mt-2 w-44 rounded-2xl shadow-xl border p-1.5 z-50 text-xs font-semibold ${
+                    isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-200' : 'bg-white border-slate-200 text-slate-800'
+                  }`}>
+                    <div className="px-3 py-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-wider">โหมดการแสดงผล</div>
+                    <button
+                      onClick={() => { setThemeMode('light'); setIsThemeMenuOpen(false); }}
+                      className={`w-full flex items-center space-x-2 px-3 py-2 rounded-xl cursor-pointer transition ${
+                        themeMode === 'light' 
+                          ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold' 
+                          : 'hover:bg-slate-500/10'
+                      }`}
+                    >
+                      <Sun className="w-4 h-4 text-amber-500" />
+                      <span>สว่าง (Light)</span>
+                    </button>
+                    <button
+                      onClick={() => { setThemeMode('dark'); setIsThemeMenuOpen(false); }}
+                      className={`w-full flex items-center space-x-2 px-3 py-2 rounded-xl cursor-pointer transition ${
+                        themeMode === 'dark' 
+                          ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold' 
+                          : 'hover:bg-slate-500/10'
+                      }`}
+                    >
+                      <Moon className="w-4 h-4 text-sky-400" />
+                      <span>มืด (Dark)</span>
+                    </button>
+                    <button
+                      onClick={() => { setThemeMode('system'); setIsThemeMenuOpen(false); }}
+                      className={`w-full flex items-center space-x-2 px-3 py-2 rounded-xl cursor-pointer transition ${
+                        themeMode === 'system' 
+                          ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold' 
+                          : 'hover:bg-slate-500/10'
+                      }`}
+                    >
+                      <Monitor className="w-4 h-4 text-slate-400" />
+                      <span>ตามอุปกรณ์ (Auto)</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
 
             {/* Logout Button */}
             {onLogout && (

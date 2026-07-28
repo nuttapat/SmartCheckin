@@ -3,6 +3,7 @@ import { UserRole, User } from '../types';
 import { registerUser, googleLogin } from '../services/api';
 import { signInWithGooglePopup } from '../lib/firebaseStore';
 import { X, UserCheck, Mail, ShieldAlert, Smartphone, CheckCircle2, Lock, Eye, EyeOff } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 
 interface RegisterModalProps {
   isOpen: boolean;
@@ -11,7 +12,9 @@ interface RegisterModalProps {
   isDarkMode?: boolean;
 }
 
-export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, onSuccess, isDarkMode = true }) => {
+export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, onSuccess, isDarkMode: propIsDarkMode }) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [role, setRole] = useState<UserRole>(UserRole.STUDENT);
   const [titleOption, setTitleOption] = useState<string>('นาย');
   const [customTitle, setCustomTitle] = useState<string>('');

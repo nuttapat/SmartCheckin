@@ -4,6 +4,7 @@ import { updateCourse } from '../services/api';
 import { X, BookOpen, Plus, Trash2, Calendar, Save, CheckCircle2, MapPin, Globe } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { DeleteCourseConfirmModal } from './DeleteCourseConfirmModal';
+import { useTheme } from '../context/ThemeContext';
 
 interface TeacherCourseEditModalProps {
   isOpen: boolean;
@@ -22,8 +23,10 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   onSuccess,
   onDeleteSuccess,
   teacherId,
-  isDarkMode = true,
+  isDarkMode: propIsDarkMode,
 }) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [courseCode, setCourseCode] = useState<string>(course.courseCode);
   const [courseName, setCourseName] = useState<string>(course.courseName);
   const [academicYear, setAcademicYear] = useState<number>(course.academicYear);
@@ -192,7 +195,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
                 <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  รหัสวิชา (Course Code)
+                  รหัสวิชา (Course Code) <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -207,7 +210,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
 
               <div className="md:col-span-2">
                 <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  ชื่อรายวิชา (Course Name)
+                  ชื่อรายวิชา (Course Name) <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"

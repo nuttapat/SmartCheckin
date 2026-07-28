@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Course } from '../types';
 import { deleteCourseApi } from '../services/api';
 import { Trash2, AlertTriangle, Lock, Eye, EyeOff, ShieldAlert, X } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 
 interface DeleteCourseConfirmModalProps {
   isOpen: boolean;
@@ -18,8 +19,10 @@ export const DeleteCourseConfirmModal: React.FC<DeleteCourseConfirmModalProps> =
   course,
   teacherId,
   onSuccess,
-  isDarkMode = true,
+  isDarkMode: propIsDarkMode,
 }) => {
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
