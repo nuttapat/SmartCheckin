@@ -43,6 +43,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
   const [isImageProcessing, setIsImageProcessing] = useState<boolean>(false);
   const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [pendingCameraNotice, setPendingCameraNotice] = useState<string | null>(null);
+  const autoSubmittedRef = useRef<boolean>(false);
 
   const [checkinStatus, setCheckinStatus] = useState<{
     success: boolean;
@@ -89,7 +90,16 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
             const tokenToUse = parsed.qrToken || parsed.rawToken;
             setScannedResult(tokenToUse);
             setManualInput(tokenToUse);
-            setPendingCameraNotice(`สแกนจากกล้องมือถือ: ดึงรหัส [${tokenToUse}] ให้อัตโนมัติเรียบร้อยแล้ว`);
+            setCheckinMode('TOKEN');
+            setPendingCameraNotice(`สแกนจากกล้องมือถือ: ตรวจพบรหัส [${tokenToUse}] ระบบกำลังเช็คชื่อให้อัตโนมัติ...`);
+
+            // Trigger immediate automatic check-in without requiring re-scanning
+            if (!autoSubmittedRef.current) {
+              autoSubmittedRef.current = true;
+              setTimeout(() => {
+                handleProcessCheckin(data.rawToken, 'TOKEN');
+              }, 150);
+            }
           }
         } else {
           setPendingCameraNotice(null);
@@ -100,6 +110,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
         console.error('Error loading pending_qr_checkin:', e);
       }
     } else {
+      autoSubmittedRef.current = false;
       stopLiveCameraStream();
     }
   }, [isOpen]);
@@ -294,6 +305,13 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
           <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300 flex items-center space-x-2 text-xs font-bold shadow-xs">
             <Camera className="w-4 h-4 text-sky-500 shrink-0" />
             <span>📱 {pendingCameraNotice}</span>
+          </div>
+        )}
+
+        {submitting && (
+          <div className="p-4 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300 flex items-center space-x-3 text-xs font-bold animate-pulse shadow-sm">
+            <div className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin shrink-0"></div>
+            <span>⚡ ระบบกำลังตรวจสอบพิกัด GPS และบันทึกเวลาเรียนให้อัตโนมัติ...</span>
           </div>
         )}
 
