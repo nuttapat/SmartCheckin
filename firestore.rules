@@ -31,8 +31,18 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Teacher attendance records collection
+    match /teacherAttendanceRecords/{recordId} {
+      allow read, write: if true;
+    }
+
     // Leave requests collection
     match /leaveRequests/{leaveId} {
+      allow read, write: if true;
+    }
+
+    // Fallback match for any other collection
+    match /{document=**} {
       allow read, write: if true;
     }
   }

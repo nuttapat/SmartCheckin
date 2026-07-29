@@ -261,6 +261,16 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
         onCheckinSuccess();
       }
     } catch (err: any) {
+      // Clear pending token so stale data won't persist
+      sessionStorage.removeItem('pending_qr_checkin');
+      
+      // Automatically switch back to HYBRID (QR + GPS) tab for easy re-scanning
+      setCheckinMode('HYBRID');
+      setScannedResult('');
+      setManualInput('');
+      setPendingCameraNotice(null);
+      autoSubmittedRef.current = false;
+
       setCheckinStatus({
         success: false,
         error: err?.message || 'เกิดข้อผิดพลาด ไม่สามารถเช็คชื่อได้',
