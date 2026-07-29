@@ -13,6 +13,7 @@ import { LoginPage } from './components/LoginPage';
 import { TestingAgentModal } from './components/TestingAgentModal';
 import { AdminDashboard } from './components/AdminDashboard';
 import { useTheme } from './context/ThemeContext';
+import { parseCheckinToken } from './utils/qrParser';
 
 // Sample pre-seeded users for instant testing
 const INITIAL_USERS: User[] = [
@@ -100,6 +101,29 @@ export default function App() {
   });
 
   const { isDarkMode, toggleTheme } = useTheme();
+
+  // Detect direct camera QR scan link from URL query params (e.g. ?checkin=SES:123:ABC)
+  useEffect(() => {
+    try {
+      const search = window.location.search;
+      if (search && (search.includes('checkin') || search.includes('qrToken') || search.includes('SES') || search.includes('EVT'))) {
+        const parsed = parseCheckinToken(window.location.href);
+        if (parsed.rawToken) {
+          const payload = {
+            rawToken: parsed.rawToken,
+            targetId: parsed.targetId,
+            qrToken: parsed.qrToken,
+            type: parsed.type,
+            timestamp: Date.now(),
+          };
+          sessionStorage.setItem('pending_qr_checkin', JSON.stringify(payload));
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }
+    } catch (err) {
+      console.error('Error handling direct camera QR scan URL:', err);
+    }
+  }, []);
 
   // Modals
   const [isRegisterOpen, setIsRegisterOpen] = useState<boolean>(false);

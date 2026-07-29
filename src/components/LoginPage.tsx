@@ -4,6 +4,7 @@ import { loginUser, forgotPassword, googleLogin } from '../services/api';
 import { signInWithGooglePopup } from '../lib/firebaseStore';
 import { QrCode, Mail, LogIn, UserPlus, ShieldAlert, Sun, Moon, Monitor, Lock, Eye, EyeOff, User as UserIcon, KeyRound, CheckCircle2, X, Sparkles, Bot } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { parseCheckinToken } from '../utils/qrParser';
 
 interface LoginPageProps {
   onLoginSuccess: (user: User) => void;
@@ -31,6 +32,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [googleLoading, setGoogleLoading] = useState<boolean>(false);
+
+  const [pendingQrCheckin] = useState<{ rawToken: string; token: string } | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('pending_qr_checkin');
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (data && data.rawToken) {
+          const parsed = parseCheckinToken(data.rawToken);
+          return {
+            rawToken: data.rawToken,
+            token: parsed.qrToken || data.rawToken,
+          };
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return null;
+  });
 
   // Fallback Google Modal state if popup blocked
   const [isGoogleModalOpen, setIsGoogleModalOpen] = useState<boolean>(false);
@@ -325,6 +345,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               รองรับการเข้าสู่ระบบด้วย Google Account และ Email/Password
             </p>
           </div>
+
+          {pendingQrCheckin && (
+            <div className="mb-6 p-4 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300 flex items-start space-x-3 shadow-sm animate-pulse">
+              <QrCode className="w-5 h-5 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
+              <div className="text-xs space-y-1">
+                <div className="font-extrabold text-sm text-sky-800 dark:text-sky-200">
+                  📌 ตรวจพบลิงก์เช็คชื่อ QR Code จากกล้องมือถือ!
+                </div>
+                <div>
+                  บันทึกรหัส <span className="font-mono font-bold bg-sky-500/20 px-2 py-0.5 rounded-md text-sky-900 dark:text-sky-100">{pendingQrCheckin.token}</span> เรียบร้อยแล้ว
+                </div>
+                <div className="text-[11px] font-medium opacity-90">
+                  👉 กรุณาเข้าสู่ระบบด้วยบัญชีนักศึกษา ระบบจะพาไปยืนยันลงเวลาเรียนโดยอัตโนมัติ
+                </div>
+              </div>
+            </div>
+          )}
 
           {errorMsg && (
             <div className="mb-5 p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center space-x-2.5 text-rose-600 dark:text-rose-300 text-xs">

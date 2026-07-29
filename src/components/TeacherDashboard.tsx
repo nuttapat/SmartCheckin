@@ -559,9 +559,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           }
           setQrCountdown(30);
 
-          // Generate QR Code Data URL image
+          // Generate QR Code Data URL image (Full web URL for native camera scanning)
           const qrText = isEvent ? `EVT:${targetId}:${newToken}` : `SES:${targetId}:${newToken}`;
-          const url = await QRCode.toDataURL(qrText, { width: 320, margin: 2, color: { dark: '#090d16', light: '#ffffff' } });
+          const qrFullUrl = `${window.location.origin}/?checkin=${encodeURIComponent(qrText)}`;
+          const url = await QRCode.toDataURL(qrFullUrl, { width: 320, margin: 2, color: { dark: '#090d16', light: '#ffffff' } });
           setQrDataUrl(url);
         } else if (payload.type === 'CHECKIN_NEW') {
           // Live checkin event received!
@@ -595,9 +596,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         setIsStaticQr(res.isStatic);
       }
 
-      // Render initial QR
+      // Render initial QR (Full web URL for native phone camera scanning)
       const initialText = `SES:${session.id}:${res.qrToken || 'active'}`;
-      const url = await QRCode.toDataURL(initialText, { width: 320, margin: 2, color: { dark: '#090d16', light: '#ffffff' } });
+      const initialFullUrl = `${window.location.origin}/?checkin=${encodeURIComponent(initialText)}`;
+      const url = await QRCode.toDataURL(initialFullUrl, { width: 320, margin: 2, color: { dark: '#090d16', light: '#ffffff' } });
       setQrDataUrl(url);
       setQrToken(res.qrToken || '');
 

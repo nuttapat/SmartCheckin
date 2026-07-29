@@ -1504,6 +1504,12 @@ app.post('/api/checkin', (req, res) => {
       return res.status(400).json({ error: 'กรุณากรอกรหัส Token 6 หลักจากหน้าจออาจารย์' });
     }
     let inputToken = qrToken.trim();
+    if (inputToken.includes('checkin=')) {
+      const match = inputToken.match(/checkin=([^&]+)/);
+      if (match && match[1]) {
+        inputToken = decodeURIComponent(match[1]).trim();
+      }
+    }
     if (inputToken.includes(':')) {
       const parts = inputToken.split(':');
       inputToken = parts[parts.length - 1];

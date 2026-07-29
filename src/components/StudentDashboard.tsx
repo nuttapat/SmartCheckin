@@ -62,6 +62,22 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
     loadStats();
   }, [student.id]);
 
+  // Auto-open checkin modal if user scanned QR code via mobile phone camera
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('pending_qr_checkin');
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (data && data.rawToken) {
+          loadActiveSessions();
+          setIsScannerOpen(true);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to trigger auto checkin from pending QR:', e);
+    }
+  }, []);
+
   const openCheckinModal = () => {
     loadActiveSessions();
     setIsScannerOpen(true);

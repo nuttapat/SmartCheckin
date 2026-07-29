@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, Session, Course } from '../types';
 import { submitCheckin } from '../services/api';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
+import { parseCheckinToken } from '../utils/qrParser';
 import { getDeviceInfo } from '../utils/deviceHelper';
 import { Html5Qrcode } from 'html5-qrcode';
 import {
@@ -41,6 +42,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [isImageProcessing, setIsImageProcessing] = useState<boolean>(false);
   const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [pendingCameraNotice, setPendingCameraNotice] = useState<string | null>(null);
 
   const [checkinStatus, setCheckinStatus] = useState<{
     success: boolean;
@@ -73,9 +75,30 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setCheckinStatus(null);
-      setScannedResult('');
-      setManualInput('');
       updateLocation();
+
+      try {
+        const saved = sessionStorage.getItem('pending_qr_checkin');
+        if (saved) {
+          const data = JSON.parse(saved);
+          if (data && data.rawToken) {
+            const parsed = parseCheckinToken(data.rawToken);
+            if (parsed.targetId) {
+              setSelectedSessionId(parsed.targetId);
+            }
+            const tokenToUse = parsed.qrToken || parsed.rawToken;
+            setScannedResult(tokenToUse);
+            setManualInput(tokenToUse);
+            setPendingCameraNotice(`สแกนจากกล้องมือถือ: ดึงรหัส [${tokenToUse}] ให้อัตโนมัติเรียบร้อยแล้ว`);
+          }
+        } else {
+          setPendingCameraNotice(null);
+          setScannedResult('');
+          setManualInput('');
+        }
+      } catch (e) {
+        console.error('Error loading pending_qr_checkin:', e);
+      }
     } else {
       stopLiveCameraStream();
     }
@@ -195,10 +218,15 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
 
       const devInfo = getDeviceInfo();
 
+      const rawInput = qrPayloadText || scannedResult || manualInput.trim();
+      const parsedToken = parseCheckinToken(rawInput);
+      const tokenToSubmit = parsedToken.qrToken || parsedToken.rawToken;
+      const targetSessionId = parsedToken.targetId || selectedSessionId || undefined;
+
       const res = await submitCheckin({
         studentId: student.id,
-        qrToken: qrPayloadText || scannedResult || manualInput.trim(),
-        sessionId: selectedSessionId || undefined,
+        qrToken: tokenToSubmit,
+        sessionId: targetSessionId,
         scannedLat: currentLat,
         scannedLng: currentLng,
         deviceId: devInfo.deviceId,
@@ -208,6 +236,9 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
         os: devInfo.os,
         checkinMode: mode,
       });
+
+      // Clear pending QR session token on success
+      sessionStorage.removeItem('pending_qr_checkin');
 
       setCheckinStatus({
         success: true,
@@ -258,6 +289,13 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {pendingCameraNotice && (
+          <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300 flex items-center space-x-2 text-xs font-bold shadow-xs">
+            <Camera className="w-4 h-4 text-sky-500 shrink-0" />
+            <span>📱 {pendingCameraNotice}</span>
+          </div>
+        )}
 
         {/* Check-in Mode Selector Tabs */}
         <div
