@@ -1,21 +1,23 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { User, Course, Session, AttendanceRecord, TeacherAttendanceRecord, QuickEvent, InviteLink, CourseMember, CourseMemberRole } from '../types';
-import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, createQuickEvent, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck, toggleQrMode } from '../services/api';
-import { QrCode, Users, Download, Sparkles, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown, EyeOff, Eye, Lock } from 'lucide-react';
+import { User, Course, Session, AttendanceRecord, TeacherAttendanceRecord, InviteLink, CourseMember, CourseMemberRole } from '../types';
+import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck, toggleQrMode } from '../services/api';
+import { QrCode, Users, Download, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown, EyeOff, Eye, Lock } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
+import { getDeviceInfo } from '../utils/deviceHelper';
 import { TeacherCourseEditModal } from './TeacherCourseEditModal';
 import { TeacherLeaveManagementModal } from './TeacherLeaveManagementModal';
 import { DeleteCourseConfirmModal } from './DeleteCourseConfirmModal';
 import { TeacherInviteModal } from './TeacherInviteModal';
 import { StudentInviteModal } from './StudentInviteModal';
+import { TeacherCheckinModal } from './TeacherCheckinModal';
 import { useTheme } from '../context/ThemeContext';
 
 interface TeacherDashboardProps {
   teacher: User;
   onOpenCreateCourse: () => void;
-  onOpenQuickEvent: () => void;
+  onOpenQuickEvent?: () => void;
   quickEventTrigger?: number;
   isDarkMode?: boolean;
 }
@@ -202,7 +204,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   // Invite modal state
   const [inviteModalCode, setInviteModalCode] = useState<InviteLink | null>(null);
-  const [quickEventModal, setQuickEventModal] = useState<QuickEvent | null>(null);
 
   // Teacher Attendance Check-In state
   const [isTeacherCheckinModalOpen, setIsTeacherCheckinModalOpen] = useState<boolean>(false);
@@ -375,28 +376,98 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   };
 
   const handleTeacherCheckinSubmit = async () => {
-    setSubmittingTeacherCheckin(true);
     setTeacherCheckinResult(null);
+
+    let tokenToSubmit = '';
+    if (teacherCheckinMethod === 'HYBRID') {
+      tokenToSubmit = (teacherScannedCode || teacherTokenInput).trim();
+      if (!tokenToSubmit) {
+        setTeacherCheckinResult({
+          success: false,
+          message: 'กรุณาสแกน QR Code หรืออัปโหลดรูปภาพ QR Code / กรอกรหัส Token ก่อนกดเช็คชื่อ',
+        });
+        return;
+      }
+    } else if (teacherCheckinMethod === 'TOKEN') {
+      tokenToSubmit = teacherTokenInput.trim();
+      if (!tokenToSubmit) {
+        setTeacherCheckinResult({
+          success: false,
+          message: 'กรุณากรอกรหัส Token 6 หลักสำหรับเข้าสอนก่อนกดเช็คชื่อ',
+        });
+        return;
+      }
+    }
+
+    setSubmittingTeacherCheckin(true);
+
     try {
+      // 1. Get fresh Geolocation position on submit (matching student checkin process)
+      let currentLat = teacherCoords.lat;
+      let currentLng = teacherCoords.lng;
+
+      if (navigator.geolocation) {
+        try {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 5000,
+              maximumAge: 0,
+            });
+          });
+          currentLat = position.coords.latitude;
+          currentLng = position.coords.longitude;
+          updateTeacherCoords({ lat: currentLat, lng: currentLng });
+        } catch (geoErr) {
+          console.warn('Teacher geolocation lookup on submit failed/denied:', geoErr);
+        }
+      }
+
+      // 2. Get device fingerprint info
+      const devInfo = getDeviceInfo();
+
+      // 3. Submit teacher check-in
       const res = await submitTeacherCheckin({
         teacherId: teacher.id,
         courseId: teacherCheckinCourseId || undefined,
         sessionId: teacherCheckinSessionId || undefined,
-        lat: teacherCoords.lat,
-        lng: teacherCoords.lng,
-        deviceId: teacher.deviceId || `dev_${teacher.id}`,
+        lat: currentLat,
+        lng: currentLng,
+        deviceId: devInfo.deviceId,
+        deviceName: devInfo.deviceName,
+        deviceType: devInfo.deviceType,
+        browser: devInfo.browser,
+        os: devInfo.os,
         checkinMethod: teacherCheckinMethod,
+        qrToken: tokenToSubmit || undefined,
         buildingRoom,
         notes: teachingNotes,
       });
 
+      // Stop camera if running
+      if (teacherHtml5QrCodeRef.current) {
+        try {
+          await teacherHtml5QrCodeRef.current.stop();
+        } catch (e) {}
+        teacherHtml5QrCodeRef.current = null;
+      }
+
+      const distMsg = typeof res.distanceMeters === 'number' && res.distanceMeters > 0
+        ? ` (ระยะห่างจากสถานที่เรียน: ${res.distanceMeters} เมตร)`
+        : '';
+
       setTeacherCheckinResult({
         success: true,
-        message: res.message || 'บันทึกการเช็คชื่อเข้าสอนเรียบร้อยแล้ว!',
+        message: (res.message || 'บันทึกการเช็คชื่อเข้าสอนเรียบร้อยแล้ว!') + distMsg,
       });
-      loadTeacherHistory();
+
+      // Reset inputs
+      setTeacherScannedCode('');
+      setTeacherTokenInput('');
       setBuildingRoom('');
       setTeachingNotes('');
+
+      loadTeacherHistory();
     } catch (err: any) {
       setTeacherCheckinResult({
         success: false,
@@ -554,9 +625,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       await deactivateSession(activeSession.id);
       setActiveSession(null);
     }
-    if (quickEventModal) {
-      setQuickEventModal(null);
-    }
     setIsQrModalOpen(false);
     if (wsRef.current) {
       wsRef.current.close();
@@ -568,49 +636,25 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const handleToggleGps = async () => {
     const nextVal = !isGpsCheckEnabled;
     setIsGpsCheckEnabled(nextVal);
-    const targetId = activeSession?.id || quickEventModal?.id;
-    if (targetId) {
+    if (activeSession?.id) {
       try {
-        await toggleGpsCheck(targetId, nextVal);
+        await toggleGpsCheck(activeSession.id, nextVal);
       } catch (err) {
         console.error('Failed to sync GPS toggle with server:', err);
       }
     }
   };
 
-  // Launch Quick Check-in (Ad-hoc Event)
-  const handleLaunchQuickEvent = async () => {
-    try {
-      const qEvt = await createQuickEvent('การเช็คชื่อด่วน (Quick Event)', teacherCoords.lat, teacherCoords.lng, teacher.id, isGpsCheckEnabled);
-      setQuickEventModal(qEvt);
-      setLiveCheckins([]);
-
-      const initialText = `EVT:${qEvt.id}:active_token`;
-      const url = await QRCode.toDataURL(initialText, { width: 320, margin: 2 });
-      setQrDataUrl(url);
-
-      connectWebSocket(qEvt.id, true);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  useEffect(() => {
-    if (quickEventTrigger && quickEventTrigger > 0) {
-      handleLaunchQuickEvent();
-    }
-  }, [quickEventTrigger]);
-
   // 30-second Countdown Timer Effect for Dynamic QR Code
   useEffect(() => {
-    if (!activeSession && !quickEventModal) return;
+    if (!activeSession) return;
 
     const timer = setInterval(() => {
       setQrCountdown((prev) => (prev > 0 ? prev - 1 : 30));
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [activeSession, quickEventModal]);
+  }, [activeSession]);
 
   // Generate Invite Link
   const handleGenerateInvite = async (role: 'STUDENT' | 'CO_TEACHER') => {
@@ -648,10 +692,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-2.5 w-full sm:w-auto md:ml-auto shrink-0">
+        <div className="flex flex-wrap sm:flex-nowrap gap-2.5 w-full sm:w-auto md:ml-auto shrink-0">
           <button
             onClick={() => setIsLeaveManagementOpen(true)}
-            className="w-full px-4 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-amber-600/20 active:scale-95 transition border border-amber-400/30 cursor-pointer relative whitespace-nowrap"
+            className="px-4 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-amber-600/20 active:scale-95 transition border border-amber-400/30 cursor-pointer relative whitespace-nowrap"
           >
             <FileText className="w-4 h-4 text-white shrink-0" />
             <span>คำขอลาเรียน</span>
@@ -663,16 +707,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </button>
 
           <button
-            onClick={onOpenQuickEvent}
-            className="w-full px-4 py-3 rounded-2xl bg-sky-200 hover:bg-sky-300 text-sky-950 dark:bg-sky-900/70 dark:text-sky-100 dark:hover:bg-sky-800 font-extrabold text-xs flex items-center justify-center space-x-2 shadow-sm active:scale-95 transition border border-sky-300/80 dark:border-sky-700 cursor-pointer whitespace-nowrap"
-          >
-            <Sparkles className="w-4 h-4 text-sky-700 dark:text-sky-300 shrink-0" />
-            <span>เช็คชื่อด่วน</span>
-          </button>
-
-          <button
             onClick={onOpenCreateCourse}
-            className="w-full px-4 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-sky-500/20 active:scale-95 transition border border-sky-300/40 cursor-pointer whitespace-nowrap"
+            className="px-4 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-sky-500/20 active:scale-95 transition border border-sky-300/40 cursor-pointer whitespace-nowrap"
           >
             <Plus className="w-4 h-4 shrink-0" />
             <span>สร้างรายวิชา</span>
@@ -680,7 +716,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
           <button
             onClick={handleOpenTeacherCheckin}
-            className="w-full px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-emerald-600/20 active:scale-95 transition border border-emerald-400/30 cursor-pointer whitespace-nowrap"
+            className="px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-emerald-600/20 active:scale-95 transition border border-emerald-400/30 cursor-pointer whitespace-nowrap"
           >
             <UserCheck className="w-4 h-4 text-white shrink-0" />
             <span>ลงชื่อเข้าสอน</span>
@@ -1895,8 +1931,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         </div>
       )}
 
-      {/* DYNAMIC QR DISPLAY MODAL / SCREEN (Active QR Session or Quick Event) */}
-      {(activeSession || quickEventModal) && isQrModalOpen && (
+      {/* DYNAMIC QR DISPLAY MODAL / SCREEN (Active QR Session) */}
+      {activeSession && isQrModalOpen && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
           <div className={`border rounded-2xl sm:rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
@@ -1909,9 +1945,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 <div className="w-3 h-3 rounded-full bg-emerald-500 animate-ping shrink-0"></div>
                 <div>
                   <h3 className={`text-sm sm:text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                    {quickEventModal
-                      ? 'โหมดเช็คชื่อด่วน (Quick Check-in Mode)'
-                      : `กำลังเปิดสแกน: ${selectedCourse?.courseCode} - สัปดาห์ที่ ${activeSession?.weekNumber}`}
+                    {`กำลังเปิดสแกน: ${selectedCourse?.courseCode} - สัปดาห์ที่ ${activeSession?.weekNumber}`}
                   </h3>
                   <p className={`text-[11px] sm:text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     {isStaticQr
@@ -1959,10 +1993,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     onClick={async () => {
                       if (!isStaticQr) return;
                       setIsStaticQr(false);
-                      const targetId = activeSession?.id || quickEventModal?.id;
-                      if (targetId) {
+                      if (activeSession?.id) {
                         try {
-                          await toggleQrMode(targetId, false);
+                          await toggleQrMode(activeSession.id, false);
                         } catch (err) {
                           console.error(err);
                         }
@@ -1985,10 +2018,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     onClick={async () => {
                       if (isStaticQr) return;
                       setIsStaticQr(true);
-                      const targetId = activeSession?.id || quickEventModal?.id;
-                      if (targetId) {
+                      if (activeSession?.id) {
                         try {
-                          await toggleQrMode(targetId, true);
+                          await toggleQrMode(activeSession.id, true);
                         } catch (err) {
                           console.error(err);
                         }
@@ -2310,449 +2342,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       )}
 
       {/* TEACHER CHECK-IN MODAL */}
-      {isTeacherCheckinModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
-          <div className={`border rounded-3xl w-full max-w-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 shadow-2xl my-auto max-h-[92vh] flex flex-col overflow-y-auto ${
-            isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
-          }`}>
-            {/* Modal Header */}
-            <div className={`flex items-center justify-between border-b pb-4 ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500">
-                  <UserCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className={`text-base font-extrabold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                    ระบบเช็คชื่ออาจารย์เข้าสอน (Teacher Check-In)
-                  </h3>
-                  <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    บันทึกเวลาการปฏิบัติการสอนและสถานที่สำหรับผู้สอน (ข้อมูลเก็บแยกจากนักศึกษา)
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsTeacherCheckinModalOpen(false)}
-                className={`p-2 rounded-xl transition ${isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Check-In Form */}
-            <div className="space-y-4">
-              {/* Method Selection Tabs (Matching Student Checkin Order & Styling) */}
-              <div>
-                <label className={`block text-xs font-bold mb-1.5 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  วิธีการบันทึกการสอน:
-                </label>
-                <div className={`grid grid-cols-3 gap-1.5 p-1.5 rounded-2xl border ${
-                  isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200'
-                }`}>
-                  {/* Position 1 (Far Left / Default): QR + GPS */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTeacherCheckinResult(null);
-                      setTeacherCheckinMethod('HYBRID');
-                    }}
-                    className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition flex flex-col sm:flex-row items-center justify-center space-x-1 ${
-                      teacherCheckinMethod === 'HYBRID'
-                        ? 'bg-blue-600 text-white shadow-md'
-                        : isDarkMode
-                        ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-                    }`}
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>QR Code + GPS</span>
-                  </button>
-
-                  {/* Position 2 (Middle): GPS อย่างเดียว */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTeacherCheckinResult(null);
-                      setTeacherCheckinMethod('GPS_ONLY');
-                    }}
-                    className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition flex flex-col sm:flex-row items-center justify-center space-x-1 ${
-                      teacherCheckinMethod === 'GPS_ONLY'
-                        ? 'bg-sky-600 text-white shadow-md'
-                        : isDarkMode
-                        ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-                    }`}
-                  >
-                    <Navigation className="w-3.5 h-3.5" />
-                    <span>GPS อย่างเดียว</span>
-                  </button>
-
-                  {/* Position 3 (Far Right): รหัสเข้าชั้นเรียน (Token) */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTeacherCheckinResult(null);
-                      setTeacherCheckinMethod('TOKEN');
-                    }}
-                    className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition flex flex-col sm:flex-row items-center justify-center space-x-1 ${
-                      teacherCheckinMethod === 'TOKEN'
-                        ? 'bg-amber-600 text-white shadow-md'
-                        : isDarkMode
-                        ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-                    }`}
-                  >
-                    <KeyRound className="w-3.5 h-3.5" />
-                    <span>รหัสเข้าชั้นเรียน</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Course & Session Selector */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className={`block text-xs font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                    เลือกรายวิชาที่เข้าสอน:
-                  </label>
-                  <select
-                    value={teacherCheckinCourseId}
-                    onChange={(e) => {
-                      setTeacherCheckinCourseId(e.target.value);
-                      const selected = courses.find((c) => c.id === e.target.value);
-                      if (selected && selected.sessions && selected.sessions.length > 0) {
-                        setTeacherCheckinSessionId(selected.sessions[0].id);
-                      } else {
-                        setTeacherCheckinSessionId('');
-                      }
-                    }}
-                    className={`w-full text-xs font-medium rounded-xl p-2.5 border focus:outline-none ${
-                      isDarkMode
-                        ? 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'
-                        : 'bg-white border-slate-300 text-slate-900 focus:border-blue-600 shadow-sm'
-                    }`}
-                  >
-                    <option value="">-- การสอนทั่วไป / นอกเหนือตารางวิชา --</option>
-                    {courses.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        [{c.courseCode}] {c.courseName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className={`block text-xs font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                    คาบเรียน / หัวข้อ:
-                  </label>
-                  <select
-                    value={teacherCheckinSessionId}
-                    onChange={(e) => setTeacherCheckinSessionId(e.target.value)}
-                    className={`w-full text-xs font-medium rounded-xl p-2.5 border focus:outline-none ${
-                      isDarkMode
-                        ? 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'
-                        : 'bg-white border-slate-300 text-slate-900 focus:border-blue-600 shadow-sm'
-                    }`}
-                  >
-                    <option value="">-- ไม่ระบุคาบเรียน (Ad-hoc Lecture) --</option>
-                    {courses
-                      .find((c) => c.id === teacherCheckinCourseId)
-                      ?.sessions?.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          สัปดาห์ที่ {s.weekNumber}: {s.topic}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Building / Room and Notes */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className={`block text-xs font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                    อาคาร / ห้องเรียน:
-                  </label>
-                  <div className="relative">
-                    <Building className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                    <input
-                      type="text"
-                      placeholder="เช่น อาคาร 3 ห้อง 302"
-                      value={buildingRoom}
-                      onChange={(e) => setBuildingRoom(e.target.value)}
-                      className={`w-full text-xs font-medium rounded-xl pl-9 pr-3 py-2.5 border focus:outline-none ${
-                        isDarkMode
-                          ? 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'
-                          : 'bg-white border-slate-300 text-slate-900 focus:border-blue-600 shadow-sm'
-                      }`}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className={`block text-xs font-bold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                    บันทึกการสอนเพิ่มเติม:
-                  </label>
-                  <div className="relative">
-                    <FileText className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                    <input
-                      type="text"
-                      placeholder="เช่น หัวข้อพิเศษ หรือ ลิงก์สไลด์การสอน"
-                      value={teachingNotes}
-                      onChange={(e) => setTeachingNotes(e.target.value)}
-                      className={`w-full text-xs font-medium rounded-xl pl-9 pr-3 py-2.5 border focus:outline-none ${
-                        isDarkMode
-                          ? 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'
-                          : 'bg-white border-slate-300 text-slate-900 focus:border-blue-600 shadow-sm'
-                      }`}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* HYBRID (QR Code + GPS) CAMERA SCANNER SECTION */}
-              {teacherCheckinMethod === 'HYBRID' && (
-                <div className="space-y-2.5">
-                  <div className={`p-3.5 rounded-2xl border text-center space-y-3 ${
-                    isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
-                  }`}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold flex items-center space-x-1.5 text-blue-500">
-                        <Camera className="w-4 h-4 animate-pulse" />
-                        <span>กล้องสแกน QR Code สำหรับอาจารย์ (Live Stream)</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={startTeacherLiveCameraStream}
-                        className="text-[11px] font-bold text-blue-500 hover:underline flex items-center space-x-1 cursor-pointer"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        <span>รีเฟรชกล้อง</span>
-                      </button>
-                    </div>
-
-                    {/* Camera Stream Element Container */}
-                    <div className="relative w-full max-w-sm mx-auto min-h-[200px] rounded-2xl overflow-hidden border border-slate-700 bg-black flex items-center justify-center">
-                      <div id="teacher-qr-reader" className="w-full h-full min-h-[200px]" />
-                      
-                      {teacherScannedCode && (
-                        <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm p-4 flex flex-col items-center justify-center space-y-2 z-10">
-                          <CheckCircle2 className="w-10 h-10 text-emerald-400 animate-bounce" />
-                          <div className="text-xs font-bold text-white">สแกน QR Code เรียบร้อยแล้ว!</div>
-                          <div className="font-mono text-xs font-extrabold text-emerald-400 bg-emerald-950/80 px-3 py-1 rounded-xl border border-emerald-500/30 break-all max-w-[90%]">
-                            {teacherScannedCode}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setTeacherScannedCode('');
-                              setTeacherTokenInput('');
-                              startTeacherLiveCameraStream();
-                            }}
-                            className="mt-2 text-[11px] px-3 py-1 bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg font-semibold transition cursor-pointer"
-                          >
-                            สแกนใหม่อีกครั้ง
-                          </button>
-                        </div>
-                      )}
-
-                      {teacherCameraError && !teacherScannedCode && (
-                        <div className="absolute inset-0 p-4 bg-rose-950/90 text-rose-200 flex flex-col items-center justify-center text-center space-y-2 z-10">
-                          <AlertCircle className="w-8 h-8 text-rose-400" />
-                          <p className="text-xs font-medium">{teacherCameraError}</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Upload image option & scanned status */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                      <input
-                        type="file"
-                        ref={teacherFileInputRef}
-                        accept="image/*"
-                        onChange={handleTeacherFileUploadScan}
-                        className="hidden"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => teacherFileInputRef.current?.click()}
-                        disabled={isTeacherImageProcessing}
-                        className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
-                          isDarkMode
-                            ? 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
-                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100 shadow-sm'
-                        }`}
-                      >
-                        <Image className="w-3.5 h-3.5 text-blue-500" />
-                        <span>{isTeacherImageProcessing ? 'กำลังอ่านรูปภาพ...' : 'อัปโหลดรูปภาพ QR Code'}</span>
-                      </button>
-
-                      {teacherScannedCode ? (
-                        <div className="text-[11px] font-bold text-emerald-500 flex items-center space-x-1">
-                          <CheckCircle className="w-3.5 h-3.5" />
-                          <span>ถอดรหัส: {teacherScannedCode}</span>
-                        </div>
-                      ) : (
-                        <div className="text-[11px] text-slate-400">
-                          ส่องกล้องไปที่ QR Code เพื่อสแกนลงเวลา
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TOKEN MODE INPUT FIELD */}
-              {teacherCheckinMethod === 'TOKEN' && (
-                <div className="space-y-1.5">
-                  <label className={`block text-xs font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                    ป้อนรหัส Token หรือตัวเลข 6 หลักสำหรับเข้าสอน:
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="ป้อนรหัส Token เช่น 842910 หรือ Token string"
-                    value={teacherTokenInput}
-                    onChange={(e) => setTeacherTokenInput(e.target.value)}
-                    className={`w-full border rounded-xl px-3.5 py-2.5 text-sm font-mono tracking-wider focus:outline-none ${
-                      isDarkMode
-                        ? 'bg-slate-800 border-slate-700 text-amber-400 focus:border-amber-500 placeholder-slate-500'
-                        : 'bg-white border-slate-300 text-slate-900 focus:border-amber-600 shadow-sm placeholder-slate-400'
-                    }`}
-                  />
-                </div>
-              )}
-
-              {/* GPS Info Banner */}
-              <div className={`p-3 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-2 ${
-                isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
-              }`}>
-                <div className="space-y-0.5">
-                  <span className={`text-[10px] font-semibold flex items-center space-x-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    <span>พิกัด GPS ปัจจุบันของผู้สอน:</span>
-                    {Math.abs(teacherCoords.lat - 13.7988363) < 0.0001 && (
-                      <span className="text-blue-500 text-[10px] font-bold">(คณะเทคนิคการแพทย์ ม.มหิดล ศาลายา)</span>
-                    )}
-                  </span>
-                  <div className="font-mono font-bold text-blue-600 dark:text-blue-400">
-                    {teacherCoords.lat.toFixed(5)}, {teacherCoords.lng.toFixed(5)}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (navigator.geolocation) {
-                      navigator.geolocation.getCurrentPosition(
-                        (pos) => updateTeacherCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                        (err) => alert(`ไม่สามารถดึงพิกัดจากเบราว์เซอร์ได้ (${err.message}) กรุณาตรวจสอบ Location Services`),
-                        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-                      );
-                    }
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 text-[11px] font-bold transition flex items-center justify-center space-x-1 shrink-0"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>ดึงพิกัด GPS ปัจจุบัน</span>
-                </button>
-              </div>
-
-              {/* Submit Button */}
-              <button
-                type="button"
-                onClick={handleTeacherCheckinSubmit}
-                disabled={submittingTeacherCheckin}
-                className={`w-full py-3.5 rounded-2xl text-white font-extrabold text-xs flex items-center justify-center space-x-2 transition shadow-lg disabled:opacity-50 active:scale-98 ${
-                  teacherCheckinMethod === 'GPS_ONLY'
-                    ? 'bg-sky-600 hover:bg-sky-500 shadow-sky-600/25'
-                    : teacherCheckinMethod === 'TOKEN'
-                    ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/25'
-                    : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/25'
-                }`}
-              >
-                {teacherCheckinMethod === 'GPS_ONLY' ? (
-                  <Navigation className="w-4 h-4" />
-                ) : teacherCheckinMethod === 'TOKEN' ? (
-                  <KeyRound className="w-4 h-4" />
-                ) : (
-                  <ShieldCheck className="w-4 h-4" />
-                )}
-                <span>
-                  {submittingTeacherCheckin
-                    ? 'กำลังบันทึกข้อมูล...'
-                    : teacherCheckinMethod === 'GPS_ONLY'
-                    ? 'กดเช็คชื่อเข้าสอนด้วย GPS ทันที'
-                    : teacherCheckinMethod === 'TOKEN'
-                    ? 'ส่งเช็คชื่อเข้าสอนด้วยรหัส Token'
-                    : 'กดเช็คชื่อเข้าสอนด้วย QR Code + GPS'}
-                </span>
-              </button>
-
-              {/* Result Notification */}
-              {teacherCheckinResult && (
-                <div className={`p-3.5 rounded-2xl border text-xs flex items-center space-x-2 ${
-                  teacherCheckinResult.success
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
-                    : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
-                }`}>
-                  {teacherCheckinResult.success ? <CheckCircle className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
-                  <span className="font-semibold">{teacherCheckinResult.message}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Teacher Check-in History Log */}
-            <div className={`pt-4 border-t space-y-3 ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
-              <h4 className={`text-xs font-extrabold uppercase tracking-wider flex items-center justify-between ${
-                isDarkMode ? 'text-slate-300' : 'text-slate-700'
-              }`}>
-                <span>ประวัติการลงเวลาเข้าสอนของคุณอาจารย์</span>
-                <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold">
-                  {teacherHistory.length} รายการ
-                </span>
-              </h4>
-
-              {teacherHistory.length === 0 ? (
-                <div className={`p-4 rounded-2xl text-center text-xs font-medium ${
-                  isDarkMode ? 'bg-slate-950 text-slate-500' : 'bg-slate-50 text-slate-400'
-                }`}>
-                  ยังไม่มีประวัติการเช็คชื่อเข้าสอนในระบบ
-                </div>
-              ) : (
-                <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-                  {teacherHistory.map((rec) => (
-                    <div
-                      key={rec.id}
-                      className={`p-3 rounded-2xl border flex items-center justify-between text-xs transition ${
-                        isDarkMode ? 'bg-slate-950 border-slate-800/80 hover:border-slate-700' : 'bg-slate-50 border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="space-y-0.5">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-extrabold text-blue-600 dark:text-blue-400">
-                            {rec.courseCode ? `[${rec.courseCode}] ${rec.courseName}` : 'การสอนทั่วไป / Ad-hoc'}
-                          </span>
-                          {rec.buildingRoom && (
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold ${
-                              isDarkMode ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-700 border-slate-200'
-                            }`}>
-                              📍 {rec.buildingRoom}
-                            </span>
-                          )}
-                        </div>
-                        <div className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {rec.sessionTopic ? `คาบเรียน: ${rec.sessionTopic} • ` : ''}
-                          วิธี: <span className="font-semibold text-sky-500">{rec.checkinMethod}</span>
-                          {rec.notes ? ` • หมายเหตุ: ${rec.notes}` : ''}
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0 font-mono text-[11px] opacity-75">
-                        <div>{new Date(rec.timestamp).toLocaleDateString('th-TH')}</div>
-                        <div className="font-bold text-emerald-500">{new Date(rec.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <TeacherCheckinModal
+        isOpen={isTeacherCheckinModalOpen}
+        onClose={() => setIsTeacherCheckinModalOpen(false)}
+        teacher={teacher}
+        courses={courses}
+        isDarkMode={isDarkMode}
+        onCheckinSuccess={() => {
+          loadTeacherCourses();
+        }}
+      />
       {/* SESSION ATTENDANCE LIST MODAL */}
       {selectedSessionModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto">

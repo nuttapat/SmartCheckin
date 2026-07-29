@@ -31,6 +31,7 @@ export const COLLECTIONS = {
   COURSES: 'courses',
   SESSIONS: 'sessions',
   ATTENDANCE: 'attendanceRecords',
+  TEACHER_ATTENDANCE: 'teacherAttendanceRecords',
   QUICK_EVENTS: 'quickEvents',
   COURSE_MEMBERS: 'courseMembers',
   LEAVE_REQUESTS: 'leaveRequests',

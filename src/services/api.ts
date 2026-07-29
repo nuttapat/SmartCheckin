@@ -327,10 +327,15 @@ export async function submitTeacherCheckin(params: {
   teacherId: string;
   courseId?: string;
   sessionId?: string;
-  lat: number;
-  lng: number;
-  deviceId: string;
+  lat?: number;
+  lng?: number;
+  deviceId?: string;
+  deviceName?: string;
+  deviceType?: string;
+  browser?: string;
+  os?: string;
   checkinMethod?: 'GPS_ONLY' | 'QR_ONLY' | 'HYBRID' | 'TOKEN';
+  qrToken?: string;
   buildingRoom?: string;
   notes?: string;
 }) {

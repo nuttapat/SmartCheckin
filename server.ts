@@ -1663,13 +1663,54 @@ app.post('/api/checkin', (req, res) => {
 
 // 4.5 TEACHER CHECK-IN ENDPOINT (SEPARATE DATASET)
 app.post('/api/teacher/checkin', (req, res) => {
-  const { teacherId, courseId, sessionId, lat, lng, deviceId, checkinMethod = 'GPS_ONLY', buildingRoom, notes } = req.body;
+  const { teacherId, courseId, sessionId, lat, lng, deviceId, deviceName, deviceType, browser, os, checkinMethod = 'HYBRID', qrToken, buildingRoom, notes } = req.body;
 
   const teacher = users.get(teacherId);
   if (!teacher || teacher.role !== UserRole.TEACHER) {
     return res.status(404).json({ error: 'ไม่พบข้อมูลผู้ใช้ของอาจารย์' });
   }
 
+  // Anti-Proxy / Device Protection
+  if (deviceId) {
+    const bindResult = bindUserDevice(teacher, deviceId, deviceName, deviceType, browser, os);
+    if (!bindResult.success) {
+      return res.status(403).json({
+        error: bindResult.error || `[Device Protection] Device Mismatch or Limit Reached!`,
+      });
+    }
+    users.set(teacher.id, teacher);
+    saveToFirestore(COLLECTIONS.USERS, teacher);
+  }
+
+  // Token Validation if provided or in TOKEN/HYBRID mode
+  if (checkinMethod === 'TOKEN' || checkinMethod === 'HYBRID' || checkinMethod === 'QR_ONLY') {
+    if (qrToken) {
+      let inputToken = qrToken.trim();
+      if (inputToken.includes(':')) {
+        const parts = inputToken.split(':');
+        inputToken = parts[parts.length - 1];
+      }
+
+      if (sessionId) {
+        const activeQR = activeQRCodes.get(sessionId);
+        if (activeQR && activeQR.token.toUpperCase() !== inputToken.toUpperCase() && activeQR.token !== inputToken) {
+          return res.status(400).json({ error: 'รหัส Token / QR Code หมดอายุหรือไม่อยู่ในระบบ! กรุณาสแกนหรือกรอกรหัส 6 หลักล่าสุด' });
+        }
+      }
+    }
+  }
+
+  // GPS Location & Distance Calculation
+  const scannedLat = lat !== undefined && lat !== null && lat !== '' && !isNaN(Number(lat)) ? parseFloat(lat) : NaN;
+  const scannedLng = lng !== undefined && lng !== null && lng !== '' && !isNaN(Number(lng)) ? parseFloat(lng) : NaN;
+
+  if ((checkinMethod === 'GPS_ONLY' || checkinMethod === 'HYBRID') && (isNaN(scannedLat) || isNaN(scannedLng))) {
+    return res.status(400).json({
+      error: 'ไม่พบตำแหน่ง GPS จากอุปกรณ์ของคุณ กรุณาเปิดอนุญาตสิทธิ์ตำแหน่งที่ตั้ง (Location Service) ในเบราว์เซอร์แล้วลองใหม่อีกครั้ง',
+    });
+  }
+
+  let distanceMeters = 0;
   let courseCode: string | undefined;
   let courseName: string | undefined;
   let sessionTopic: string | undefined;
@@ -1678,11 +1719,30 @@ app.post('/api/teacher/checkin', (req, res) => {
     const c = courses.get(courseId);
     courseCode = c?.courseCode;
     courseName = c?.courseName;
+    if (c && c.defaultLat && c.defaultLng && !isNaN(scannedLat) && !isNaN(scannedLng)) {
+      distanceMeters = getHaversineDistance(c.defaultLat, c.defaultLng, scannedLat, scannedLng);
+    }
   }
 
   if (sessionId && sessions.has(sessionId)) {
     const s = sessions.get(sessionId);
     sessionTopic = s?.topic;
+    if (s && s.teacherLat !== undefined && s.teacherLng !== undefined && !isNaN(scannedLat) && !isNaN(scannedLng) && distanceMeters === 0) {
+      distanceMeters = getHaversineDistance(s.teacherLat, s.teacherLng, scannedLat, scannedLng);
+    }
+  }
+
+  // Duplicate check-in prevention for same session
+  if (sessionId) {
+    const alreadyChecked = teacherAttendanceRecords.find(
+      (r) => r.sessionId === sessionId && r.teacherId === teacherId
+    );
+    if (alreadyChecked) {
+      return res.status(400).json({
+        error: 'คุณได้บันทึกการเช็คชื่อเข้าสอนสำหรับคาบนี้เรียบร้อยแล้ว!',
+        record: alreadyChecked,
+      });
+    }
   }
 
   const record: TeacherAttendanceRecord = {
@@ -1695,19 +1755,24 @@ app.post('/api/teacher/checkin', (req, res) => {
     sessionId,
     sessionTopic,
     timestamp: new Date().toISOString(),
-    lat: parseFloat(lat) || 13.7563,
-    lng: parseFloat(lng) || 100.5018,
+    lat: !isNaN(scannedLat) ? scannedLat : 13.7563,
+    lng: !isNaN(scannedLng) ? scannedLng : 100.5018,
     checkinMethod,
     deviceId: deviceId || teacher.deviceId || 'unknown',
     buildingRoom,
     notes,
+    distanceMeters,
+    qrToken,
   };
 
   teacherAttendanceRecords.push(record);
+  saveToFirestore(COLLECTIONS.TEACHER_ATTENDANCE, record);
 
   res.json({
     message: 'อาจารย์เช็คชื่อเข้าสอนสำเร็จเรียบร้อยแล้ว!',
     record,
+    distanceMeters,
+    checkinMethod,
   });
 });
 
@@ -3105,6 +3170,16 @@ async function syncFromFirestore() {
     } else {
       for (const lr of leaveRequests) {
         await saveToFirestore(COLLECTIONS.LEAVE_REQUESTS, lr);
+      }
+    }
+
+    const fsTeacherAttendance = await getAllFromFirestore<TeacherAttendanceRecord>(COLLECTIONS.TEACHER_ATTENDANCE);
+    if (fsTeacherAttendance && fsTeacherAttendance.length > 0) {
+      teacherAttendanceRecords.length = 0;
+      teacherAttendanceRecords.push(...fsTeacherAttendance);
+    } else {
+      for (const tar of teacherAttendanceRecords) {
+        await saveToFirestore(COLLECTIONS.TEACHER_ATTENDANCE, tar);
       }
     }
 

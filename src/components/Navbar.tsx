@@ -10,7 +10,7 @@ interface NavbarProps {
   onOpenRegister: () => void;
   onOpenCreateCourse: () => void;
   onOpenJoinCourse: () => void;
-  onOpenQuickEvent: () => void;
+  onOpenQuickEvent?: () => void;
   onOpenUserSettings: (tab?: 'profile' | 'password' | 'device' | 'gps') => void;
   onOpenTestingAgent?: () => void;
   onLogout?: () => void;

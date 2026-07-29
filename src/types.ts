@@ -175,6 +175,8 @@ export interface TeacherAttendanceRecord {
   deviceId: string;
   buildingRoom?: string;
   notes?: string;
+  distanceMeters?: number;
+  qrToken?: string;
 }
 
 export interface QuickEvent {
