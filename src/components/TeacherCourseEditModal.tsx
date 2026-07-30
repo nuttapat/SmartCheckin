@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Course, TeachingWeek, Semester } from '../types';
+import { Course, TeachingWeek, Semester, User } from '../types';
 import { updateCourse } from '../services/api';
 import { X, BookOpen, Plus, Trash2, Calendar, Save, CheckCircle2, MapPin, Globe } from 'lucide-react';
 import { MapPicker } from './MapPicker';
@@ -13,6 +13,7 @@ interface TeacherCourseEditModalProps {
   onSuccess: (updatedCourse: Course) => void;
   onDeleteSuccess?: (courseId: string) => void;
   teacherId?: string;
+  teachersList?: User[];
   isDarkMode?: boolean;
 }
 
@@ -23,6 +24,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   onSuccess,
   onDeleteSuccess,
   teacherId,
+  teachersList,
   isDarkMode: propIsDarkMode,
 }) => {
   const { isDarkMode: themeIsDarkMode } = useTheme();
@@ -31,6 +33,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   const [courseName, setCourseName] = useState<string>(course.courseName);
   const [academicYear, setAcademicYear] = useState<number>(course.academicYear);
   const [semester, setSemester] = useState<Semester>(course.semester);
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string>(course.ownerId || '');
   const [coordinatorName, setCoordinatorName] = useState<string>(course.coordinatorName);
   const [defaultLat, setDefaultLat] = useState<number>(course.defaultLat || 13.7988363);
   const [defaultLng, setDefaultLng] = useState<number>(course.defaultLng || 100.322944);
@@ -48,6 +51,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
     setCourseName(course.courseName);
     setAcademicYear(course.academicYear);
     setSemester(course.semester);
+    setSelectedTeacherId(course.ownerId || '');
     setCoordinatorName(course.coordinatorName);
     setDefaultLat(course.defaultLat || 13.7988363);
     setDefaultLng(course.defaultLng || 100.322944);
@@ -116,6 +120,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
         academicYear,
         semester,
         coordinatorName,
+        ownerId: selectedTeacherId || course.ownerId,
         defaultLat,
         defaultLng,
         allowedGpsRadius,
@@ -263,14 +268,42 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
                 <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                   อาจารย์ผู้รับผิดชอบวิชา
                 </label>
-                <input
-                  type="text"
-                  value={coordinatorName}
-                  onChange={(e) => setCoordinatorName(e.target.value)}
-                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
-                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                  }`}
-                />
+                {teachersList && teachersList.length > 0 ? (
+                  <select
+                    value={selectedTeacherId}
+                    onChange={(e) => {
+                      const tId = e.target.value;
+                      setSelectedTeacherId(tId);
+                      const tObj = teachersList.find((t) => t.id === tId);
+                      if (tObj) {
+                        const name = `${tObj.prefixTh || tObj.title || ''}${tObj.firstNameTh || tObj.firstName || ''} ${tObj.lastNameTh || tObj.lastName || ''}`.trim() || tObj.email;
+                        setCoordinatorName(name);
+                      }
+                    }}
+                    className={`w-full border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-sky-500 ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    <option value="">-- ไม่ระบุ / คงเดิม --</option>
+                    {teachersList.map((t) => {
+                      const name = `${t.prefixTh || t.title || ''}${t.firstNameTh || t.firstName || ''} ${t.lastNameTh || t.lastName || ''}`.trim() || t.email;
+                      return (
+                        <option key={t.id} value={t.id}>
+                          {name} ({t.email})
+                        </option>
+                      );
+                    })}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={coordinatorName}
+                    onChange={(e) => setCoordinatorName(e.target.value)}
+                    className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  />
+                )}
               </div>
             </div>
 

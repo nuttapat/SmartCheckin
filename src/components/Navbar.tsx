@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { User, UserRole } from '../types';
-import { QrCode, User as UserIcon, Plus, Sparkles, Sun, Moon, Monitor, LogOut, Settings, KeyRound, ChevronDown, MapPin, Bot } from 'lucide-react';
+import { QrCode, User as UserIcon, Plus, Sparkles, Sun, Moon, Monitor, LogOut, Settings, KeyRound, ChevronDown, MapPin, Bot, Shield } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 interface NavbarProps {
@@ -14,6 +14,8 @@ interface NavbarProps {
   onOpenUserSettings: (tab?: 'profile' | 'password' | 'device' | 'gps') => void;
   onOpenTestingAgent?: () => void;
   onLogout?: () => void;
+  onExitViewMode?: () => void;
+  isSwitchedFromAdmin?: boolean;
   isDarkMode?: boolean;
   onToggleTheme?: () => void;
 }
@@ -29,6 +31,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenUserSettings,
   onOpenTestingAgent,
   onLogout,
+  onExitViewMode,
+  isSwitchedFromAdmin,
   isDarkMode: propIsDarkMode,
   onToggleTheme,
 }) => {
@@ -98,6 +102,19 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Action Buttons & Switcher */}
           <div className="flex items-center space-x-2.5">
+            {/* Return to Admin Button if in view mode */}
+            {isSwitchedFromAdmin && onExitViewMode && (
+              <button
+                onClick={onExitViewMode}
+                className="px-3 py-1.5 rounded-xl text-xs font-black text-slate-950 bg-amber-400 hover:bg-amber-300 transition shadow-md flex items-center space-x-1.5 cursor-pointer shrink-0 animate-pulse hover:animate-none"
+                title="ออกจากมุมมอง และกลับสู่ระบบผู้ดูแลระบบ (Admin)"
+              >
+                <Shield className="w-3.5 h-3.5 fill-slate-950" />
+                <span className="hidden md:inline">🔙 กลับสู่ Admin</span>
+                <span className="md:hidden">🔙 Admin</span>
+              </button>
+            )}
+
             {/* User Profile & Settings Menu */}
             <div 
               className="relative"
@@ -176,6 +193,34 @@ export const Navbar: React.FC<NavbarProps> = ({
                         <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>อัปเดตรหัสผ่านเข้าสู่ระบบ</p>
                       </div>
                     </button>
+
+                    {currentUser?.role === UserRole.ADMIN && onOpenTestingAgent && (
+                      <button
+                        onClick={() => { setIsDropdownOpen(false); onOpenTestingAgent(); }}
+                        className={`w-full text-left px-3 py-2 text-xs rounded-xl flex items-center space-x-2.5 transition font-medium ${
+                          isDarkMode ? 'hover:bg-slate-700/80 text-sky-300' : 'hover:bg-sky-50 text-sky-800'
+                        }`}
+                      >
+                        <Bot className="w-4 h-4 text-sky-500 shrink-0" />
+                        <div>
+                          <p className="font-semibold text-sky-500">🤖 Agent ทดสอบระบบ</p>
+                          <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>ชุดตรวจสอบและทดสอบระบบ QA</p>
+                        </div>
+                      </button>
+                    )}
+
+                    {isSwitchedFromAdmin && onExitViewMode && (
+                      <button
+                        onClick={() => { setIsDropdownOpen(false); onExitViewMode(); }}
+                        className="w-full text-left px-3 py-2 text-xs rounded-xl flex items-center space-x-2.5 transition font-extrabold text-amber-600 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30"
+                      >
+                        <Shield className="w-4 h-4 text-amber-500 shrink-0" />
+                        <div>
+                          <p className="font-bold">🔙 ออกจากมุมมอง (กลับสู่ Admin)</p>
+                          <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>สลับกลับไปยังสิทธิ์ผู้ดูแลระบบหลัก</p>
+                        </div>
+                      </button>
+                    )}
                   </div>
 
                   {onLogout && (

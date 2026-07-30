@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
-import { loginUser, forgotPassword, googleLogin } from '../services/api';
+import { loginUser, forgotPassword, googleLogin, fetchSystemSettings } from '../services/api';
 import { signInWithGooglePopup } from '../lib/firebaseStore';
 import { QrCode, Mail, LogIn, UserPlus, ShieldAlert, Sun, Moon, Monitor, Lock, Eye, EyeOff, User as UserIcon, KeyRound, CheckCircle2, X, Sparkles, Bot } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
@@ -79,12 +79,70 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   // Hidden dev mode state for demo accounts
   const [showDemoAccounts, setShowDemoAccounts] = useState<boolean>(false);
 
+  // Dynamic system settings state
+  const [sysSettings, setSysSettings] = useState<any>(null);
+
+  useEffect(() => {
+    fetchSystemSettings().then(setSysSettings).catch(() => {});
+  }, []);
+
+  // Helper to check if email domain is allowed to register/login based on dynamic server settings
+  const checkIsDomainAllowed = (emailStr: string, currentSysSettings?: any): { allowed: boolean; reason?: string } => {
+    const clean = emailStr.trim().toLowerCase();
+    if (!clean || !clean.includes('@')) return { allowed: false, reason: 'รูปแบบอีเมลไม่ถูกต้อง' };
+
+    const settingsToUse = currentSysSettings || sysSettings;
+
+    // Check if system settings allow other domains (@gmail.com, etc.)
+    const allowOther = settingsToUse?.allowOtherDomainsSelfRegister ?? settingsToUse?.allowOtherDomains ?? false;
+    if (allowOther) {
+      return { allowed: true };
+    }
+
+    const domain = clean.split('@')[1] || '';
+
+    let sDomains: string[] = settingsToUse?.studentDomains;
+    if (!Array.isArray(sDomains) && settingsToUse?.studentDomain) {
+      sDomains = settingsToUse.studentDomain.split(/[,;\s]+/).filter(Boolean);
+    }
+    if (!Array.isArray(sDomains) || sDomains.length === 0) {
+      sDomains = ['student.mahidol.ac.th', 'student.mahidol.edu'];
+    } else {
+      sDomains = sDomains.map((d: string) => d.trim().toLowerCase().replace(/^@/, ''));
+    }
+
+    let tDomains: string[] = settingsToUse?.teacherDomains;
+    if (!Array.isArray(tDomains) && settingsToUse?.teacherDomain) {
+      tDomains = settingsToUse.teacherDomain.split(/[,;\s]+/).filter(Boolean);
+    }
+    if (!Array.isArray(tDomains) || tDomains.length === 0) {
+      tDomains = ['mahidol.ac.th', 'mahidol.edu'];
+    } else {
+      tDomains = tDomains.map((d: string) => d.trim().toLowerCase().replace(/^@/, ''));
+    }
+
+    const isStudentDomain = sDomains.some((d: string) => domain === d || domain.endsWith('.' + d));
+    const isTeacherDomain = tDomains.some((d: string) => domain === d || domain.endsWith('.' + d));
+
+    if (isStudentDomain || isTeacherDomain) {
+      return { allowed: true };
+    }
+
+    const allowedStudentStr = sDomains.map((d: string) => `@${d}`).join(', ');
+    const allowedTeacherStr = tDomains.map((d: string) => `@${d}`).join(', ');
+    const allowedList = [allowedStudentStr, allowedTeacherStr].filter(Boolean).join(' และ ');
+
+    return {
+      allowed: false,
+      reason: `🚫 โดเมนอีเมล @${domain} ไม่ได้รับอนุญาตให้ลงทะเบียนเข้าใช้งานระบบ (อนุญาตเฉพาะโดเมนสถาบัน: ${allowedList || 'ตามที่กำหนด'} หรือติดต่อผู้ดูแลระบบเพื่อขอเปิดสิทธิ์)`,
+    };
+  };
+
   // Helper to determine forced role based on domain/email rules
   const getForcedRole = (emailStr: string): UserRole | null => {
     const clean = emailStr.trim().toLowerCase();
-    if (clean === 'nuttapat.anu@gmail.com') return UserRole.ADMIN;
-    if (clean.endsWith('@student.mahidol.ac.th')) return UserRole.STUDENT;
-    if (clean.endsWith('@mahidol.ac.th')) return UserRole.TEACHER;
+    if (clean.endsWith('@student.mahidol.ac.th') || clean.endsWith('@student.mahidol.edu')) return UserRole.STUDENT;
+    if (clean.endsWith('@mahidol.ac.th') || clean.endsWith('@mahidol.edu')) return UserRole.TEACHER;
     return null;
   };
 
@@ -92,18 +150,40 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     setErrorMsg('');
     setGoogleLoading(true);
     try {
+      const latestSettings = await fetchSystemSettings().catch(() => sysSettings);
+      if (latestSettings) setSysSettings(latestSettings);
+
       const fbUser = await signInWithGooglePopup();
       if (fbUser && fbUser.email) {
+        const cleanEmail = fbUser.email.trim().toLowerCase();
+
+        // 🛑 STRICT DOMAIN PRE-CHECK BEFORE OPENING REGISTRATION MODAL
+        const domainCheck = checkIsDomainAllowed(cleanEmail, latestSettings);
+        if (!domainCheck.allowed) {
+          setErrorMsg(domainCheck.reason || '🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้เข้าใช้งานระบบ');
+          setIsGoogleModalOpen(false);
+          setGoogleLoading(false);
+          return;
+        }
+
         const res = await googleLogin(
-          fbUser.email,
-          fbUser.displayName || fbUser.email.split('@')[0],
+          cleanEmail,
+          fbUser.displayName || cleanEmail.split('@')[0],
           fbUser.photoURL || undefined
         );
 
         if (res.requiresOnboarding) {
-          // New Google account - open Onboarding Modal with prefilled default name parts
-          setGoogleEmailInput(fbUser.email);
-          const rawName = fbUser.displayName || fbUser.email.split('@')[0];
+          // Re-verify domain check for user onboarding
+          const onboardingDomainCheck = checkIsDomainAllowed(cleanEmail, latestSettings);
+          if (!onboardingDomainCheck.allowed) {
+            setErrorMsg(onboardingDomainCheck.reason || '🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้ลงทะเบียนเข้าใช้งาน');
+            setIsGoogleModalOpen(false);
+            return;
+          }
+
+          // New allowed Google account - open Onboarding Modal with prefilled default name parts
+          setGoogleEmailInput(cleanEmail);
+          const rawName = fbUser.displayName || cleanEmail.split('@')[0];
           setGoogleNameInput(rawName);
           const parts = rawName.trim().split(' ');
           setGoogleFirstNameTh(parts[0] || '');
@@ -111,7 +191,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           setGoogleFirstNameEn(parts[0] || '');
           setGoogleLastNameEn(parts.slice(1).join(' ') || '');
 
-          const forced = (res.forcedRole as UserRole | null) || getForcedRole(fbUser.email);
+          const forced = (res.forcedRole as UserRole | null) || getForcedRole(cleanEmail);
           if (forced === UserRole.STUDENT) {
             setGoogleRoleSelect(UserRole.STUDENT);
             setGoogleTitleOption('นาย');
@@ -134,11 +214,27 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           onLoginSuccess(res.user);
           return;
         }
+      } else {
+        // Fallback for mobile webview where Google popup is blocked or sessionStorage is partitioned
+        if (email && email.includes('@')) {
+          const cleanEmail = email.trim().toLowerCase();
+          const domainCheck = checkIsDomainAllowed(cleanEmail, latestSettings);
+          if (!domainCheck.allowed) {
+            setErrorMsg(domainCheck.reason || '🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้เข้าใช้งานระบบ');
+            setIsGoogleModalOpen(false);
+            return;
+          }
+          setGoogleEmailInput(cleanEmail);
+          setIsGoogleModalOpen(true);
+        } else {
+          setErrorMsg('กรุณากรอกอีเมล Google ในช่องอีเมลด้านบนก่อนเปิดแบบฟอร์มลงทะเบียน');
+        }
       }
     } catch (err: any) {
-      console.warn('Google popup error, presenting fallback account option:', err);
-      // Popup blocked or closed - open smooth Google Account dialog
-      setIsGoogleModalOpen(true);
+      console.warn('Google auth error:', err);
+      const msg = err?.message || '';
+      setErrorMsg(msg || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบด้วย Google');
+      setIsGoogleModalOpen(false); // DO NOT open registration modal on error
     } finally {
       setGoogleLoading(false);
     }
@@ -148,8 +244,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     e.preventDefault();
     setErrorMsg('');
 
-    if (!googleEmailInput.trim() || !googleEmailInput.includes('@')) {
+    const cleanEmail = googleEmailInput.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
       setErrorMsg('กรุณากรอก Google Email ที่ถูกต้อง');
+      return;
+    }
+
+    // STRICT DOMAIN CHECK IN MODAL SUBMIT
+    const latestSettings = await fetchSystemSettings().catch(() => sysSettings);
+    if (latestSettings) setSysSettings(latestSettings);
+
+    const domainCheck = checkIsDomainAllowed(cleanEmail, latestSettings);
+    if (!domainCheck.allowed) {
+      setErrorMsg(domainCheck.reason || '🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้ลงทะเบียนเข้าใช้งานระบบ');
       return;
     }
 
@@ -203,7 +310,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         onLoginSuccess(res.user);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบด้วย Google');
+      const rawMsg = err?.message || '';
+      if (rawMsg.includes('Unexpected token') || rawMsg.includes('is not valid JSON') || rawMsg.includes('SyntaxError')) {
+        setErrorMsg('🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้ลงทะเบียนเข้าใช้งาน (อนุญาตเฉพาะโดเมนสถาบันตามที่กำหนด หรือติดต่อผู้ดูแลระบบเพื่อขอเปิดสิทธิ์)');
+      } else {
+        setErrorMsg(rawMsg || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบด้วย Google');
+      }
     } finally {
       setGoogleLoading(false);
     }
@@ -585,29 +697,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           <p className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
             อัปเดตล่าสุด: 26 กรกฎาคม 2569
           </p>
-          {onOpenTestingAgent && (
-            <div className="pt-2 flex justify-center">
-              <button
-                onClick={onOpenTestingAgent}
-                className={`inline-flex items-center space-x-2 px-4 py-2 rounded-2xl border text-xs font-bold transition shadow-sm cursor-pointer ${
-                  isDarkMode 
-                    ? 'bg-gradient-to-r from-sky-500/20 via-blue-500/20 to-indigo-500/20 text-sky-300 border-sky-500/40 hover:border-sky-400 hover:bg-sky-500/30' 
-                    : 'bg-gradient-to-r from-sky-50 via-blue-50 to-indigo-50 text-sky-900 border-sky-300 hover:bg-sky-100'
-                }`}
-                title="เปิด Agent ทดสอบระบบอัจฉริยะ (System QA Agent)"
-              >
-                <Bot className="w-4 h-4 text-sky-500 shrink-0" />
-                <span>🤖 Agent ทดสอบระบบ</span>
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
       {/* Google Sign-In Dialog / Onboarding Modal */}
       {isGoogleModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
-          <div className={`w-full max-w-lg border rounded-3xl shadow-2xl relative transition-all my-auto max-h-[92vh] flex flex-col ${
+          <div className={`w-full max-w-lg border rounded-2xl overflow-hidden shadow-2xl relative transition-all my-auto max-h-[92vh] flex flex-col ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
           }`}>
             {/* Modal Header */}
@@ -687,7 +783,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                             👑 แบบฟอร์มสำหรับผู้ดูแลระบบ (Admin)
                           </p>
                           <p className="text-xs opacity-90 mt-0.5 leading-relaxed">
-                            บัญชีผู้ดูแลระบบพิเศษ <strong>nuttapat.anu@gmail.com</strong> — กำหนดสิทธิ์เป็น <strong>ผู้ดูแลระบบ (Admin)</strong> อัตโนมัติ
+                            บัญชีผู้ดูแลระบบได้รับการอนุมัติสิทธิ์ — กำหนดสิทธิ์เป็น <strong>ผู้ดูแลระบบ (Admin)</strong> อัตโนมัติ
                           </p>
                         </div>
                       </div>

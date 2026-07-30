@@ -25,6 +25,7 @@ export enum Semester {
 export enum AttendanceStatus {
   PRESENT = 'PRESENT',
   LATE = 'LATE',
+  LEAVE = 'LEAVE',
   ABSENT = 'ABSENT',
 }
 
@@ -90,6 +91,10 @@ export interface User {
   authProvider?: 'google' | 'email';
   deviceId?: string; // Legacy primary device fingerprint/UUID
   devices?: UserDevice[]; // List of bound devices
+  department?: string; // Major/Department code or name
+  isSuspended?: boolean; // Account suspended flag
+  suspendedReason?: string;
+  lastLoginAt?: string;
   createdAt: string;
 }
 
@@ -101,7 +106,7 @@ export interface TeachingWeek {
 
 export interface Course {
   id: string;
-  courseCode: string; // e.g., TEST101
+  courseCode: string; // e.g., MTID204, MTCM303, MTID626
   courseName: string;
   academicYear: number; // e.g., 2569
   semester: Semester;
@@ -112,6 +117,11 @@ export interface Course {
   defaultLng?: number;
   allowedGpsRadius?: number;
   weeks: TeachingWeek[];
+  curriculums?: string[]; // Multiple curriculum names/codes (e.g. ["วิทยาศาสตร์มหาบัณฑิต (เทคนิคการแพทย์)", "ปรัชญาดุษฎีบัณฑิต (เทคนิคการแพทย์)"])
+  facultyCode?: string; // 'MT'
+  departmentCode?: string; // 'ID', 'CM', 'CH', 'MI', 'MS', 'RT'
+  majorCode?: string; // 'MTMT' or 'MTRT'
+  degreeLevel?: string; // 'ปริญญาตรี' or 'บัณฑิตศึกษา'
   createdAt: string;
 }
 
@@ -225,4 +235,101 @@ export interface QRTokenPayload {
   expiresAt: number;
   lat: number;
   lng: number;
+}
+
+export interface SystemSettings {
+  id: string; // 'global_config'
+  academicYear?: number; // e.g. 2569
+  academicSemester?: Semester; // '1', '2', 'SUMMER'
+  defaultGpsRadiusMeters?: number; // e.g. 100
+  dynamicQrIntervalSeconds?: number; // e.g. 30
+
+  // Maintenance & Announcement
+  maintenanceMode?: boolean; // Maintenance toggle
+  systemMaintenanceMode?: boolean; // Maintenance toggle alias
+  maintenanceMessage?: string;
+  announcementMessage?: string; // Banner broadcast message
+  systemAnnouncement?: string; // Banner broadcast message alias
+
+  // Security & Devices
+  allowGoogleAutoRegister?: boolean;
+  maxDevicesPerUser?: number; // e.g. 1
+  singleDeviceLockEnabled?: boolean;
+  gpsCheckinRequired?: boolean;
+  gpsRadiusMeters?: number;
+  dynamicQrRotationSeconds?: number;
+
+  // Domain & Registration Rules
+  allowTeacherSelfRegister?: boolean;
+  allowStudentSelfRegister?: boolean;
+  allowOtherDomainsSelfRegister?: boolean;
+  allowOtherDomains?: boolean; // alias
+  teacherDomains?: string[]; // e.g. ['mahidol.ac.th', 'mahidol.edu']
+  studentDomains?: string[]; // e.g. ['student.mahidol.ac.th', 'student.mahidol.edu']
+  teacherDomain?: string; // e.g. 'mahidol.ac.th'
+  studentDomain?: string; // e.g. 'student.mahidol.ac.th'
+
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface MasterUniversity {
+  id: string;
+  code: string; // e.g. 'MU'
+  nameTh: string; // 'มหาวิทยาลัยมหิดล'
+  nameEn: string; // 'Mahidol University'
+}
+
+export interface MasterFaculty {
+  id: string;
+  universityId: string; // 'MU'
+  code: string; // 'MT'
+  nameTh: string; // 'คณะเทคนิคการแพทย์'
+  nameEn: string; // 'Faculty of Medical Technology'
+}
+
+export interface MasterMajor {
+  id: string;
+  facultyCode: string; // 'MT'
+  code: string; // 'MTMT', 'MTRT'
+  nameTh: string; // 'สาขาวิชาเทคนิคการแพทย์', 'สาขาวิชารังสีเทคนิค'
+  nameEn: string; // 'Medical Technology', 'Radiological Technology'
+}
+
+export interface MasterDepartment {
+  id: string;
+  code: string; // e.g., 'CH', 'MI', 'MS', 'CM', 'RT', 'ID'
+  nameTh: string; // e.g. 'ภาควิชาเคมีคลินิก'
+  nameEn: string; // e.g. 'Department of Clinical Chemistry'
+  facultyTh?: string; // 'คณะเทคนิคการแพทย์'
+  facultyCode?: string; // 'MT'
+  majorCode?: string; // 'MTMT', 'MTRT', or 'ALL'
+  majorNameTh?: string; // 'สาขาวิชาเทคนิคการแพทย์' / 'สาขาวิชารังสีเทคนิค'
+  createdAt?: string;
+}
+
+export interface MasterDegreeLevel {
+  id: string;
+  code: string; // 'BACHELOR', 'GRADUATE'
+  nameTh: string; // 'ปริญญาตรี', 'บัณฑิตศึกษา'
+  nameEn: string; // 'Undergraduate', 'Graduate'
+}
+
+export interface MasterCurriculum {
+  id: string;
+  code: string; // e.g. 'CURR_BS_MT', 'CURR_MS_MT', 'CURR_PHD_MT'
+  nameTh: string; // e.g. 'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)', 'วิทยาศาสตร์มหาบัณฑิต (เทคนิคการแพทย์)', 'ปรัชญาดุษฎีบัณฑิต (เทคนิคการแพทย์)'
+  titleTh?: string;
+  nameEn: string;
+  facultyCode: string; // 'MT'
+  majorCode: string; // 'MTMT' or 'MTRT'
+  degreeLevel: string; // 'ปริญญาตรี' or 'บัณฑิตศึกษา'
+  createdAt?: string;
+}
+
+export interface MasterPrefix {
+  id: string;
+  titleTh: string; // e.g., 'นาย', 'นางสาว', 'อ.ดร.'
+  titleEn: string; // e.g., 'Mr.', 'Miss', 'Dr.'
+  category: 'STUDENT' | 'TEACHER' | 'BOTH';
 }

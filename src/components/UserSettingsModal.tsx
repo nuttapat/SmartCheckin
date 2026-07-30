@@ -767,7 +767,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
 
                   <div className={`p-3 rounded-xl border ${isDarkMode ? 'bg-slate-900/60 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
                     <span className={`block text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>โควตานโยบายผูกอุปกรณ์</span>
-                    {isTeacherOrAdmin ? (
+                    {isTeacherOrAdmin || maxDevicesLimit === null ? (
                       <div className="flex items-center space-x-1.5 text-emerald-400 font-bold text-xs mt-0.5">
                         <CheckCircle2 className="w-4 h-4" />
                         <span>ไม่จำกัดจำนวนอุปกรณ์ (Unlimited)</span>
@@ -775,12 +775,12 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                     ) : (
                       <div className="flex items-center justify-between mt-0.5">
                         <span className="font-bold text-xs text-amber-400">
-                          สูงสุด 3 เครื่อง ({boundDevices.length}/3)
+                          สูงสุด {maxDevicesLimit} เครื่อง ({boundDevices.length}/{maxDevicesLimit})
                         </span>
                         <div className="w-20 bg-slate-700 h-2 rounded-full overflow-hidden ml-2">
                           <div
-                            className={`h-full ${boundDevices.length >= 3 ? 'bg-rose-500' : 'bg-emerald-500'}`}
-                            style={{ width: `${Math.min(100, (boundDevices.length / 3) * 100)}%` }}
+                            className={`h-full ${boundDevices.length >= maxDevicesLimit ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                            style={{ width: `${Math.min(100, (boundDevices.length / (maxDevicesLimit || 1)) * 100)}%` }}
                           />
                         </div>
                       </div>
@@ -789,10 +789,10 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                 </div>
 
                 <p className={`text-[11px] leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                  {isTeacherOrAdmin ? (
-                    '💡 สำหรับอาจารย์และผู้ดูแลระบบ สามารถผูกและสลับใช้งานอุปกรณ์ได้ไม่จำกัดจำนวน (เช่น โน้ตบุ๊กสอน, ไอแพด, โทรศัพท์มือถือ) เพื่อความสะดวกในการจัดการการสอน'
+                  {isTeacherOrAdmin || maxDevicesLimit === null ? (
+                    '💡 สำหรับบัญชีนี้ สามารถผูกและสลับใช้งานอุปกรณ์ได้ไม่จำกัดจำนวน เพื่อความสะดวกในการเข้าใช้งาน'
                   ) : (
-                    '🔒 สำหรับนักศึกษา สามารถผูกอุปกรณ์ประจำตัวได้สูงสุด 3 เครื่อง (เช่น มือถือประจำตัว, แท็บเล็ต, คอมพิวเตอร์) เพื่อป้องกันการส่งรหัสให้ผู้อื่นเช็คชื่อแทน'
+                    `🔒 สำหรับนักศึกษา สามารถผูกอุปกรณ์ประจำตัวได้สูงสุด ${maxDevicesLimit} เครื่อง ตามที่ผู้ดูแลระบบกำหนด เพื่อป้องกันการส่งรหัสให้ผู้อื่นเช็คชื่อแทน`
                   )}
                 </p>
               </div>
@@ -843,7 +843,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                   {!boundDevices.some((d) => d.deviceId === currentDevInfo.deviceId) && (
                     <button
                       onClick={handleBindCurrentDevice}
-                      disabled={deviceActionLoading || (!isTeacherOrAdmin && boundDevices.length >= 3)}
+                      disabled={deviceActionLoading || (!isTeacherOrAdmin && maxDevicesLimit !== null && boundDevices.length >= maxDevicesLimit)}
                       className="py-1.5 px-3 rounded-lg text-xs font-bold bg-sky-500 hover:bg-sky-400 text-slate-950 transition disabled:opacity-50 flex items-center space-x-1 cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
@@ -852,10 +852,10 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                   )}
                 </div>
 
-                {!isTeacherOrAdmin && boundDevices.length >= 3 && !boundDevices.some((d) => d.deviceId === currentDevInfo.deviceId) && (
+                {!isTeacherOrAdmin && maxDevicesLimit !== null && boundDevices.length >= maxDevicesLimit && !boundDevices.some((d) => d.deviceId === currentDevInfo.deviceId) && (
                   <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[11px] flex items-center space-x-2">
                     <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>คุณผูกอุปกรณ์ครบ 3 เครื่องแล้ว หากต้องการใช้เครื่องนี้ กรุณายกเลิกการผูกอุปกรณ์เดิม 1 เครื่องก่อน</span>
+                    <span>คุณผูกอุปกรณ์ครบ {maxDevicesLimit} เครื่องแล้ว หากต้องการใช้เครื่องนี้ กรุณายกเลิกการผูกอุปกรณ์เดิม 1 เครื่องก่อน</span>
                   </div>
                 )}
               </div>

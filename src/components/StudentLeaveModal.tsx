@@ -318,14 +318,18 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
           }`}
         >
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-2xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-500">
+            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border ${
+              isDarkMode ? 'bg-sky-500/10 border-sky-500/20 text-sky-400' : 'bg-sky-100 border-sky-200 text-sky-700'
+            }`}>
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-extrabold flex items-center space-x-2">
+              <h3 className={`text-lg font-extrabold flex items-center space-x-2 ${
+                isDarkMode ? 'text-white' : 'text-slate-900'
+              }`}>
                 <span>ระบบแจ้งลาเรียน (Student Leave System)</span>
               </h3>
-              <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+              <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                 ยื่นใบลาป่วย/ลากิจ และติดตามสถานะการพิจารณาจากอาจารย์ผู้สอน
               </p>
             </div>
@@ -333,7 +337,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
 
           <button
             onClick={onClose}
-            className={`p-2 rounded-xl transition ${
+            className={`p-2 rounded-xl transition cursor-pointer ${
               isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'
             }`}
           >
@@ -345,11 +349,9 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
         <div className={`flex border-b px-6 pt-3 gap-2 ${isDarkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'}`}>
           <button
             onClick={() => setActiveTab('NEW')}
-            className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition flex items-center space-x-2 ${
+            className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition flex items-center space-x-2 cursor-pointer ${
               activeTab === 'NEW'
-                ? isDarkMode
-                  ? 'bg-sky-600 text-white shadow-md'
-                  : 'bg-sky-600 text-white shadow-md'
+                ? 'bg-sky-600 text-white shadow-md'
                 : isDarkMode
                 ? 'text-slate-400 hover:text-white hover:bg-slate-800'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
@@ -361,11 +363,9 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
 
           <button
             onClick={() => setActiveTab('HISTORY')}
-            className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition flex items-center space-x-2 relative ${
+            className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition flex items-center space-x-2 relative cursor-pointer ${
               activeTab === 'HISTORY'
-                ? isDarkMode
-                  ? 'bg-sky-600 text-white shadow-md'
-                  : 'bg-sky-600 text-white shadow-md'
+                ? 'bg-sky-600 text-white shadow-md'
                 : isDarkMode
                 ? 'text-slate-400 hover:text-white hover:bg-slate-800'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
@@ -399,11 +399,11 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
 
               {/* Course Selector */}
               <div>
-                <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
                   เลือกรายวิชาที่ต้องการแจ้งลา <span className="text-rose-500">*</span>
                 </label>
                 {courses.length === 0 ? (
-                  <p className="text-xs text-amber-500">คุณยังไม่ได้ลงทะเบียนในรายวิชาใดๆ กรุณาเพิ่มรายวิชาก่อนส่งใบลา</p>
+                  <p className={`text-xs ${isDarkMode ? 'text-amber-400' : 'text-amber-700'}`}>คุณยังไม่ได้ลงทะเบียนในรายวิชาใดๆ กรุณาเพิ่มรายวิชาก่อนส่งใบลา</p>
                 ) : (
                   <select
                     value={selectedCourseId}
@@ -415,11 +415,11 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                     className={`w-full p-3 rounded-2xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
                       isDarkMode
                         ? 'bg-slate-800 border-slate-700 text-white'
-                        : 'bg-slate-50 border-slate-300 text-slate-900'
+                        : 'bg-white border-slate-300 text-slate-900'
                     }`}
                   >
                     {courses.map((c) => (
-                      <option key={c.id} value={c.id}>
+                      <option key={c.id} value={c.id} className={isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}>
                         [{c.courseCode}] {c.courseName} (อาจารย์: {c.coordinatorName || c.ownerName || '-'})
                       </option>
                     ))}
@@ -429,7 +429,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
 
               {/* Leave Duration Range Selector */}
               <div>
-                <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
                   รูปแบบระยะเวลาการลา <span className="text-rose-500">*</span>
                 </label>
                 <div className="grid grid-cols-2 gap-3">
@@ -439,7 +439,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                       setLeaveRangeMode('SINGLE');
                       setClassCheckWarning('');
                     }}
-                    className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-center space-x-2 transition ${
+                    className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-center space-x-2 transition cursor-pointer ${
                       leaveRangeMode === 'SINGLE'
                         ? 'bg-sky-600 text-white border-sky-500 shadow-md'
                         : isDarkMode
@@ -457,7 +457,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                       if (endDate < leaveDate) setEndDate(leaveDate);
                       setClassCheckWarning('');
                     }}
-                    className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-center space-x-2 transition ${
+                    className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-center space-x-2 transition cursor-pointer ${
                       leaveRangeMode === 'MULTI'
                         ? 'bg-sky-600 text-white border-sky-500 shadow-md'
                         : isDarkMode
@@ -475,7 +475,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* Leave Type */}
                 <div>
-                  <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
                     ประเภทการลา <span className="text-rose-500">*</span>
                   </label>
                   <select
@@ -484,18 +484,18 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                     className={`w-full p-3 rounded-2xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
                       isDarkMode
                         ? 'bg-slate-800 border-slate-700 text-white'
-                        : 'bg-slate-50 border-slate-300 text-slate-900'
+                        : 'bg-white border-slate-300 text-slate-900'
                     }`}
                   >
-                    <option value={LeaveType.SICK}>🤒 ลาป่วย (Sick Leave)</option>
-                    <option value={LeaveType.PERSONAL}>📌 ลากิจ (Personal Leave)</option>
-                    <option value={LeaveType.OTHER}>📑 ลาอื่นๆ (Other)</option>
+                    <option value={LeaveType.SICK} className={isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}>🤒 ลาป่วย (Sick Leave)</option>
+                    <option value={LeaveType.PERSONAL} className={isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}>📌 ลากิจ (Personal Leave)</option>
+                    <option value={LeaveType.OTHER} className={isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}>📑 ลาอื่นๆ (Other)</option>
                   </select>
                 </div>
 
                 {/* Leave Date or Start Date */}
                 <div>
-                  <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
                     {leaveRangeMode === 'MULTI' ? 'วันที่เริ่มต้นลา ' : 'วันที่ขอลา '}
                     <span className="text-rose-500">*</span>
                   </label>
@@ -506,7 +506,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                     className={`w-full p-3 rounded-2xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
                       isDarkMode
                         ? 'bg-slate-800 border-slate-700 text-white'
-                        : 'bg-slate-50 border-slate-300 text-slate-900'
+                        : 'bg-white border-slate-300 text-slate-900'
                     }`}
                   />
                 </div>
@@ -514,7 +514,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                 {/* End Date (Multi-Day) OR Week Number (Single-Day) */}
                 {leaveRangeMode === 'MULTI' ? (
                   <div>
-                    <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
                       วันที่สิ้นสุดการลา <span className="text-rose-500">*</span>
                     </label>
                     <input
@@ -525,13 +525,13 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                       className={`w-full p-3 rounded-2xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
                         isDarkMode
                           ? 'bg-slate-800 border-slate-700 text-white'
-                          : 'bg-slate-50 border-slate-300 text-slate-900'
+                          : 'bg-white border-slate-300 text-slate-900'
                       }`}
                     />
                   </div>
                 ) : (
                   <div>
-                    <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
                       สัปดาห์เรียน
                     </label>
                     <select
@@ -540,16 +540,16 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                       className={`w-full p-3 rounded-2xl border text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
                         isDarkMode
                           ? 'bg-slate-800 border-slate-700 text-white'
-                          : 'bg-slate-50 border-slate-300 text-slate-900'
+                          : 'bg-white border-slate-300 text-slate-900'
                       }`}
                     >
-                      <option value="">-- ไม่ระบุ / Sync ตามวันที่ --</option>
+                      <option value="" className={isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}>-- ไม่ระบุ / Sync ตามวันที่ --</option>
                       {selectedCourse?.weeks?.map((w) => (
-                        <option key={w.weekNumber} value={w.weekNumber}>
+                        <option key={w.weekNumber} value={w.weekNumber} className={isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}>
                           สัปดาห์ที่ {w.weekNumber}: {w.topic} {w.date ? `(${w.date})` : ''}
                         </option>
                       )) || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((w) => (
-                        <option key={w} value={w}>สัปดาห์ที่ {w}</option>
+                        <option key={w} value={w} className={isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}>สัปดาห์ที่ {w}</option>
                       ))}
                     </select>
                   </div>
@@ -558,15 +558,17 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
 
               {/* Class Existence Warning Banner */}
               {classCheckWarning && (
-                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium flex items-center space-x-2.5">
-                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                <div className={`p-3.5 rounded-2xl border text-xs font-medium flex items-center space-x-2.5 ${
+                  isDarkMode ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-amber-50 border-amber-200 text-amber-800 font-semibold'
+                }`}>
+                  <AlertCircle className={`w-4 h-4 shrink-0 ${isDarkMode ? 'text-amber-400' : 'text-amber-700'}`} />
                   <span>{classCheckWarning}</span>
                 </div>
               )}
 
               {/* Reason */}
               <div>
-                <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
                   เหตุผลรายละเอียดการลา <span className="text-rose-500">*</span>
                 </label>
                 <textarea
@@ -577,14 +579,14 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                   className={`w-full p-3 rounded-2xl border text-sm transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
                     isDarkMode
                       ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500'
-                      : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-400'
+                      : 'bg-white border-slate-300 text-slate-900 placeholder-slate-500'
                   }`}
                 />
               </div>
 
               {/* File Attachment */}
               <div>
-                <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                <label className={`block text-xs font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
                   แนบหลักฐานประกอบการลา (ใบรับรองแพทย์ / ใบลากิจ)
                 </label>
                 <div
@@ -595,7 +597,9 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                   }`}
                 >
                   {attachmentName ? (
-                    <div className="flex items-center justify-between p-2 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400">
+                    <div className={`flex items-center justify-between p-2 rounded-xl border ${
+                      isDarkMode ? 'bg-sky-500/10 border-sky-500/20 text-sky-400' : 'bg-sky-50 border-sky-200 text-sky-800'
+                    }`}>
                       <div className="flex items-center space-x-2 truncate">
                         <FileCheck className="w-5 h-5 shrink-0" />
                         <span className="text-xs font-medium truncate">{attachmentName}</span>
@@ -605,7 +609,9 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                           <button
                             type="button"
                             onClick={() => openDocumentPreview(attachmentUrl)}
-                            className="p-1.5 hover:bg-sky-500/20 rounded-lg text-sky-400 font-bold text-xs flex items-center space-x-1 transition cursor-pointer"
+                            className={`p-1.5 rounded-lg font-bold text-xs flex items-center space-x-1 transition cursor-pointer ${
+                              isDarkMode ? 'hover:bg-sky-500/20 text-sky-400' : 'hover:bg-sky-200 text-sky-800'
+                            }`}
                             title="ดูตัวอย่างเอกสาร"
                           >
                             <Eye className="w-4 h-4" />
@@ -618,7 +624,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                             setAttachmentName('');
                             setAttachmentUrl('');
                           }}
-                          className="p-1 hover:bg-rose-500/20 rounded-lg text-rose-400 transition"
+                          className="p-1 hover:bg-rose-500/20 rounded-lg text-rose-500 transition cursor-pointer"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -627,8 +633,12 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                   ) : (
                     <label className="cursor-pointer flex flex-col items-center justify-center py-3">
                       <Upload className="w-8 h-8 text-sky-500 mb-2 animate-bounce" />
-                      <span className="text-xs font-bold text-sky-500">กดเพื่ออัปโหลดไฟล์ / ถ่ายภาพใบรับรองแพทย์</span>
-                      <span className="text-[11px] text-slate-400 mt-1">รองรับ JPG, PNG, PDF ขนาดไม่เกิน 5MB</span>
+                      <span className={`text-xs font-bold ${isDarkMode ? 'text-sky-400' : 'text-sky-700'}`}>
+                        กดเพื่ออัปโหลดไฟล์ / ถ่ายภาพใบรับรองแพทย์
+                      </span>
+                      <span className={`text-[11px] mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                        รองรับ JPG, PNG, PDF ขนาดไม่เกิน 5MB
+                      </span>
                       <input
                         type="file"
                         accept="image/*,.pdf"
@@ -662,16 +672,18 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
             /* HISTORY TAB */
             <div className="space-y-4">
               {loading ? (
-                <div className="py-12 text-center text-slate-400 text-xs">กำลังโหลดประวัติการแจ้งลา...</div>
+                <div className={`py-12 text-center text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>กำลังโหลดประวัติการแจ้งลา...</div>
               ) : leaveRequests.length === 0 ? (
                 <div className="py-12 text-center space-y-3">
-                  <div className="w-12 h-12 rounded-full bg-slate-800 text-slate-500 flex items-center justify-center mx-auto">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto ${
+                    isDarkMode ? 'bg-slate-800 text-slate-500' : 'bg-slate-200 text-slate-500'
+                  }`}>
                     <FileText className="w-6 h-6" />
                   </div>
                   <p className={`text-sm font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                     ยังไม่มีประวัติการยื่นใบลาเรียน
                   </p>
-                  <p className="text-xs text-slate-400">คุณสามารถส่งใบลาใหม่ผ่านแท็บ "กรอกใบลาเรียนใหม่"</p>
+                  <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>คุณสามารถส่งใบลาใหม่ผ่านแท็บ "กรอกใบลาเรียนใหม่"</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -680,19 +692,25 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                       leave.status === LeaveStatus.APPROVED
                         ? {
                             label: 'อนุมัติแล้ว',
-                            color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
-                            icon: <CheckCircle className="w-4 h-4 text-emerald-400" />,
+                            color: isDarkMode
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                              : 'bg-emerald-100 text-emerald-800 border-emerald-300 font-extrabold',
+                            icon: <CheckCircle className={`w-4 h-4 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`} />,
                           }
                         : leave.status === LeaveStatus.REJECTED
                         ? {
                             label: 'ไม่อนุมัติ',
-                            color: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
-                            icon: <XCircle className="w-4 h-4 text-rose-400" />,
+                            color: isDarkMode
+                              ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                              : 'bg-rose-100 text-rose-800 border-rose-300 font-extrabold',
+                            icon: <XCircle className={`w-4 h-4 ${isDarkMode ? 'text-rose-400' : 'text-rose-700'}`} />,
                           }
                         : {
                             label: 'รออนุมัติ',
-                            color: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
-                            icon: <Clock className="w-4 h-4 text-amber-400 animate-pulse" />,
+                            color: isDarkMode
+                              ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                              : 'bg-amber-100 text-amber-800 border-amber-300 font-extrabold',
+                            icon: <Clock className={`w-4 h-4 ${isDarkMode ? 'text-amber-400' : 'text-amber-700'} animate-pulse`} />,
                           };
 
                     const typeLabel =
@@ -708,18 +726,22 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                         className={`p-5 rounded-2xl border transition-all ${
                           isDarkMode
                             ? 'bg-slate-800/80 border-slate-700 hover:border-slate-600'
-                            : 'bg-slate-50 border-slate-200 hover:border-slate-300'
+                            : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'
                         }`}
                       >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-700/50">
+                        <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b ${
+                          isDarkMode ? 'border-slate-700/50' : 'border-slate-200'
+                        }`}>
                           <div>
                             <div className="flex items-center space-x-2">
-                              <span className="font-mono text-xs font-bold text-sky-400 px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20">
+                              <span className={`font-mono text-xs font-bold px-2 py-0.5 rounded border ${
+                                isDarkMode ? 'text-sky-400 bg-sky-500/10 border-sky-500/20' : 'text-sky-800 bg-sky-100 border-sky-300'
+                              }`}>
                                 {leave.courseCode}
                               </span>
-                              <span className="font-bold text-sm text-white">{leave.courseName}</span>
+                              <span className={`font-bold text-sm ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{leave.courseName}</span>
                             </div>
-                            <div className="text-xs text-slate-400 mt-1 flex items-center space-x-3">
+                            <div className={`text-xs mt-1 flex items-center space-x-3 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                               <span>{typeLabel}</span>
                               <span>•</span>
                               <span>
@@ -747,7 +769,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                             {leave.status === LeaveStatus.PENDING && (
                               <button
                                 onClick={() => handleCancelLeave(leave.id)}
-                                className="p-1.5 rounded-xl text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 transition"
+                                className="p-1.5 rounded-xl text-rose-500 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 transition cursor-pointer"
                                 title="ยกเลิกใบลา"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -758,19 +780,21 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
 
                         {/* Leave Detail */}
                         <div className="mt-3 text-xs space-y-2">
-                          <p className={`${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                            <span className="font-bold text-slate-400">เหตุผลการลา:</span> {leave.reason}
+                          <p className={isDarkMode ? 'text-slate-300' : 'text-slate-700'}>
+                            <span className={`font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-800'}`}>เหตุผลการลา:</span> {leave.reason}
                           </p>
 
                           {leave.attachmentName && (
                             <div className="flex items-center space-x-2 pt-1">
-                              <FileCheck className="w-4 h-4 text-sky-400 shrink-0" />
-                              <span className="text-sky-400 font-medium">เอกสารประกอบ: {leave.attachmentName}</span>
+                              <FileCheck className={`w-4 h-4 shrink-0 ${isDarkMode ? 'text-sky-400' : 'text-sky-700'}`} />
+                              <span className={`font-medium ${isDarkMode ? 'text-sky-400' : 'text-sky-800'}`}>เอกสารประกอบ: {leave.attachmentName}</span>
                               {leave.attachmentUrl && (
                                 <button
                                   type="button"
                                   onClick={() => openDocumentPreview(leave.attachmentUrl!)}
-                                  className="text-sky-400 hover:underline flex items-center space-x-1 font-bold ml-2 cursor-pointer"
+                                  className={`flex items-center space-x-1 font-bold ml-2 cursor-pointer hover:underline ${
+                                    isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-700 hover:text-sky-800'
+                                  }`}
                                 >
                                   <Eye className="w-3.5 h-3.5" />
                                   <span>เปิดดูเอกสาร</span>
@@ -780,12 +804,14 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                           )}
 
                           {leave.teacherComment && (
-                            <div className="p-3 rounded-xl bg-slate-900/60 border border-sky-500/20 text-sky-300 mt-2">
+                            <div className={`p-3 rounded-xl border mt-2 ${
+                              isDarkMode ? 'bg-slate-900/60 border-sky-500/20 text-sky-300' : 'bg-sky-50 border-sky-200 text-sky-900'
+                            }`}>
                               <span className="font-bold">ความคิดเห็นจากอาจารย์:</span> {leave.teacherComment}
                             </div>
                           )}
 
-                          <div className="text-[10px] text-slate-500 text-right pt-1">
+                          <div className={`text-[10px] text-right pt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
                             ยื่นเมื่อ: {new Date(leave.createdAt).toLocaleString('th-TH')}
                           </div>
                         </div>

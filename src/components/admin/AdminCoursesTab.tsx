@@ -1,0 +1,812 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { User, Course } from '../../types';
+import {
+  fetchAdminCollection,
+  saveAdminDocument,
+  deleteAdminDocument,
+  fetchTeachers,
+} from '../../services/api';
+import { TeacherCourseCreationModal } from '../TeacherCourseCreationModal';
+import { TeacherCourseEditModal } from '../TeacherCourseEditModal';
+import {
+  BookOpen,
+  Search,
+  RefreshCw,
+  Plus,
+  Edit3,
+  Trash2,
+  Calendar,
+  Layers,
+  ArrowUpDown,
+  X,
+  Play,
+  Square,
+  Sparkles,
+} from 'lucide-react';
+
+interface AdminCoursesTabProps {
+  adminUser: User;
+  isDarkMode: boolean;
+  showToast: (msg: string) => void;
+  setDeleteConfirmItem: (item: any) => void;
+  onRefreshOverview: () => void;
+}
+
+export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
+  adminUser,
+  isDarkMode,
+  showToast,
+  setDeleteConfirmItem,
+  onRefreshOverview,
+}) => {
+  const [allCourses, setAllCourses] = useState<any[]>([]);
+  const [allSessions, setAllSessions] = useState<any[]>([]);
+  const [teachersList, setTeachersList] = useState<User[]>([]);
+  const [selectedCourseForSessions, setSelectedCourseForSessions] = useState<string>('ALL');
+  const [courseSearchQuery, setCourseSearchQuery] = useState<string>('');
+  const [loadingCoursesData, setLoadingCoursesData] = useState<boolean>(false);
+
+  // Sorting
+  const [courseSortField, setCourseSortField] = useState<'code' | 'year' | 'coordinator' | 'weeks' | 'sessions' | null>(null);
+  const [courseSortDir, setCourseSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const [sessionSortField, setSessionSortField] = useState<'week' | 'topic' | 'status' | null>(null);
+  const [sessionSortDir, setSessionSortDir] = useState<'asc' | 'desc'>('asc');
+
+  // Modals state
+  const [isCreateCourseModalOpen, setIsCreateCourseModalOpen] = useState<boolean>(false);
+  const [isEditCourseModalOpen, setIsEditCourseModalOpen] = useState<boolean>(false);
+  const [editingCourse, setEditingCourse] = useState<any | null>(null);
+
+  const [sessionModalOpen, setSessionModalOpen] = useState<boolean>(false);
+  const [editingSessionData, setEditingSessionData] = useState<any | null>(null);
+
+  const loadCoursesAndSessionsData = async (silent = false) => {
+    try {
+      if (!silent) setLoadingCoursesData(true);
+      const [cRes, sRes] = await Promise.all([
+        fetchAdminCollection('courses'),
+        fetchAdminCollection('sessions'),
+      ]);
+      setAllCourses(cRes.documents || []);
+      setAllSessions(sRes.documents || []);
+    } catch (err) {
+      console.error('Failed to load courses & sessions:', err);
+    } finally {
+      if (!silent) setLoadingCoursesData(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCoursesAndSessionsData();
+  }, []);
+
+  const handleCourseSort = (field: 'code' | 'year' | 'coordinator' | 'weeks' | 'sessions') => {
+    if (courseSortField === field) {
+      if (courseSortDir === 'asc') setCourseSortDir('desc');
+      else {
+        setCourseSortField(null);
+        setCourseSortDir('asc');
+      }
+    } else {
+      setCourseSortField(field);
+      setCourseSortDir('asc');
+    }
+  };
+
+  const handleSessionSort = (field: 'week' | 'topic' | 'status') => {
+    if (sessionSortField === field) {
+      if (sessionSortDir === 'asc') setSessionSortDir('desc');
+      else {
+        setSessionSortField(null);
+        setSessionSortDir('asc');
+      }
+    } else {
+      setSessionSortField(field);
+      setSessionSortDir('asc');
+    }
+  };
+
+  // Handlers for Course CRUD
+  const handleOpenCreateCourse = async () => {
+    if (teachersList.length === 0) {
+      const tData = await fetchTeachers().catch(() => []);
+      if (tData.length > 0) setTeachersList(tData);
+    }
+    setIsCreateCourseModalOpen(true);
+  };
+
+  const handleOpenEditCourse = async (course: any) => {
+    if (teachersList.length === 0) {
+      const tData = await fetchTeachers().catch(() => []);
+      if (tData.length > 0) setTeachersList(tData);
+    }
+    setEditingCourse(course);
+    setIsEditCourseModalOpen(true);
+  };
+
+  const handleDeleteCourseSubmit = (courseId: string, courseCode: string) => {
+    setDeleteConfirmItem({
+      type: 'course',
+      id: courseId,
+      title: `คุณต้องการลบรายวิชา "${courseCode}" ใช่หรือไม่?`,
+      subtitle: 'การลบรายวิชานี้จะทำการลบสัปดาห์สอน สมาชิก ประวัติการเช็คชื่อ และใบลาที่เกี่ยวข้องทั้งหมดออกจากฐานข้อมูลถาวร',
+      action: async () => {
+        await deleteAdminDocument('courses', courseId);
+        showToast(`ลบวิชา ${courseCode} เรียบร้อยแล้ว`);
+        await loadCoursesAndSessionsData();
+        onRefreshOverview();
+      },
+    });
+  };
+
+  // Handlers for Sessions
+  const handleOpenCreateSession = (preselectedCourseId?: string) => {
+    const course = allCourses.find((c) => c.id === preselectedCourseId) || allCourses[0];
+    const courseId = course?.id || '';
+    const existingSessions = allSessions.filter((s) => s.courseId === courseId);
+    const nextWeekNum = existingSessions.length + 1;
+
+    const newSessionDoc = {
+      id: `ses_${courseId}_w${nextWeekNum}_${Date.now()}`,
+      courseId: courseId,
+      weekNumber: nextWeekNum,
+      topic: `การเรียนสัปดาห์ที่ ${nextWeekNum}`,
+      teacherLat: course?.defaultLat || 13.7988363,
+      teacherLng: course?.defaultLng || 100.322944,
+      isActive: false,
+      createdAt: new Date().toISOString(),
+    };
+    setEditingSessionData(newSessionDoc);
+    setSessionModalOpen(true);
+  };
+
+  const handleOpenEditSession = (session: any) => {
+    setEditingSessionData(JSON.parse(JSON.stringify(session)));
+    setSessionModalOpen(true);
+  };
+
+  const handleSaveSessionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSessionData?.courseId || !editingSessionData?.topic) {
+      alert('กรุณาเลือกรายวิชาและระบุหัวข้อการเรียน');
+      return;
+    }
+    try {
+      await saveAdminDocument('sessions', editingSessionData);
+      showToast(`บันทึก Session สัปดาห์ที่ ${editingSessionData.weekNumber} สำเร็จ`);
+      setSessionModalOpen(false);
+      await loadCoursesAndSessionsData();
+      onRefreshOverview();
+    } catch (err: any) {
+      alert(err.message || 'ไม่สามารถบันทึก Session ได้');
+    }
+  };
+
+  const handleToggleSessionActiveStatus = async (session: any) => {
+    try {
+      const updated = {
+        ...session,
+        isActive: !session.isActive,
+        updatedAt: new Date().toISOString(),
+      };
+      await saveAdminDocument('sessions', updated);
+      showToast(`${updated.isActive ? '🟢 เปิดการเช็กชื่อ' : '🔴 ปิดการเช็กชื่อ'} สัปดาห์ที่ ${session.weekNumber} สำเร็จ`);
+      await loadCoursesAndSessionsData();
+      onRefreshOverview();
+    } catch (err: any) {
+      alert(err.message || 'ไม่สามารถปรับสถานะการเช็กชื่อได้');
+    }
+  };
+
+  const handleDeleteSessionSubmit = (sessionId: string, weekNum: number) => {
+    setDeleteConfirmItem({
+      type: 'session',
+      id: sessionId,
+      title: `คุณต้องการลบ Session สัปดาห์ที่ ${weekNum} ใช่หรือไม่?`,
+      subtitle: 'การลบ Session นี้จะลบประวัติการเข้าเรียนในสัปดาห์นี้ถาวร',
+      action: async () => {
+        await deleteAdminDocument('sessions', sessionId);
+        showToast(`ลบ Session สัปดาห์ที่ ${weekNum} เรียบร้อยแล้ว`);
+        await loadCoursesAndSessionsData();
+        onRefreshOverview();
+      },
+    });
+  };
+
+  const handleGenerateSessionsFromWeeks = async (course: any) => {
+    if (!course) return;
+    const weeksList = course.weeks && course.weeks.length > 0
+      ? course.weeks
+      : Array.from({ length: 15 }, (_, i) => ({
+          weekNumber: i + 1,
+          topic: `การเรียนสัปดาห์ที่ ${i + 1}`,
+          date: new Date(Date.now() + i * 7 * 86400000).toISOString().slice(0, 10),
+        }));
+
+    const existingSessions = allSessions.filter((s) => s.courseId === course.id);
+    const existingWeekNums = new Set(existingSessions.map((s) => Number(s.weekNumber)));
+
+    let createdCount = 0;
+    for (const w of weeksList) {
+      const wNum = Number(w.weekNumber);
+      if (!existingWeekNums.has(wNum)) {
+        const newSes = {
+          id: `ses_${course.id}_w${wNum}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          courseId: course.id,
+          weekNumber: wNum,
+          topic: w.topic || `การเรียนสัปดาห์ที่ ${wNum}`,
+          teacherLat: course.defaultLat || 13.7988363,
+          teacherLng: course.defaultLng || 100.322944,
+          isActive: false,
+          createdAt: new Date().toISOString(),
+        };
+        await saveAdminDocument('sessions', newSes);
+        createdCount++;
+      }
+    }
+
+    showToast(`สร้าง Session อัตโนมัติเพิ่ม ${createdCount} สัปดาห์ เรียบร้อยแล้ว`);
+    await loadCoursesAndSessionsData();
+    onRefreshOverview();
+  };
+
+  const filteredAndSortedCourses = useMemo(() => {
+    return allCourses
+      .filter((c) => {
+        if (!courseSearchQuery.trim()) return true;
+        const q = courseSearchQuery.toLowerCase().trim();
+        const code = (c.courseCode || c.code || '').toLowerCase();
+        const name = (c.courseName || c.nameTh || '').toLowerCase();
+        const coordinator = (c.coordinatorName || '').toLowerCase();
+        return code.includes(q) || name.includes(q) || coordinator.includes(q);
+      })
+      .sort((a, b) => {
+        if (!courseSortField) return 0;
+        let valA: any = '';
+        let valB: any = '';
+
+        if (courseSortField === 'code') {
+          valA = a.courseCode || a.code || '';
+          valB = b.courseCode || b.code || '';
+        } else if (courseSortField === 'year') {
+          valA = a.academicYear || 0;
+          valB = b.academicYear || 0;
+        } else if (courseSortField === 'coordinator') {
+          valA = a.coordinatorName || '';
+          valB = b.coordinatorName || '';
+        } else if (courseSortField === 'weeks') {
+          valA = a.weeks?.length || 0;
+          valB = b.weeks?.length || 0;
+        } else if (courseSortField === 'sessions') {
+          valA = allSessions.filter((s) => s.courseId === a.id).length;
+          valB = allSessions.filter((s) => s.courseId === b.id).length;
+        }
+
+        if (valA < valB) return courseSortDir === 'asc' ? -1 : 1;
+        if (valA > valB) return courseSortDir === 'asc' ? 1 : -1;
+        return 0;
+      });
+  }, [allCourses, courseSearchQuery, courseSortField, courseSortDir, allSessions]);
+
+  const filteredSessions = useMemo(() => {
+    return allSessions
+      .filter((s) => {
+        if (selectedCourseForSessions === 'ALL') return true;
+        return s.courseId === selectedCourseForSessions;
+      })
+      .sort((a, b) => {
+        if (!sessionSortField) return (a.weekNumber || 0) - (b.weekNumber || 0);
+        let valA: any = '';
+        let valB: any = '';
+
+        if (sessionSortField === 'week') {
+          valA = a.weekNumber || 0;
+          valB = b.weekNumber || 0;
+        } else if (sessionSortField === 'topic') {
+          valA = a.topic || '';
+          valB = b.topic || '';
+        } else if (sessionSortField === 'status') {
+          valA = a.isActive ? 1 : 0;
+          valB = b.isActive ? 1 : 0;
+        }
+
+        if (valA < valB) return sessionSortDir === 'asc' ? -1 : 1;
+        if (valA > valB) return sessionSortDir === 'asc' ? 1 : -1;
+        return 0;
+      });
+  }, [allSessions, selectedCourseForSessions, sessionSortField, sessionSortDir]);
+
+  return (
+    <div className="space-y-6">
+      {/* SECTION 1: COURSE MANAGEMENT */}
+      <div className="space-y-3">
+        <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+        }`}>
+          <div className="flex items-center space-x-2.5">
+            <div className={`p-2 rounded-xl border ${
+              isDarkMode ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : 'bg-purple-100 text-purple-700 border-purple-200'
+            }`}>
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className={`text-sm font-extrabold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                รายวิชาในระบบทั้งหมด ({filteredAndSortedCourses.length} วิชา)
+              </h3>
+              <p className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                เพิ่ม แก้ไข ลบ รายวิชาในภาคเรียน และตั้งค่าสัปดาห์สอน
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[200px]">
+              <Search className={`w-3.5 h-3.5 absolute left-3 top-2.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
+              <input
+                type="text"
+                placeholder="ค้นหารหัสวิชา, ชื่อวิชา..."
+                value={courseSearchQuery}
+                onChange={(e) => setCourseSearchQuery(e.target.value)}
+                className={`w-full pl-8 pr-3 py-1.5 rounded-xl text-xs font-medium border transition focus:outline-none ${
+                  isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                }`}
+              />
+            </div>
+
+            <button
+              onClick={handleOpenCreateCourse}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 shadow-md shadow-purple-600/30 transition flex items-center space-x-1.5 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>สร้างรายวิชาใหม่</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Courses Table */}
+        <div className={`rounded-2xl border overflow-hidden ${isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[700px] text-left text-xs border-collapse">
+              <thead>
+                <tr className={`border-b ${isDarkMode ? 'bg-slate-800/80 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-800 font-extrabold'}`}>
+                  <th onClick={() => handleCourseSort('code')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
+                    <div className="flex items-center space-x-1">
+                      <span>รหัสวิชา / ชื่อรายวิชา</span>
+                      <ArrowUpDown className={`w-3 h-3 shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
+                    </div>
+                  </th>
+                  <th onClick={() => handleCourseSort('year')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
+                    <div className="flex items-center space-x-1">
+                      <span>ภาคเรียน / ปี</span>
+                      <ArrowUpDown className={`w-3 h-3 shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
+                    </div>
+                  </th>
+                  <th onClick={() => handleCourseSort('coordinator')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
+                    <div className="flex items-center space-x-1">
+                      <span>อาจารย์ผู้ประสานงาน</span>
+                      <ArrowUpDown className={`w-3 h-3 shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
+                    </div>
+                  </th>
+                  <th onClick={() => handleCourseSort('sessions')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
+                    <div className="flex items-center space-x-1">
+                      <span>จำนวน Session</span>
+                      <ArrowUpDown className={`w-3 h-3 shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
+                    </div>
+                  </th>
+                  <th className="p-3.5 font-extrabold text-right">จัดการ</th>
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${isDarkMode ? 'divide-slate-800/60' : 'divide-slate-100'}`}>
+                {loadingCoursesData ? (
+                  <tr>
+                    <td colSpan={5} className={`p-8 text-center font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                      <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-purple-500" />
+                      กำลังโหลดข้อมูลรายวิชา...
+                    </td>
+                  </tr>
+                ) : filteredAndSortedCourses.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className={`p-8 text-center font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                      ไม่พบข้อมูลรายวิชาในระบบ
+                    </td>
+                  </tr>
+                ) : (
+                  filteredAndSortedCourses.map((crs) => {
+                    const sessionCount = allSessions.filter((s) => s.courseId === crs.id).length;
+                    return (
+                      <tr key={crs.id} className={`transition ${isDarkMode ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
+                        <td className="p-3.5">
+                          <div>
+                            <div className={`font-extrabold font-mono text-xs ${isDarkMode ? 'text-purple-400' : 'text-purple-700'}`}>
+                              {crs.courseCode || crs.code}
+                            </div>
+                            <div className={`font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                              {crs.courseName || crs.nameTh}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-3.5">
+                          <span className={`font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                            ภาค {crs.semester || '1'}/{crs.academicYear || '2569'}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          <span className={`font-medium ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                            {crs.coordinatorName || 'ไม่ระบุ'}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${
+                            isDarkMode ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' : 'bg-sky-100 text-sky-800 border-sky-300'
+                          }`}>
+                            {sessionCount} Sessions
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end space-x-1.5">
+                            <button
+                              onClick={() => handleGenerateSessionsFromWeeks(crs)}
+                              className={`px-2 py-1 rounded-lg border text-[10px] font-bold flex items-center space-x-1 cursor-pointer transition ${
+                                isDarkMode
+                                  ? 'bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border-purple-500/30'
+                                  : 'bg-purple-100 hover:bg-purple-200 text-purple-800 border-purple-300'
+                              }`}
+                              title="สร้าง Session อัตโนมัติจากแผนการสอน 15 สัปดาห์"
+                            >
+                              <Sparkles className="w-3 h-3" />
+                              <span>Gen Sessions</span>
+                            </button>
+                            <button
+                              onClick={() => handleOpenEditCourse(crs)}
+                              className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                isDarkMode
+                                  ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-sky-400'
+                                  : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-sky-700'
+                              }`}
+                              title="แก้ไขรายวิชา"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCourseSubmit(crs.id, crs.courseCode || crs.code)}
+                              className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                isDarkMode
+                                  ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-rose-400'
+                                  : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-rose-700'
+                              }`}
+                              title="ลบรายวิชา"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION 2: WEEKLY SESSIONS MANAGEMENT */}
+      <div className={`space-y-3 pt-4 border-t ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+        <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+        }`}>
+          <div className="flex items-center space-x-2.5">
+            <div className={`p-2 rounded-xl border ${
+              isDarkMode ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' : 'bg-sky-100 text-sky-700 border-sky-200'
+            }`}>
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className={`text-sm font-extrabold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                การเรียนการสอนรายสัปดาห์ (Weekly Sessions)
+              </h3>
+              <p className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                จัดการสัปดาห์เรียน, เปิด/ปิดรับเช็กชื่อประจำสัปดาห์, ปรับแต่งพิกัด GPS
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Filter by course */}
+            <select
+              value={selectedCourseForSessions}
+              onChange={(e) => setSelectedCourseForSessions(e.target.value)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
+                isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+              }`}
+            >
+              <option value="ALL">เลือกวิชาทั้งหมด (All Courses)</option>
+              {allCourses.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.courseCode || c.code} - {c.courseName || c.nameTh}
+                </option>
+              ))}
+            </select>
+
+            <button
+              onClick={() => handleOpenCreateSession(selectedCourseForSessions !== 'ALL' ? selectedCourseForSessions : undefined)}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-sky-600 hover:bg-sky-500 shadow-md shadow-sky-600/30 transition flex items-center space-x-1.5 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>สร้าง Session สัปดาห์ใหม่</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Sessions Table */}
+        <div className={`rounded-2xl border overflow-hidden ${isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[650px] text-left text-xs border-collapse">
+              <thead>
+                <tr className={`border-b ${isDarkMode ? 'bg-slate-800/80 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-800 font-extrabold'}`}>
+                  <th onClick={() => handleSessionSort('week')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
+                    <div className="flex items-center space-x-1">
+                      <span>สัปดาห์ / วิชา</span>
+                      <ArrowUpDown className={`w-3 h-3 shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
+                    </div>
+                  </th>
+                  <th onClick={() => handleSessionSort('topic')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
+                    <div className="flex items-center space-x-1">
+                      <span>หัวข้อการสอน (Topic)</span>
+                      <ArrowUpDown className={`w-3 h-3 shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
+                    </div>
+                  </th>
+                  <th onClick={() => handleSessionSort('status')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
+                    <div className="flex items-center space-x-1">
+                      <span>สถานะเช็กชื่อ</span>
+                      <ArrowUpDown className={`w-3 h-3 shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
+                    </div>
+                  </th>
+                  <th className="p-3.5 font-extrabold text-right">จัดการ</th>
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${isDarkMode ? 'divide-slate-800/60' : 'divide-slate-100'}`}>
+                {filteredSessions.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className={`p-8 text-center font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                      ไม่พบข้อมูล Session ประจำสัปดาห์
+                    </td>
+                  </tr>
+                ) : (
+                  filteredSessions.map((ses) => {
+                    const matchedCourse = allCourses.find((c) => c.id === ses.courseId);
+                    return (
+                      <tr key={ses.id} className={`transition ${isDarkMode ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
+                        <td className="p-3.5">
+                          <div className="flex items-center space-x-2">
+                            <span className={`w-7 h-7 rounded-lg border font-black flex items-center justify-center shrink-0 ${
+                              isDarkMode
+                                ? 'bg-sky-500/15 border-sky-500/30 text-sky-400'
+                                : 'bg-sky-100 border-sky-300 text-sky-800'
+                            }`}>
+                              W{ses.weekNumber || 1}
+                            </span>
+                            <div>
+                              <div className={`font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                {matchedCourse ? `${matchedCourse.courseCode || matchedCourse.code}` : 'ไม่ระบุวิชา'}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-3.5">
+                          <span className={`font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                            {ses.topic || `สัปดาห์ที่ ${ses.weekNumber}`}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          <button
+                            onClick={() => handleToggleSessionActiveStatus(ses)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold border flex items-center space-x-1.5 cursor-pointer transition ${
+                              ses.isActive
+                                ? isDarkMode ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                : isDarkMode ? 'bg-slate-800 text-slate-400 border-slate-700' : 'bg-slate-100 text-slate-600 border-slate-300'
+                            }`}
+                          >
+                            {ses.isActive ? <Play className="w-3 h-3 fill-current" /> : <Square className="w-3 h-3" />}
+                            <span>{ses.isActive ? '🟢 กำลังเปิดรับเช็กชื่อ' : '🔴 ปิดเช็กชื่อ'}</span>
+                          </button>
+                        </td>
+                        <td className="p-3.5 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end space-x-1.5">
+                            <button
+                              onClick={() => handleOpenEditSession(ses)}
+                              className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                isDarkMode
+                                  ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-sky-400'
+                                  : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-sky-700'
+                              }`}
+                              title="แก้ไข Session"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSessionSubmit(ses.id, ses.weekNumber)}
+                              className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                isDarkMode
+                                  ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-rose-400'
+                                  : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-rose-700'
+                              }`}
+                              title="ลบ Session"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* CREATE / EDIT COURSE MODALS */}
+      {isCreateCourseModalOpen && (
+        <TeacherCourseCreationModal
+          isOpen={isCreateCourseModalOpen}
+          onClose={() => setIsCreateCourseModalOpen(false)}
+          onSuccess={async (newCourse) => {
+            showToast(`สร้างรายวิชา ${newCourse.courseCode} สำเร็จ`);
+            setIsCreateCourseModalOpen(false);
+            await loadCoursesAndSessionsData();
+            onRefreshOverview();
+          }}
+          ownerId={adminUser?.id || ''}
+          coordinatorDefault={`${adminUser?.title || ''}${adminUser?.firstNameTh || ''} ${adminUser?.lastNameTh || ''}`.trim()}
+          teachersList={teachersList}
+          isDarkMode={isDarkMode}
+        />
+      )}
+
+      {isEditCourseModalOpen && editingCourse && (
+        <TeacherCourseEditModal
+          isOpen={isEditCourseModalOpen}
+          onClose={() => {
+            setIsEditCourseModalOpen(false);
+            setEditingCourse(null);
+          }}
+          course={editingCourse}
+          teachersList={teachersList}
+          onSuccess={async (updated) => {
+            showToast(`แก้ไขรายวิชา ${updated.courseCode} เรียบร้อยแล้ว`);
+            setIsEditCourseModalOpen(false);
+            setEditingCourse(null);
+            await loadCoursesAndSessionsData();
+            onRefreshOverview();
+          }}
+          onDeleteSuccess={async () => {
+            showToast('ลบรายวิชาเรียบร้อยแล้ว');
+            setIsEditCourseModalOpen(false);
+            setEditingCourse(null);
+            await loadCoursesAndSessionsData();
+            onRefreshOverview();
+          }}
+          isDarkMode={isDarkMode}
+        />
+      )}
+
+      {/* CREATE / EDIT SESSION MODAL */}
+      {sessionModalOpen && editingSessionData && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className={`border rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl relative overflow-hidden ${
+            isDarkMode ? 'bg-slate-900 border-sky-500/30 text-slate-100' : 'bg-white border-sky-200 text-slate-900'
+          }`}>
+            <button
+              onClick={() => setSessionModalOpen(false)}
+              className={`absolute right-4 top-4 p-2 rounded-full transition ${
+                isDarkMode ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500'
+              }`}
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center space-x-3 text-sky-500">
+              <div className="w-10 h-10 rounded-2xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center shrink-0">
+                <Calendar className="w-5 h-5 stroke-[2.2]" />
+              </div>
+              <div>
+                <h3 className={`text-base font-extrabold ${isDarkMode ? 'text-sky-400' : 'text-sky-700'}`}>
+                  {editingSessionData.id.includes('w') ? `แก้ไข Session สัปดาห์ที่ ${editingSessionData.weekNumber}` : 'สร้าง Session ใหม่'}
+                </h3>
+                <p className={`text-xs mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                  ตั้งค่าสัปดาห์เรียน หัวข้อบทเรียน พิกัดสถานที่เรียน GPS
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveSessionSubmit} className="space-y-4">
+              <div>
+                <label className={`block text-xs font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>เลือกรายวิชา *</label>
+                <select
+                  required
+                  value={editingSessionData.courseId || ''}
+                  onChange={(e) => setEditingSessionData({ ...editingSessionData, courseId: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border text-xs font-bold ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  <option value="">-- เลือกรายวิชา --</option>
+                  {allCourses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.courseCode || c.code} - {c.courseName || c.nameTh}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>สัปดาห์ที่ (Week Number) *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="30"
+                    required
+                    value={editingSessionData.weekNumber || 1}
+                    onChange={(e) => setEditingSessionData({ ...editingSessionData, weekNumber: parseInt(e.target.value, 10) || 1 })}
+                    className={`w-full p-2.5 rounded-xl border text-xs font-bold ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className={`block text-xs font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>สถานะเช็กชื่อ</label>
+                  <select
+                    value={editingSessionData.isActive ? 'active' : 'inactive'}
+                    onChange={(e) => setEditingSessionData({ ...editingSessionData, isActive: e.target.value === 'active' })}
+                    className={`w-full p-2.5 rounded-xl border text-xs font-bold ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    <option value="inactive">🔴 ปิดเช็กชื่อ</option>
+                    <option value="active">🟢 เปิดให้เช็กชื่อ</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>หัวข้อบทเรียน (Topic) *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingSessionData.topic || ''}
+                  onChange={(e) => setEditingSessionData({ ...editingSessionData, topic: e.target.value })}
+                  placeholder="เช่น บทนำวิชาวิศวกรรมซอฟต์แวร์..."
+                  className={`w-full p-2.5 rounded-xl border text-xs font-semibold ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                  }`}
+                />
+              </div>
+
+              <div className={`flex items-center justify-end space-x-3 pt-3 border-t ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button
+                  type="button"
+                  onClick={() => setSessionModalOpen(false)}
+                  className={`px-4 py-2 rounded-xl font-bold text-xs transition border cursor-pointer ${
+                    isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                  }`}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl font-extrabold text-xs text-white bg-sky-600 hover:bg-sky-500 transition shadow-lg shadow-sky-600/30 cursor-pointer"
+                >
+                  บันทึก Session
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

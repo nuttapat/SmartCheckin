@@ -20,6 +20,14 @@ import {
   LeaveType,
   LeaveStatus,
   LeaveRequest,
+  SystemSettings,
+  MasterDepartment,
+  MasterPrefix,
+  MasterCurriculum,
+  MasterUniversity,
+  MasterFaculty,
+  MasterMajor,
+  MasterDegreeLevel,
 } from './src/types.js';
 import { saveToFirestore, getAllFromFirestore, deleteFromFirestore, COLLECTIONS } from './src/lib/firebaseStore.js';
 
@@ -45,6 +53,105 @@ const teacherAttendanceRecords: TeacherAttendanceRecord[] = [];
 const quickEvents: Map<string, QuickEvent> = new Map();
 const inviteLinks: Map<string, InviteLink> = new Map();
 const leaveRequests: LeaveRequest[] = [];
+const masterDepartments: Map<string, MasterDepartment> = new Map();
+const masterCurriculums: Map<string, MasterCurriculum> = new Map();
+const masterPrefixes: Map<string, MasterPrefix> = new Map();
+
+// Default Global System Settings
+let systemSettings: SystemSettings = {
+  id: 'global_config',
+  academicYear: 2569,
+  academicSemester: Semester.FIRST,
+  defaultGpsRadiusMeters: 100,
+  dynamicQrIntervalSeconds: 30,
+  maintenanceMode: false,
+  systemMaintenanceMode: false,
+  maintenanceMessage: 'ระบบกำลังปิดปรับปรุงชั่วคราว ขออภัยในความไม่สะดวก',
+  announcementMessage: '',
+  systemAnnouncement: '',
+  allowGoogleAutoRegister: true,
+  maxDevicesPerUser: 1,
+  singleDeviceLockEnabled: true,
+  allowTeacherSelfRegister: true,
+  allowStudentSelfRegister: true,
+  allowOtherDomainsSelfRegister: false,
+  allowOtherDomains: false,
+  teacherDomains: ['mahidol.ac.th', 'mahidol.edu'],
+  studentDomains: ['student.mahidol.ac.th', 'student.mahidol.edu'],
+  teacherDomain: 'mahidol.ac.th, mahidol.edu',
+  studentDomain: 'student.mahidol.ac.th, student.mahidol.edu',
+  updatedAt: new Date().toISOString(),
+  updatedBy: 'system',
+};
+
+const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || 'nuttapat.anu@gmail.com').trim().toLowerCase();
+
+// Domain check helper function for new user registration
+const checkRegistrationDomain = (emailStr: string): { allowed: boolean; forcedRole: UserRole | null; reason?: string } => {
+  const cleanEmail = emailStr.trim().toLowerCase();
+  if (cleanEmail === SUPER_ADMIN_EMAIL) {
+    return { allowed: true, forcedRole: UserRole.ADMIN };
+  }
+
+  // Parse student domains list
+  let studentDomains: string[] = [];
+  if (Array.isArray(systemSettings.studentDomains) && systemSettings.studentDomains.length > 0) {
+    studentDomains = systemSettings.studentDomains.map((d) => d.trim().toLowerCase().replace(/^@/, '')).filter(Boolean);
+  } else if (systemSettings.studentDomain) {
+    studentDomains = systemSettings.studentDomain.split(/[,;\s]+/).map((d) => d.trim().toLowerCase().replace(/^@/, '')).filter(Boolean);
+  }
+  if (studentDomains.length === 0) {
+    studentDomains = ['student.mahidol.ac.th', 'student.mahidol.edu'];
+  }
+
+  // Parse teacher domains list
+  let teacherDomains: string[] = [];
+  if (Array.isArray(systemSettings.teacherDomains) && systemSettings.teacherDomains.length > 0) {
+    teacherDomains = systemSettings.teacherDomains.map((d) => d.trim().toLowerCase().replace(/^@/, '')).filter(Boolean);
+  } else if (systemSettings.teacherDomain) {
+    teacherDomains = systemSettings.teacherDomain.split(/[,;\s]+/).map((d) => d.trim().toLowerCase().replace(/^@/, '')).filter(Boolean);
+  }
+  if (teacherDomains.length === 0) {
+    teacherDomains = ['mahidol.ac.th', 'mahidol.edu'];
+  }
+
+  const allowOther = systemSettings.allowOtherDomainsSelfRegister ?? systemSettings.allowOtherDomains ?? false;
+
+  const parts = cleanEmail.split('@');
+  const emailDomain = parts.length > 1 ? parts[1] : '';
+
+  // Student domain check
+  const isStudent = studentDomains.some((d) => emailDomain === d || emailDomain.endsWith('.' + d));
+  if (isStudent) {
+    if (systemSettings.allowStudentSelfRegister === false) {
+      return { allowed: false, forcedRole: null, reason: 'ระบบปิดการลงทะเบียนบัญชีนักศึกษาใหม่ชั่วคราว (กรุณาติดต่อผู้ดูแลระบบ)' };
+    }
+    return { allowed: true, forcedRole: UserRole.STUDENT };
+  }
+
+  // Teacher domain check
+  const isTeacher = teacherDomains.some((d) => emailDomain === d || emailDomain.endsWith('.' + d));
+  if (isTeacher) {
+    if (systemSettings.allowTeacherSelfRegister === false) {
+      return { allowed: false, forcedRole: null, reason: 'ระบบปิดการลงทะเบียนบัญชีอาจารย์ใหม่ชั่วคราว (กรุณาติดต่อผู้ดูแลระบบ)' };
+    }
+    return { allowed: true, forcedRole: UserRole.TEACHER };
+  }
+
+  // Other domains toggle check
+  if (allowOther) {
+    return { allowed: true, forcedRole: null };
+  }
+
+  const allowedStudentStr = studentDomains.map((d) => `@${d}`).join(', ');
+  const allowedTeacherStr = teacherDomains.map((d) => `@${d}`).join(', ');
+  const allowedList = [allowedStudentStr, allowedTeacherStr].filter(Boolean).join(' และ ');
+  return {
+    allowed: false,
+    forcedRole: null,
+    reason: `🚫 โดเมนอีเมล @${emailDomain} ไม่ได้รับอนุญาตให้ลงทะเบียนเข้าใช้งานระบบ (ระบบไม่อนุญาตให้ใช้บัญชีทั่วไป เช่น @gmail.com หรือ @hotmail.com อนุญาตเฉพาะโดเมนสถาบัน: ${allowedList || 'ตามที่กำหนด'} เท่านั้น หรือติดต่อผู้ดูแลระบบเพื่อขอเปิดสิทธิ์ยกเว้น)`,
+  };
+};
 
 // Dynamic QR Tokens: sessionId/eventId -> { token, expiresAt, lat, lng }
 interface ActiveQR {
@@ -205,12 +312,13 @@ function bindUserDevice(
 
   // Check limits
   const isStudent = user.role === UserRole.STUDENT;
-  const MAX_STUDENT_DEVICES = 3;
+  const isLockEnabled = systemSettings.singleDeviceLockEnabled ?? true;
+  const maxAllowedDevices = systemSettings.maxDevicesPerUser || 1;
 
-  if (isStudent && user.devices.length >= MAX_STUDENT_DEVICES) {
+  if (isStudent && isLockEnabled && user.devices.length >= maxAllowedDevices) {
     return {
       success: false,
-      error: `[Anti-Proxy Device Limit] บัญชีนักศึกษานี้ผูกอุปกรณ์ครบ 3 เครื่องแล้ว (สิทธิ์สูงสุด 3 เครื่องสำหรับนักศึกษา) อุปกรณ์นี้ยังไม่ได้ผูกในระบบ กรุณาเข้าเมนู "ตั้งค่าบัญชี" เพื่อยกเลิกอุปกรณ์เดิม หรือติดต่ออาจารย์/แอดมินเพื่อรีเซ็ตอุปกรณ์`,
+      error: `[Anti-Proxy Device Limit] บัญชีนักศึกษานี้ผูกอุปกรณ์ครบ ${maxAllowedDevices} เครื่องแล้ว (สิทธิ์สูงสุด ${maxAllowedDevices} เครื่องตามนโยบายระบบ) อุปกรณ์นี้ยังไม่ได้ผูกในระบบ กรุณาเข้าเมนู "ตั้งค่าบัญชี" เพื่อยกเลิกอุปกรณ์เดิม หรือติดต่ออาจารย์/แอดมินเพื่อรีเซ็ตอุปกรณ์`,
       user,
     };
   }
@@ -258,6 +366,91 @@ const sampleCourse: Course = {
 };
 
 courses.set(sampleCourse.id, sampleCourse);
+
+// Seed Academic Structure Sample Courses (Faculty of Medical Technology)
+const bioinfoCourse: Course = {
+  id: 'crs_mtid626',
+  courseCode: 'MTID626',
+  courseName: 'Advanced Bioinformatics',
+  academicYear: 2569,
+  semester: Semester.FIRST,
+  coordinatorName: 'อ.ดร. สมชาย ใจดี',
+  ownerId: teacherUser.id,
+  ownerName: 'อ.ดร. สมชาย ใจดี',
+  facultyCode: 'MT',
+  departmentCode: 'ID',
+  majorCode: 'MTMT',
+  degreeLevel: 'บัณฑิตศึกษา',
+  curriculums: [
+    'วิทยาศาสตร์มหาบัณฑิต (เทคนิคการแพทย์)',
+    'ปรัชญาดุษฎีบัณฑิต (เทคนิคการแพทย์)'
+  ],
+  defaultLat: 13.7988363,
+  defaultLng: 100.322944,
+  allowedGpsRadius: 200,
+  weeks: [
+    { weekNumber: 1, topic: 'Genomics & High-Throughput Sequencing Data', date: '2026-07-10' },
+    { weekNumber: 2, topic: 'Machine Learning in Computational Biology', date: '2026-07-17' },
+    { weekNumber: 3, topic: 'Structural Bioinformatics & Molecular Docking', date: '2026-07-24' },
+  ],
+  createdAt: new Date().toISOString(),
+};
+
+const dataMgmtCourse: Course = {
+  id: 'crs_mtid204',
+  courseCode: 'MTID204',
+  courseName: 'Data Management with Computer',
+  academicYear: 2569,
+  semester: Semester.FIRST,
+  coordinatorName: 'ผศ.ดร. วนิดา เรียนดี',
+  ownerId: coTeacherUser.id,
+  ownerName: 'ผศ.ดร. วนิดา เรียนดี',
+  facultyCode: 'MT',
+  departmentCode: 'ID',
+  majorCode: 'MTMT',
+  degreeLevel: 'ปริญญาตรี',
+  curriculums: [
+    'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)',
+    'วิทยาศาสตร์บัณฑิต (รังสีเทคนิค)'
+  ],
+  defaultLat: 13.7988363,
+  defaultLng: 100.322944,
+  allowedGpsRadius: 200,
+  weeks: [
+    { weekNumber: 1, topic: 'Database Fundamentals in Medical Context', date: '2026-07-12' },
+    { weekNumber: 2, topic: 'Healthcare Information Systems & Security', date: '2026-07-19' },
+  ],
+  createdAt: new Date().toISOString(),
+};
+
+const commTechCourse: Course = {
+  id: 'crs_mtcm303',
+  courseCode: 'MTCM303',
+  courseName: 'Community Medical Technology',
+  academicYear: 2569,
+  semester: Semester.FIRST,
+  coordinatorName: 'อ.ดร. สมชาย ใจดี',
+  ownerId: teacherUser.id,
+  ownerName: 'อ.ดร. สมชาย ใจดี',
+  facultyCode: 'MT',
+  departmentCode: 'CM',
+  majorCode: 'MTMT',
+  degreeLevel: 'ปริญญาตรี',
+  curriculums: [
+    'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)'
+  ],
+  defaultLat: 13.7988363,
+  defaultLng: 100.322944,
+  allowedGpsRadius: 200,
+  weeks: [
+    { weekNumber: 1, topic: 'Principles of Primary Health Care & Field Work', date: '2026-07-15' },
+  ],
+  createdAt: new Date().toISOString(),
+};
+
+courses.set(bioinfoCourse.id, bioinfoCourse);
+courses.set(dataMgmtCourse.id, dataMgmtCourse);
+courses.set(commTechCourse.id, commTechCourse);
 
 // Add course members
 courseMembers.push(
@@ -544,11 +737,33 @@ app.post('/api/auth/register', (req, res) => {
     return res.status(400).json({ error: 'กรุณากรอกอีเมลที่ถูกต้อง (เช่น example@gmail.com)' });
   }
 
-  if (cleanEmail === 'nuttapat.anu@gmail.com') {
-    return res.status(400).json({ error: 'อีเมล nuttapat.anu@gmail.com ต้องลงทะเบียนและเข้าสู่ระบบด้วย Google Account เท่านั้น' });
+  // Maintenance mode check for non-admin registration
+  const isMaintenance = systemSettings.maintenanceMode || systemSettings.systemMaintenanceMode;
+  if (isMaintenance && cleanEmail !== SUPER_ADMIN_EMAIL) {
+    const msg = systemSettings.maintenanceMessage || systemSettings.announcementMessage || 'ระบบกำลังปิดปรับปรุงชั่วคราว ขออภัยในความไม่สะดวก';
+    return res.status(503).json({
+      error: `[โหมดปิดปรับปรุงระบบ] ${msg}`,
+    });
   }
 
-  const userRole = role || UserRole.STUDENT;
+  // Check if system allows self/auto registration
+  if (!systemSettings.allowGoogleAutoRegister && cleanEmail !== SUPER_ADMIN_EMAIL) {
+    return res.status(403).json({
+      error: 'ระบบปิดการลงทะเบียนผู้ใช้งานใหม่ชั่วคราว (ทั้ง Google และ Email/Password) กรุณาติดต่อผู้ดูแลระบบเพื่อขออนุมัติบัญชี',
+    });
+  }
+
+  if (cleanEmail === SUPER_ADMIN_EMAIL) {
+    return res.status(400).json({ error: 'อีเมลผู้ดูแลระบบหลักต้องลงทะเบียนและเข้าสู่ระบบด้วย Google Account เท่านั้น' });
+  }
+
+  // Domain permission check
+  const domainCheck = checkRegistrationDomain(cleanEmail);
+  if (!domainCheck.allowed) {
+    return res.status(403).json({ error: domainCheck.reason });
+  }
+
+  const userRole = domainCheck.forcedRole || role || UserRole.STUDENT;
 
   if (!firstNameTh || !lastNameTh) {
     return res.status(400).json({ error: 'กรุณากรอกชื่อและนามสกุลภาษาไทย' });
@@ -600,6 +815,22 @@ app.post('/api/auth/login', (req, res) => {
 
   if (!user) {
     return res.status(404).json({ error: 'ไม่พบผู้ใช้งานในระบบ กรุณาตรวจสอบอีเมลหรือลงทะเบียนใหม่' });
+  }
+
+  // Maintenance mode check for non-admin users
+  const isMaintenance = systemSettings.maintenanceMode || systemSettings.systemMaintenanceMode;
+  const isUserAdmin = user.role === UserRole.ADMIN || user.id === 'usr_admin_1' || cleanEmail === SUPER_ADMIN_EMAIL;
+  if (isMaintenance && !isUserAdmin) {
+    const msg = systemSettings.maintenanceMessage || systemSettings.announcementMessage || 'ระบบกำลังปิดปรับปรุงชั่วคราว ขออภัยในความไม่สะดวก';
+    return res.status(503).json({
+      error: `[โหมดปิดปรับปรุงระบบ] ${msg}`,
+    });
+  }
+
+  if (user.isSuspended) {
+    return res.status(403).json({
+      error: `บัญชีของคุณถูกระงับการใช้งานโดยผู้ดูแลระบบ ${user.suspendedReason ? `(สาเหตุ: ${user.suspendedReason})` : ''}`,
+    });
   }
 
   if (!password || password.toString().trim() === '') {
@@ -684,92 +915,115 @@ app.put('/api/users/:userId/profile', (req, res) => {
 });
 
 app.post('/api/auth/google', (req, res) => {
-  const { email, name, picture, role, title, universityId, firstNameTh, lastNameTh, firstNameEn, lastNameEn, password } = req.body || {};
-  const userEmail = (email || `user_${Math.floor(1000 + Math.random() * 9000)}@university.ac.th`).toString().trim().toLowerCase();
+  try {
+    const { email, name, picture, role, title, universityId, firstNameTh, lastNameTh, firstNameEn, lastNameEn, password } = req.body || {};
+    const userEmail = (email || `user_${Math.floor(1000 + Math.random() * 9000)}@university.ac.th`).toString().trim().toLowerCase();
 
-  let user = Array.from(users.values()).find((u) => u.email && u.email.toLowerCase() === userEmail);
+    let user = Array.from(users.values()).find((u) => u.email && u.email.toLowerCase() === userEmail);
 
-  // Auto-detect domain rules for Mahidol & Admin
-  const getForcedRole = (emailStr: string): UserRole | null => {
-    if (emailStr === 'nuttapat.anu@gmail.com') {
-      return UserRole.ADMIN;
-    }
-    if (emailStr.endsWith('@student.mahidol.ac.th')) {
-      return UserRole.STUDENT;
-    }
-    if (emailStr.endsWith('@mahidol.ac.th')) {
-      return UserRole.TEACHER;
-    }
-    return null;
-  };
-
-  const forcedRole = getForcedRole(userEmail);
-
-  if (!user) {
-    // If user does not exist in system yet and no role is explicitly passed
-    if (!role) {
-      return res.json({
-        requiresOnboarding: true,
-        forcedRole: forcedRole,
-        email: userEmail,
-        name: name || userEmail.split('@')[0],
-        picture: picture || 'https://lh3.googleusercontent.com/a/default-user',
-        message: forcedRole === UserRole.STUDENT
-          ? 'พบอีเมลนักศึกษา (@student.mahidol.ac.th) กรุณากรอกข้อมูลสำหรับนักศึกษาเพื่อเริ่มต้นใช้งาน'
-          : forcedRole === UserRole.TEACHER
-          ? 'พบอีเมลอาจารย์ (@mahidol.ac.th) กรุณากรอกข้อมูลสำหรับอาจารย์เพื่อเริ่มต้นใช้งาน'
-          : forcedRole === UserRole.ADMIN
-          ? 'พบอีเมลผู้ดูแลระบบ (nuttapat.anu@gmail.com) กรุณากรอกข้อมูลผู้ดูแลระบบเพื่อเริ่มต้นใช้งาน'
-          : 'ผู้ใช้งานใหม่ กรุณาตั้งค่าประเภทบัญชี กำหนดรหัสผ่าน และระบุข้อมูลประจำตัวเพื่อเริ่มต้นใช้งาน',
+    // Maintenance mode check for non-admin users
+    const isMaintenance = systemSettings.maintenanceMode || systemSettings.systemMaintenanceMode;
+    const isUserAdmin = (user && (user.role === UserRole.ADMIN || user.id === 'usr_admin_1')) || userEmail === SUPER_ADMIN_EMAIL;
+    if (isMaintenance && !isUserAdmin) {
+      const msg = systemSettings.maintenanceMessage || systemSettings.announcementMessage || 'ระบบกำลังปิดปรับปรุงชั่วคราว ขออภัยในความไม่สะดวก';
+      return res.status(503).json({
+        error: `[โหมดปิดปรับปรุงระบบ] ${msg}`,
       });
     }
 
-    // Determine effective user role: forcedRole takes precedence over requested role
-    const effectiveRole = forcedRole || (role === UserRole.TEACHER ? UserRole.TEACHER : role === UserRole.ADMIN ? UserRole.ADMIN : UserRole.STUDENT);
+    if (!user) {
+      // Check if system allows auto registration via Google
+      if (!systemSettings.allowGoogleAutoRegister && userEmail !== SUPER_ADMIN_EMAIL) {
+        return res.status(403).json({
+          error: 'ระบบปิดการสมัครสมาชิกใหม่ชั่วคราว กรุณาติดต่อผู้ดูแลระบบเพื่อขออนุมัติหรือสร้างบัญชี',
+        });
+      }
 
-    // Validate Student ID if registering as Student
-    if (effectiveRole === UserRole.STUDENT && (!universityId || !universityId.toString().trim())) {
-      return res.status(400).json({ error: 'กรุณาระบุรหัสประจำตัวนักศึกษาที่ถูกต้อง' });
+      // Domain permission check
+      const domainCheck = checkRegistrationDomain(userEmail);
+      if (!domainCheck.allowed) {
+        return res.status(403).json({ error: domainCheck.reason });
+      }
+
+      const forcedRole = domainCheck.forcedRole;
+
+      // If user does not exist in system yet and no role is explicitly passed
+      if (!role) {
+        const sDomain = systemSettings.studentDomain || 'student.mahidol.ac.th';
+        const tDomain = systemSettings.teacherDomain || 'mahidol.ac.th';
+
+        return res.json({
+          requiresOnboarding: true,
+          forcedRole: forcedRole,
+          email: userEmail,
+          name: name || userEmail.split('@')[0],
+          picture: picture || 'https://lh3.googleusercontent.com/a/default-user',
+          message: forcedRole === UserRole.STUDENT
+            ? `พบอีเมลนักศึกษา (@${sDomain}) กรุณากรอกข้อมูลสำหรับนักศึกษาเพื่อเริ่มต้นใช้งาน`
+            : forcedRole === UserRole.TEACHER
+            ? `พบอีเมลอาจารย์ (@${tDomain}) กรุณากรอกข้อมูลสำหรับอาจารย์เพื่อเริ่มต้นใช้งาน`
+            : forcedRole === UserRole.ADMIN
+            ? 'พบอีเมลผู้ดูแลระบบ กรุณากรอกข้อมูลผู้ดูแลระบบเพื่อเริ่มต้นใช้งาน'
+            : 'ผู้ใช้งานใหม่ กรุณาตั้งค่าประเภทบัญชี กำหนดรหัสผ่าน และระบุข้อมูลประจำตัวเพื่อเริ่มต้นใช้งาน',
+        });
+      }
+
+      // Determine effective user role: forcedRole takes precedence over requested role
+      const effectiveRole = forcedRole || (role === UserRole.TEACHER ? UserRole.TEACHER : role === UserRole.ADMIN ? UserRole.ADMIN : UserRole.STUDENT);
+
+      // Validate Student ID if registering as Student
+      if (effectiveRole === UserRole.STUDENT && (!universityId || !(universityId + '').trim())) {
+        return res.status(400).json({ error: 'กรุณาระบุรหัสประจำตัวนักศึกษาที่ถูกต้อง' });
+      }
+
+      const parts = (name || 'Google User').toString().trim().split(' ');
+      const fTh = firstNameTh && firstNameTh.toString().trim() ? firstNameTh.toString().trim() : (parts[0] || 'ผู้ใช้งาน');
+      const lTh = lastNameTh && lastNameTh.toString().trim() ? lastNameTh.toString().trim() : (parts.slice(1).join(' ') || 'กูเกิล');
+      const fEn = firstNameEn && firstNameEn.toString().trim() ? firstNameEn.toString().trim() : (parts[0] || 'Google');
+      const lEn = lastNameEn && lastNameEn.toString().trim() ? lastNameEn.toString().trim() : (parts.slice(1).join(' ') || 'User');
+
+      user = {
+        id: `usr_g_${Date.now()}`,
+        role: effectiveRole,
+        title: title ? title.toString().trim() : (effectiveRole === UserRole.TEACHER ? 'อ.ดร.' : effectiveRole === UserRole.ADMIN ? 'แอดมิน' : 'นาย'),
+        firstNameTh: fTh,
+        lastNameTh: lTh,
+        firstNameEn: fEn,
+        lastNameEn: lEn,
+        universityId: effectiveRole === UserRole.STUDENT ? (universityId || '').toString().trim() : '',
+        email: userEmail,
+        password: password && password.toString().trim() ? password.toString().trim() : '123456',
+        avatarUrl: picture || 'https://lh3.googleusercontent.com/a/default-user',
+        authProvider: 'google',
+        deviceId: `dev_g_${Date.now()}`,
+        createdAt: new Date().toISOString(),
+      };
+      users.set(user.id, user);
+      saveToFirestore(COLLECTIONS.USERS, user);
+    } else {
+      if (user.isSuspended) {
+        return res.status(403).json({
+          error: `บัญชีของคุณถูกระงับการใช้งานโดยผู้ดูแลระบบ ${user.suspendedReason ? `(สาเหตุ: ${user.suspendedReason})` : ''}`,
+        });
+      }
+
+      // Existing user signing in with Google - link account & update avatar / password if provided
+      if (picture) user.avatarUrl = picture;
+      if (!user.authProvider) user.authProvider = 'google';
+      if (password && password.toString().trim()) {
+        user.password = password.toString().trim();
+      }
+      if (userEmail === SUPER_ADMIN_EMAIL) {
+        user.role = UserRole.ADMIN;
+      }
+      saveToFirestore(COLLECTIONS.USERS, user);
     }
 
-    const parts = (name || 'Google User').toString().trim().split(' ');
-    const fTh = firstNameTh && firstNameTh.toString().trim() ? firstNameTh.toString().trim() : (parts[0] || 'ผู้ใช้งาน');
-    const lTh = lastNameTh && lastNameTh.toString().trim() ? lastNameTh.toString().trim() : (parts.slice(1).join(' ') || 'กูเกิล');
-    const fEn = firstNameEn && firstNameEn.toString().trim() ? firstNameEn.toString().trim() : (parts[0] || 'Google');
-    const lEn = lastNameEn && lastNameEn.toString().trim() ? lastNameEn.toString().trim() : (parts.slice(1).join(' ') || 'User');
-
-    user = {
-      id: `usr_g_${Date.now()}`,
-      role: effectiveRole,
-      title: title ? title.toString().trim() : (effectiveRole === UserRole.TEACHER ? 'อ.ดร.' : effectiveRole === UserRole.ADMIN ? 'แอดมิน' : 'นาย'),
-      firstNameTh: fTh,
-      lastNameTh: lTh,
-      firstNameEn: fEn,
-      lastNameEn: lEn,
-      universityId: effectiveRole === UserRole.STUDENT ? universityId.toString().trim() : '',
-      email: userEmail,
-      password: password && password.toString().trim() ? password.toString().trim() : '123456',
-      avatarUrl: picture || 'https://lh3.googleusercontent.com/a/default-user',
-      authProvider: 'google',
-      deviceId: `dev_g_${Date.now()}`,
-      createdAt: new Date().toISOString(),
-    };
-    users.set(user.id, user);
-    saveToFirestore(COLLECTIONS.USERS, user);
-  } else {
-    // Existing user signing in with Google - link account & update avatar / password if provided
-    if (picture) user.avatarUrl = picture;
-    if (!user.authProvider) user.authProvider = 'google';
-    if (password && password.toString().trim()) {
-      user.password = password.toString().trim();
-    }
-    if (userEmail === 'nuttapat.anu@gmail.com') {
-      user.role = UserRole.ADMIN;
-    }
-    saveToFirestore(COLLECTIONS.USERS, user);
+    res.json({ message: 'เข้าสู่ระบบด้วย Google สำเร็จ (Google Auth successful)', user });
+  } catch (err: any) {
+    console.error('Error in /api/auth/google:', err);
+    res.status(500).json({ error: 'เกิดข้อผิดพลาดในการประมวลผลระบบลงทะเบียน/เข้าสู่ระบบด้วย Google กรุณาลองใหม่อีกครั้ง' });
   }
-
-  res.json({ message: 'เข้าสู่ระบบด้วย Google สำเร็จ (Google Auth successful)', user });
 });
 
 app.get('/api/users/me', (req, res) => {
@@ -812,7 +1066,7 @@ app.get('/api/courses', (req, res) => {
 });
 
 app.post('/api/courses', (req, res) => {
-  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, ownerId, defaultLat, defaultLng, allowedGpsRadius } = req.body;
+  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, ownerId, defaultLat, defaultLng, allowedGpsRadius, curriculums, facultyCode, departmentCode, majorCode, degreeLevel } = req.body;
 
   if (!courseCode || !courseName) {
     return res.status(400).json({ error: 'Course code and name are required.' });
@@ -840,6 +1094,11 @@ app.post('/api/courses', (req, res) => {
     defaultLng: lng,
     allowedGpsRadius: radius,
     weeks: weeks || [],
+    curriculums: Array.isArray(curriculums) ? curriculums : (curriculums ? [curriculums] : []),
+    facultyCode: facultyCode || 'MT',
+    departmentCode: departmentCode || 'ID',
+    majorCode: majorCode || 'MTMT',
+    degreeLevel: degreeLevel || 'ปริญญาตรี',
     createdAt: new Date().toISOString(),
   };
 
@@ -921,7 +1180,7 @@ app.put('/api/courses/:id', (req, res) => {
     }
   }
 
-  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, defaultLat, defaultLng, allowedGpsRadius } = req.body;
+  const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, defaultLat, defaultLng, allowedGpsRadius, curriculums, facultyCode, departmentCode, majorCode, degreeLevel } = req.body;
 
   if (courseCode) course.courseCode = courseCode;
   if (courseName) course.courseName = courseName;
@@ -931,6 +1190,11 @@ app.put('/api/courses/:id', (req, res) => {
   if (defaultLat !== undefined) course.defaultLat = parseFloat(defaultLat);
   if (defaultLng !== undefined) course.defaultLng = parseFloat(defaultLng);
   if (allowedGpsRadius !== undefined) course.allowedGpsRadius = parseFloat(allowedGpsRadius);
+  if (curriculums !== undefined) course.curriculums = Array.isArray(curriculums) ? curriculums : [curriculums];
+  if (facultyCode) course.facultyCode = facultyCode;
+  if (departmentCode) course.departmentCode = departmentCode;
+  if (majorCode) course.majorCode = majorCode;
+  if (degreeLevel) course.degreeLevel = degreeLevel;
 
   const courseLat = course.defaultLat || 13.7988363;
   const courseLng = course.defaultLng || 100.322944;
@@ -2058,14 +2322,14 @@ app.post('/api/leave-requests', (req, res) => {
     courseId: course.id,
     courseCode: course.courseCode,
     courseName: course.courseName,
-    weekNumber: weekNumber ? Number(weekNumber) : undefined,
+    ...(weekNumber ? { weekNumber: Number(weekNumber) } : {}),
     leaveType: leaveType as LeaveType,
     leaveDate,
-    endDate: isMultiDay ? endDate : undefined,
+    ...(isMultiDay && endDate ? { endDate } : {}),
     isMultiDay: Boolean(isMultiDay),
     reason,
-    attachmentUrl,
-    attachmentName,
+    ...(attachmentUrl ? { attachmentUrl } : {}),
+    ...(attachmentName ? { attachmentName } : {}),
     status: LeaveStatus.PENDING,
     createdAt: new Date().toISOString(),
   };
@@ -2748,6 +3012,217 @@ app.delete('/api/admin/database/document/:collectionName/:docId', async (req, re
   }
 });
 
+// --- SYSTEM SETTINGS & MASTER DATA ENDPOINTS ---
+
+// Get public/global system settings
+app.get('/api/system/settings', (req, res) => {
+  try {
+    res.json(systemSettings);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error fetching system settings' });
+  }
+});
+
+// Update global system settings (Admin)
+app.put('/api/admin/settings', async (req, res) => {
+  try {
+    const body = req.body || {};
+
+    // Normalize Maintenance Mode & Messages
+    const isMaintenance = body.maintenanceMode ?? body.systemMaintenanceMode ?? systemSettings.maintenanceMode ?? false;
+    const msgAnnouncement = body.announcementMessage ?? body.systemAnnouncement ?? systemSettings.announcementMessage ?? '';
+    const msgMaintenance = body.maintenanceMessage || msgAnnouncement || 'ระบบกำลังปิดปรับปรุงชั่วคราว ขออภัยในความไม่สะดวก';
+
+    // Normalize Domain Settings
+    let tDomains: string[] = body.teacherDomains;
+    if (!Array.isArray(tDomains) && body.teacherDomain) {
+      tDomains = body.teacherDomain.split(/[,;\s]+/).filter(Boolean);
+    }
+    if (!Array.isArray(tDomains)) {
+      tDomains = systemSettings.teacherDomains || ['mahidol.ac.th', 'mahidol.edu'];
+    }
+
+    let sDomains: string[] = body.studentDomains;
+    if (!Array.isArray(sDomains) && body.studentDomain) {
+      sDomains = body.studentDomain.split(/[,;\s]+/).filter(Boolean);
+    }
+    if (!Array.isArray(sDomains)) {
+      sDomains = systemSettings.studentDomains || ['student.mahidol.ac.th', 'student.mahidol.edu'];
+    }
+
+    const allowOther = body.allowOtherDomainsSelfRegister ?? body.allowOtherDomains ?? systemSettings.allowOtherDomainsSelfRegister ?? false;
+
+    const updated: SystemSettings = {
+      ...systemSettings,
+      ...body,
+      id: 'global_config',
+      maintenanceMode: Boolean(isMaintenance),
+      systemMaintenanceMode: Boolean(isMaintenance),
+      maintenanceMessage: msgMaintenance,
+      announcementMessage: msgAnnouncement,
+      systemAnnouncement: msgAnnouncement,
+      allowTeacherSelfRegister: body.allowTeacherSelfRegister ?? systemSettings.allowTeacherSelfRegister ?? true,
+      allowStudentSelfRegister: body.allowStudentSelfRegister ?? systemSettings.allowStudentSelfRegister ?? true,
+      allowOtherDomainsSelfRegister: Boolean(allowOther),
+      allowOtherDomains: Boolean(allowOther),
+      teacherDomains: tDomains,
+      teacherDomain: tDomains.join(', '),
+      studentDomains: sDomains,
+      studentDomain: sDomains.join(', '),
+      updatedAt: new Date().toISOString(),
+    };
+
+    systemSettings = updated;
+    await saveToFirestore(COLLECTIONS.SYSTEM_SETTINGS, updated);
+    res.json({ message: 'บันทึกการตั้งค่าระบบเรียบร้อยแล้ว', settings: systemSettings });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error updating system settings' });
+  }
+});
+
+// Get Master Departments
+app.get('/api/admin/master/departments', (req, res) => {
+  try {
+    const deps = Array.from(masterDepartments.values());
+    res.json(deps);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error fetching master departments' });
+  }
+});
+
+// Save (Create/Update) Master Department
+app.post('/api/admin/master/departments', async (req, res) => {
+  try {
+    const { id, code, nameTh, nameEn, facultyTh, facultyCode, majorCode, majorNameTh } = req.body;
+    if (!code || !nameTh) {
+      return res.status(400).json({ error: 'กรุณากรอกรหัสภาควิชาและชื่อภาควิชา (ภาษาไทย)' });
+    }
+    const depId = id || `dep_${Date.now()}`;
+    const newDep: MasterDepartment = {
+      id: depId,
+      code: code.trim().toUpperCase(),
+      nameTh: nameTh.trim(),
+      nameEn: (nameEn || '').trim(),
+      facultyTh: (facultyTh || 'คณะเทคนิคการแพทย์').trim(),
+      facultyCode: (facultyCode || 'MT').trim(),
+      majorCode: (majorCode || 'MTMT').trim(),
+      majorNameTh: (majorNameTh || 'สาขาวิชาเทคนิคการแพทย์').trim(),
+      createdAt: req.body.createdAt || new Date().toISOString(),
+    };
+    masterDepartments.set(depId, newDep);
+    await saveToFirestore(COLLECTIONS.MASTER_DEPARTMENTS, newDep);
+    res.json({ message: 'บันทึกภาควิชาเรียบร้อยแล้ว', department: newDep });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error saving department' });
+  }
+});
+
+// Delete Master Department
+app.delete('/api/admin/master/departments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    masterDepartments.delete(id);
+    await deleteFromFirestore(COLLECTIONS.MASTER_DEPARTMENTS, id);
+    res.json({ message: 'ลบภาควิชาเรียบร้อยแล้ว', id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error deleting department' });
+  }
+});
+
+// Get Master Curriculums
+app.get('/api/admin/master/curriculums', (req, res) => {
+  try {
+    const currs = Array.from(masterCurriculums.values());
+    res.json(currs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error fetching master curriculums' });
+  }
+});
+
+// Save (Create/Update) Master Curriculum
+app.post('/api/admin/master/curriculums', async (req, res) => {
+  try {
+    const { id, code, nameTh, titleTh, nameEn, facultyCode, majorCode, degreeLevel } = req.body;
+    const currTitle = (nameTh || titleTh || '').trim();
+    if (!currTitle) {
+      return res.status(400).json({ error: 'กรุณากรอกชื่อหลักสูตร (ภาษาไทย)' });
+    }
+    const currId = id || `curr_${Date.now()}`;
+    const newCurr: MasterCurriculum = {
+      id: currId,
+      code: (code || `CURR_${Date.now()}`).trim().toUpperCase(),
+      nameTh: currTitle,
+      titleTh: currTitle,
+      nameEn: (nameEn || '').trim(),
+      facultyCode: (facultyCode || 'MT').trim(),
+      majorCode: (majorCode || 'MTMT').trim(),
+      degreeLevel: (degreeLevel || 'ปริญญาตรี').trim(),
+      createdAt: req.body.createdAt || new Date().toISOString(),
+    };
+    masterCurriculums.set(currId, newCurr);
+    await saveToFirestore(COLLECTIONS.MASTER_CURRICULUMS, newCurr);
+    res.json({ message: 'บันทึกหลักสูตรเรียบร้อยแล้ว', curriculum: newCurr });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error saving curriculum' });
+  }
+});
+
+// Delete Master Curriculum
+app.delete('/api/admin/master/curriculums/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    masterCurriculums.delete(id);
+    await deleteFromFirestore(COLLECTIONS.MASTER_CURRICULUMS, id);
+    res.json({ message: 'ลบหลักสูตรเรียบร้อยแล้ว', id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error deleting curriculum' });
+  }
+});
+
+// Get Master Prefixes
+app.get('/api/admin/master/prefixes', (req, res) => {
+  try {
+    const prefixes = Array.from(masterPrefixes.values());
+    res.json(prefixes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error fetching master prefixes' });
+  }
+});
+
+// Save Master Prefix
+app.post('/api/admin/master/prefixes', async (req, res) => {
+  try {
+    const { id, titleTh, titleEn, category } = req.body;
+    if (!titleTh) {
+      return res.status(400).json({ error: 'กรุณากรอกคำนำหน้านาม (ภาษาไทย)' });
+    }
+    const prefixId = id || `prefix_${Date.now()}`;
+    const newPrefix: MasterPrefix = {
+      id: prefixId,
+      titleTh: titleTh.trim(),
+      titleEn: (titleEn || '').trim(),
+      category: category || 'BOTH',
+    };
+    masterPrefixes.set(prefixId, newPrefix);
+    await saveToFirestore(COLLECTIONS.MASTER_PREFIXES, newPrefix);
+    res.json({ message: 'บันทึกคำนำหน้านามเรียบร้อยแล้ว', prefix: newPrefix });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error saving prefix' });
+  }
+});
+
+// Delete Master Prefix
+app.delete('/api/admin/master/prefixes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    masterPrefixes.delete(id);
+    await deleteFromFirestore(COLLECTIONS.MASTER_PREFIXES, id);
+    res.json({ message: 'ลบคำนำหน้านามเรียบร้อยแล้ว', id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error deleting prefix' });
+  }
+});
+
 // Helper to clean orphaned data
 async function cleanOrphanedData() {
   const deletedSummary = {
@@ -2883,6 +3358,202 @@ app.put('/api/admin/users/:userId/reset-device', async (req, res) => {
   res.json({ message: `ปลดล็อกอุปกรณ์ทั้งหมดของผู้ใช้ (${targetUser.firstNameTh}) เรียบร้อยแล้ว`, user: targetUser });
 });
 
+// Admin Reset Password for a user
+app.put('/api/admin/users/:userId/reset-password', async (req, res) => {
+  const { userId } = req.params;
+  const { newPassword } = req.body || {};
+
+  if (!newPassword || newPassword.toString().trim() === '') {
+    return res.status(400).json({ error: 'กรุณากำหนดรหัสผ่านใหม่' });
+  }
+
+  const targetUser = users.get(userId);
+  if (!targetUser) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  targetUser.password = newPassword.toString().trim();
+  users.set(userId, targetUser);
+  await saveToFirestore(COLLECTIONS.USERS, targetUser);
+
+  res.json({ message: `รีเซ็ตรหัสผ่านของผู้ใช้ (${targetUser.firstNameTh}) สำเร็จแล้ว`, user: targetUser });
+});
+
+// Admin Update User Profile Details
+app.put('/api/admin/users/:userId/details', async (req, res) => {
+  const { userId } = req.params;
+  const targetUser = users.get(userId);
+  if (!targetUser) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  const {
+    title,
+    firstNameTh,
+    lastNameTh,
+    firstNameEn,
+    lastNameEn,
+    universityId,
+    email,
+    role,
+    department,
+    isSuspended,
+    suspendedReason,
+  } = req.body || {};
+
+  if (role && [UserRole.STUDENT, UserRole.TEACHER, UserRole.ADMIN].includes(role)) {
+    targetUser.role = role;
+  }
+  if (title !== undefined) targetUser.title = title;
+  if (firstNameTh !== undefined) targetUser.firstNameTh = firstNameTh;
+  if (lastNameTh !== undefined) targetUser.lastNameTh = lastNameTh;
+  if (firstNameEn !== undefined) targetUser.firstNameEn = firstNameEn;
+  if (lastNameEn !== undefined) targetUser.lastNameEn = lastNameEn;
+  if (universityId !== undefined) targetUser.universityId = universityId;
+  if (email !== undefined) targetUser.email = email;
+  if (department !== undefined) targetUser.department = department;
+  if (isSuspended !== undefined) targetUser.isSuspended = isSuspended;
+  if (suspendedReason !== undefined) targetUser.suspendedReason = suspendedReason;
+
+  users.set(userId, targetUser);
+  await saveToFirestore(COLLECTIONS.USERS, targetUser);
+
+  res.json({ message: `อัปเดตข้อมูลผู้ใช้งาน (${targetUser.firstNameTh}) เรียบร้อยแล้ว`, user: targetUser });
+});
+
+// Admin Toggle User Status (Suspend / Activate)
+app.put('/api/admin/users/:userId/status', async (req, res) => {
+  const { userId } = req.params;
+  const { isSuspended, suspendedReason } = req.body || {};
+
+  const targetUser = users.get(userId);
+  if (!targetUser) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  targetUser.isSuspended = !!isSuspended;
+  targetUser.suspendedReason = suspendedReason || '';
+  users.set(userId, targetUser);
+  await saveToFirestore(COLLECTIONS.USERS, targetUser);
+
+  res.json({
+    message: isSuspended
+      ? `ระงับการใช้งานบัญชี (${targetUser.firstNameTh}) เรียบร้อยแล้ว`
+      : `ปลดการระงับบัญชี (${targetUser.firstNameTh}) เรียบร้อยแล้ว`,
+    user: targetUser,
+  });
+});
+
+// Admin Delete Single User
+app.delete('/api/admin/users/:userId', async (req, res) => {
+  const { userId } = req.params;
+  const targetUser = users.get(userId);
+  if (!targetUser) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  if (targetUser.email && targetUser.email.trim().toLowerCase() === SUPER_ADMIN_EMAIL) {
+    return res.status(400).json({ error: 'ไม่สามารถลบบัญชี Super Admin ได้' });
+  }
+
+  users.delete(userId);
+  await deleteFromFirestore(COLLECTIONS.USERS, userId);
+
+  res.json({ message: `ลบบัญชีผู้ใช้งาน (${targetUser.firstNameTh}) ออกจากระบบสำเร็จ` });
+});
+
+// Admin Bulk Role Change
+app.post('/api/admin/users/bulk-role', async (req, res) => {
+  const { userIds, role } = req.body || {};
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return res.status(400).json({ error: 'กรุณาระบุรายชื่อผู้ใช้ที่ต้องการเปลี่ยนสิทธิ์' });
+  }
+  if (![UserRole.STUDENT, UserRole.TEACHER, UserRole.ADMIN].includes(role)) {
+    return res.status(400).json({ error: 'สิทธิ์ไม่ถูกต้อง' });
+  }
+
+  let updatedCount = 0;
+  for (const id of userIds) {
+    const u = users.get(id);
+    if (u && u.email && u.email.trim().toLowerCase() !== SUPER_ADMIN_EMAIL) {
+      u.role = role;
+      users.set(id, u);
+      await saveToFirestore(COLLECTIONS.USERS, u);
+      updatedCount++;
+    }
+  }
+
+  res.json({ message: `เปลี่ยนบทบาทผู้ใช้จำนวน ${updatedCount} รายการเป็น ${role} สำเร็จ` });
+});
+
+// Admin Bulk Status Change (Suspend / Activate)
+app.post('/api/admin/users/bulk-status', async (req, res) => {
+  const { userIds, isSuspended, suspendedReason } = req.body || {};
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return res.status(400).json({ error: 'กรุณาระบุรายชื่อผู้ใช้ที่ต้องการเปลี่ยนสถานะ' });
+  }
+
+  let updatedCount = 0;
+  for (const id of userIds) {
+    const u = users.get(id);
+    if (u && u.email && u.email.trim().toLowerCase() !== SUPER_ADMIN_EMAIL) {
+      u.isSuspended = !!isSuspended;
+      u.suspendedReason = suspendedReason || '';
+      users.set(id, u);
+      await saveToFirestore(COLLECTIONS.USERS, u);
+      updatedCount++;
+    }
+  }
+
+  res.json({
+    message: isSuspended
+      ? `ระงับการใช้งานผู้ใช้จำนวน ${updatedCount} รายการเรียบร้อยแล้ว`
+      : `ยกเลิกการระงับผู้ใช้จำนวน ${updatedCount} รายการเรียบร้อยแล้ว`,
+  });
+});
+
+// Admin Bulk Delete Users
+app.post('/api/admin/users/bulk-delete', async (req, res) => {
+  const { userIds } = req.body || {};
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return res.status(400).json({ error: 'กรุณาระบุรายชื่อผู้ใช้ที่ต้องการลบ' });
+  }
+
+  let deletedCount = 0;
+  for (const id of userIds) {
+    const u = users.get(id);
+    if (u && u.email && u.email.trim().toLowerCase() !== SUPER_ADMIN_EMAIL) {
+      users.delete(id);
+      await deleteFromFirestore(COLLECTIONS.USERS, id);
+      deletedCount++;
+    }
+  }
+
+  res.json({ message: `ลบบัญชีผู้ใช้จำนวน ${deletedCount} รายการสำเร็จ` });
+});
+
+// Admin Bulk Unbind Devices
+app.post('/api/admin/users/bulk-reset-devices', async (req, res) => {
+  const { userIds } = req.body || {};
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return res.status(400).json({ error: 'กรุณาระบุรายชื่อผู้ใช้ที่ต้องการปลดล็อกอุปกรณ์' });
+  }
+
+  let resetCount = 0;
+  for (const id of userIds) {
+    const u = users.get(id);
+    if (u) {
+      u.deviceId = undefined;
+      u.devices = [];
+      users.set(id, u);
+      await saveToFirestore(COLLECTIONS.USERS, u);
+      resetCount++;
+    }
+  }
+
+  res.json({ message: `ปลดล็อกอุปกรณ์ของผู้ใช้จำนวน ${resetCount} รายการเรียบร้อยแล้ว` });
+});
+
 // -------------------- DEVICE BINDING MANAGEMENT API --------------------
 // Get bound devices for a user
 app.get('/api/users/:userId/devices', (req, res) => {
@@ -2908,9 +3579,12 @@ app.get('/api/users/:userId/devices', (req, res) => {
   }
 
   const isStudent = user.role === UserRole.STUDENT;
+  const isLockEnabled = systemSettings.singleDeviceLockEnabled ?? true;
+  const maxAllowedDevices = systemSettings.maxDevicesPerUser || 1;
+
   res.json({
     devices: user.devices,
-    maxDevices: isStudent ? 3 : null, // null means unlimited
+    maxDevices: isStudent && isLockEnabled ? maxAllowedDevices : null,
     role: user.role,
     userId: user.id,
   });
@@ -3107,21 +3781,8 @@ async function syncFromFirestore() {
     const fsCourses = await getAllFromFirestore<Course>(COLLECTIONS.COURSES);
     if (fsCourses && fsCourses.length > 0) {
       for (const c of fsCourses) {
-        if (c.courseCode === 'MTID204' || c.id === 'crs_mtid204') {
-          console.log(`[Firestore Migration] Migrating course ${c.id} (${c.courseCode}) -> TEST101`);
-          await deleteFromFirestore(COLLECTIONS.COURSES, c.id);
-          const updatedCourse: Course = {
-            ...c,
-            id: 'crs_test101',
-            courseCode: 'TEST101',
-          };
-          courses.set(updatedCourse.id, updatedCourse);
-          await saveToFirestore(COLLECTIONS.COURSES, updatedCourse);
-        } else {
-          courses.set(c.id, c);
-        }
+        courses.set(c.id, c);
       }
-      courses.delete('crs_mtid204');
     } else {
       for (const c of courses.values()) {
         await saveToFirestore(COLLECTIONS.COURSES, c);
@@ -3186,6 +3847,180 @@ async function syncFromFirestore() {
     } else {
       for (const tar of teacherAttendanceRecords) {
         await saveToFirestore(COLLECTIONS.TEACHER_ATTENDANCE, tar);
+      }
+    }
+
+    // Sync System Settings
+    const fsSettings = await getAllFromFirestore<SystemSettings>(COLLECTIONS.SYSTEM_SETTINGS);
+    if (fsSettings && fsSettings.length > 0) {
+      const config = fsSettings.find((s) => s.id === 'global_config') || fsSettings[0];
+      if (config) {
+        systemSettings = { ...systemSettings, ...config };
+      }
+    } else {
+      await saveToFirestore(COLLECTIONS.SYSTEM_SETTINGS, { id: 'global_config', ...systemSettings });
+    }
+
+    // Sync Master Departments
+    const fsDeps = await getAllFromFirestore<MasterDepartment>(COLLECTIONS.MASTER_DEPARTMENTS);
+    if (fsDeps && fsDeps.length > 0) {
+      masterDepartments.clear();
+      for (const d of fsDeps) {
+        masterDepartments.set(d.id, d);
+      }
+    } else {
+      // Seed default master departments (Faculty of Medical Technology)
+      const defaultDeps: MasterDepartment[] = [
+        {
+          id: 'dep_ch',
+          code: 'CH',
+          nameTh: 'ภาควิชาเคมีคลินิก',
+          nameEn: 'Department of Clinical Chemistry',
+          facultyTh: 'คณะเทคนิคการแพทย์',
+          facultyCode: 'MT',
+          majorCode: 'MTMT',
+          majorNameTh: 'สาขาวิชาเทคนิคการแพทย์',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'dep_mi',
+          code: 'MI',
+          nameTh: 'ภาควิชาจุลชีววิทยาคลินิกและเทคโนโลยีประยุกต์',
+          nameEn: 'Department of Clinical Microbiology and Applied Technology',
+          facultyTh: 'คณะเทคนิคการแพทย์',
+          facultyCode: 'MT',
+          majorCode: 'MTMT',
+          majorNameTh: 'สาขาวิชาเทคนิคการแพทย์',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'dep_ms',
+          code: 'MS',
+          nameTh: 'ภาควิชาจุลทรรศนศาสตร์คลินิก',
+          nameEn: 'Department of Clinical Microscopy',
+          facultyTh: 'คณะเทคนิคการแพทย์',
+          facultyCode: 'MT',
+          majorCode: 'MTMT',
+          majorNameTh: 'สาขาวิชาเทคนิคการแพทย์',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'dep_cm',
+          code: 'CM',
+          nameTh: 'ภาควิชาเทคนิคการแพทย์ชุมชน',
+          nameEn: 'Department of Community Medical Technology',
+          facultyTh: 'คณะเทคนิคการแพทย์',
+          facultyCode: 'MT',
+          majorCode: 'MTMT',
+          majorNameTh: 'สาขาวิชาเทคนิคการแพทย์',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'dep_rt',
+          code: 'RT',
+          nameTh: 'ภาควิชารังสีเทคนิค',
+          nameEn: 'Department of Radiological Technology',
+          facultyTh: 'คณะเทคนิคการแพทย์',
+          facultyCode: 'MT',
+          majorCode: 'MTRT',
+          majorNameTh: 'สาขาวิชารังสีเทคนิค',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'dep_id',
+          code: 'ID',
+          nameTh: 'วิชาทั่วไป / สหวิทยาการ (Interdisciplinary)',
+          nameEn: 'Interdisciplinary Studies',
+          facultyTh: 'คณะเทคนิคการแพทย์',
+          facultyCode: 'MT',
+          majorCode: 'ALL',
+          majorNameTh: 'ใช้ร่วมทุกสาขา',
+          createdAt: new Date().toISOString(),
+        },
+      ];
+      for (const d of defaultDeps) {
+        masterDepartments.set(d.id, d);
+        await saveToFirestore(COLLECTIONS.MASTER_DEPARTMENTS, d);
+      }
+    }
+
+    // Sync Master Curriculums
+    const fsCurrs = await getAllFromFirestore<MasterCurriculum>(COLLECTIONS.MASTER_CURRICULUMS);
+    if (fsCurrs && fsCurrs.length > 0) {
+      masterCurriculums.clear();
+      for (const c of fsCurrs) {
+        masterCurriculums.set(c.id, c);
+      }
+    } else {
+      const defaultCurrs: MasterCurriculum[] = [
+        {
+          id: 'curr_bs_mt',
+          code: 'CURR_BS_MT',
+          nameTh: 'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)',
+          nameEn: 'Bachelor of Science (Medical Technology)',
+          facultyCode: 'MT',
+          majorCode: 'MTMT',
+          degreeLevel: 'ปริญญาตรี',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'curr_bs_rt',
+          code: 'CURR_BS_RT',
+          nameTh: 'วิทยาศาสตร์บัณฑิต (รังสีเทคนิค)',
+          nameEn: 'Bachelor of Science (Radiological Technology)',
+          facultyCode: 'MT',
+          majorCode: 'MTRT',
+          degreeLevel: 'ปริญญาตรี',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'curr_ms_mt',
+          code: 'CURR_MS_MT',
+          nameTh: 'วิทยาศาสตร์มหาบัณฑิต (เทคนิคการแพทย์)',
+          nameEn: 'Master of Science (Medical Technology)',
+          facultyCode: 'MT',
+          majorCode: 'MTMT',
+          degreeLevel: 'บัณฑิตศึกษา',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'curr_phd_mt',
+          code: 'CURR_PHD_MT',
+          nameTh: 'ปรัชญาดุษฎีบัณฑิต (เทคนิคการแพทย์)',
+          nameEn: 'Doctor of Philosophy (Medical Technology)',
+          facultyCode: 'MT',
+          majorCode: 'MTMT',
+          degreeLevel: 'บัณฑิตศึกษา',
+          createdAt: new Date().toISOString(),
+        },
+      ];
+      for (const c of defaultCurrs) {
+        masterCurriculums.set(c.id, c);
+        await saveToFirestore(COLLECTIONS.MASTER_CURRICULUMS, c);
+      }
+    }
+
+    // Sync Master Prefixes
+    const fsPrefixes = await getAllFromFirestore<MasterPrefix>(COLLECTIONS.MASTER_PREFIXES);
+    if (fsPrefixes && fsPrefixes.length > 0) {
+      masterPrefixes.clear();
+      for (const p of fsPrefixes) {
+        masterPrefixes.set(p.id, p);
+      }
+    } else {
+      const defaultPrefixes: MasterPrefix[] = [
+        { id: 'pref_1', titleTh: 'นาย', titleEn: 'Mr.', category: 'STUDENT' },
+        { id: 'pref_2', titleTh: 'นางสาว', titleEn: 'Miss', category: 'STUDENT' },
+        { id: 'pref_3', titleTh: 'นาง', titleEn: 'Mrs.', category: 'STUDENT' },
+        { id: 'pref_4', titleTh: 'อ.ดร.', titleEn: 'Dr.', category: 'TEACHER' },
+        { id: 'pref_5', titleTh: 'ผศ.ดร.', titleEn: 'Asst.Prof.Dr.', category: 'TEACHER' },
+        { id: 'pref_6', titleTh: 'รศ.ดร.', titleEn: 'Assoc.Prof.Dr.', category: 'TEACHER' },
+        { id: 'pref_7', titleTh: 'ศ.ดร.', titleEn: 'Prof.Dr.', category: 'TEACHER' },
+        { id: 'pref_8', titleTh: 'อาจารย์', titleEn: 'Lecturer', category: 'TEACHER' },
+      ];
+      for (const p of defaultPrefixes) {
+        masterPrefixes.set(p.id, p);
+        await saveToFirestore(COLLECTIONS.MASTER_PREFIXES, p);
       }
     }
 

@@ -670,14 +670,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Teacher Welcome Header & Quick Action */}
-      <div className={`rounded-3xl p-6 md:p-8 border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all ${
+      <div className={`rounded-3xl p-4 sm:p-6 md:p-8 border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all ${
         isDarkMode 
           ? 'bg-gradient-to-r from-slate-950 via-slate-900 to-sky-950/50 border-sky-900/40 text-white shadow-2xl' 
           : 'bg-gradient-to-r from-sky-100/80 via-blue-50/70 to-indigo-50/50 border-sky-200/90 text-slate-900 shadow-sm'
       }`}>
-        <div className="space-y-1 text-left">
+        <div className="space-y-1 text-left w-full md:w-auto">
           <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-bold border ${
             isDarkMode
               ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
@@ -686,7 +686,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             <ShieldCheck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
             <span>Teacher Console</span>
           </div>
-          <h1 className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+          <h1 className={`text-xl sm:text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
             ยินดีต้อนรับ, {teacher.title} {teacher.firstNameTh} {teacher.lastNameTh}
           </h1>
           <p className={`text-xs md:text-sm ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
@@ -694,10 +694,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-wrap sm:flex-nowrap gap-2.5 w-full sm:w-auto md:ml-auto shrink-0">
+        <div className="grid grid-cols-1 sm:grid-cols-3 md:flex md:flex-nowrap gap-2 sm:gap-2.5 w-full sm:w-auto md:ml-auto shrink-0">
           <button
             onClick={() => setIsLeaveManagementOpen(true)}
-            className="px-4 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-amber-600/20 active:scale-95 transition border border-amber-400/30 cursor-pointer relative whitespace-nowrap"
+            className="w-full sm:w-auto px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-amber-600/20 active:scale-95 transition border border-amber-400/30 cursor-pointer relative whitespace-nowrap"
           >
             <FileText className="w-4 h-4 text-white shrink-0" />
             <span>คำขอลาเรียน</span>
@@ -710,7 +710,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
           <button
             onClick={onOpenCreateCourse}
-            className="px-4 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-sky-500/20 active:scale-95 transition border border-sky-300/40 cursor-pointer whitespace-nowrap"
+            className="w-full sm:w-auto px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-sky-500/20 active:scale-95 transition border border-sky-300/40 cursor-pointer whitespace-nowrap"
           >
             <Plus className="w-4 h-4 shrink-0" />
             <span>สร้างรายวิชา</span>
@@ -718,7 +718,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
           <button
             onClick={handleOpenTeacherCheckin}
-            className="px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-emerald-600/20 active:scale-95 transition border border-emerald-400/30 cursor-pointer whitespace-nowrap"
+            className="w-full sm:w-auto px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-md shadow-emerald-600/20 active:scale-95 transition border border-emerald-400/30 cursor-pointer whitespace-nowrap"
           >
             <UserCheck className="w-4 h-4 text-white shrink-0" />
             <span>ลงชื่อเข้าสอน</span>
@@ -727,13 +727,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       </div>
 
       {/* System Mode Switcher Tabs */}
-      <div className={`p-1.5 rounded-2xl border flex flex-col md:flex-row gap-2 ${
+      <div className={`p-1.5 rounded-2xl border grid grid-cols-1 md:grid-cols-3 gap-1.5 ${
         isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-sky-50/60 border-sky-200/80'
       }`}>
         <button
           type="button"
           onClick={() => setDashboardTab('STUDENT_ATTENDANCE')}
-          className={`flex-1 py-3 px-3.5 rounded-xl text-xs font-extrabold transition flex items-center justify-start md:justify-center text-left space-x-2 ${
+          className={`py-2.5 px-3 rounded-xl text-xs font-extrabold transition flex items-center justify-center text-center space-x-2 cursor-pointer ${
             dashboardTab === 'STUDENT_ATTENDANCE'
               ? isDarkMode
                 ? 'bg-sky-500/25 text-sky-200 border border-sky-400/40 shadow-xs'
@@ -744,13 +744,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           }`}
         >
           <Users className="w-4 h-4 text-sky-700 dark:text-sky-300 shrink-0" />
-          <span>1. บันทึกการเข้าเรียนนักศึกษา (Student Attendance)</span>
+          <span>
+            <span className="md:hidden">1. เช็คชื่อนักศึกษา</span>
+            <span className="hidden md:inline">1. บันทึกการเข้าเรียนนักศึกษา (Student Attendance)</span>
+          </span>
         </button>
 
         <button
           type="button"
           onClick={() => setDashboardTab('TEACHER_LOGS')}
-          className={`flex-1 py-3 px-3.5 rounded-xl text-xs font-extrabold transition flex items-center justify-start md:justify-center text-left space-x-2 ${
+          className={`py-2.5 px-3 rounded-xl text-xs font-extrabold transition flex items-center justify-center text-center space-x-2 cursor-pointer ${
             dashboardTab === 'TEACHER_LOGS'
               ? isDarkMode
                 ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40 shadow-xs'
@@ -761,13 +764,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           }`}
         >
           <UserCheck className="w-4 h-4 text-emerald-700 dark:text-emerald-300 shrink-0" />
-          <span>2. บันทึกการเข้าสอนอาจารย์ (Teacher Logs)</span>
+          <span>
+            <span className="md:hidden">2. บันทึกการเข้าสอน</span>
+            <span className="hidden md:inline">2. บันทึกการเข้าสอนอาจารย์ (Teacher Logs)</span>
+          </span>
         </button>
 
         <button
           type="button"
           onClick={() => setDashboardTab('COURSE_OVERVIEW')}
-          className={`flex-1 py-3 px-3.5 rounded-xl text-xs font-extrabold transition flex items-center justify-start md:justify-center text-left space-x-2 ${
+          className={`py-2.5 px-3 rounded-xl text-xs font-extrabold transition flex items-center justify-center text-center space-x-2 cursor-pointer ${
             dashboardTab === 'COURSE_OVERVIEW'
               ? isDarkMode
                 ? 'bg-purple-500/25 text-purple-200 border border-purple-400/40 shadow-xs'
@@ -778,7 +784,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           }`}
         >
           <BarChart3 className="w-4 h-4 text-purple-700 dark:text-purple-300 shrink-0" />
-          <span>3. ภาพรวมวิชา &amp; เวลาเข้าเรียน (Coordinator Dashboard)</span>
+          <span>
+            <span className="md:hidden">3. ภาพรวมวิชา</span>
+            <span className="hidden md:inline">3. ภาพรวมวิชา &amp; เวลาเข้าเรียน (Coordinator Dashboard)</span>
+          </span>
         </button>
       </div>
 
@@ -944,7 +953,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     </h2>
                   </div>
 
-                  <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto ml-auto">
+                  <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center justify-end gap-2 w-full sm:w-auto ml-auto">
                     <button
                       onClick={() => {
                         if (teacherRoleInfo.canEdit) {
@@ -953,7 +962,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           alert("สิทธิ์ไม่เพียงพอ: เฉพาะผู้รับผิดชอบรายวิชา (Course Coordinator) และเจ้าของรายวิชาเท่านั้นที่มีสิทธิ์แก้ไขข้อมูลรายวิชา\n\nสิทธิ์ของคุณ: " + (teacherRoleInfo.isCoCoordinator ? "ผู้ร่วมรับผิดชอบรายวิชา" : "อาจารย์ผู้สอน") + " สามารถเปิดเช็คชื่อ สร้าง QR Code และดูรายชื่อนักศึกษาได้");
                         }
                       }}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition active:scale-95 cursor-pointer ${
+                      className={`w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-95 cursor-pointer ${
                         teacherRoleInfo.canEdit
                           ? 'bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30'
                           : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 opacity-70'
@@ -968,7 +977,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     <a
                       href={`/api/export-csv/${selectedCourse.id}`}
                       download
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition border ${
+                      className={`w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition border ${
                         isDarkMode 
                           ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700' 
                           : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200 shadow-sm'

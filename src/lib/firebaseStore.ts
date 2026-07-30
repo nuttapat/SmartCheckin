@@ -21,8 +21,13 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
 export async function signInWithGooglePopup() {
-  const result = await signInWithPopup(auth, googleProvider);
-  return result.user;
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    return result.user;
+  } catch (err: any) {
+    console.warn('[Firebase Auth] signInWithPopup encountered issue, popup block or mobile storage partitioning:', err);
+    return null;
+  }
 }
 
 // Firestore Collection Names
@@ -35,7 +40,30 @@ export const COLLECTIONS = {
   QUICK_EVENTS: 'quickEvents',
   COURSE_MEMBERS: 'courseMembers',
   LEAVE_REQUESTS: 'leaveRequests',
+  SYSTEM_SETTINGS: 'systemSettings',
+  MASTER_DEPARTMENTS: 'masterDepartments',
+  MASTER_PREFIXES: 'masterPrefixes',
+  MASTER_CURRICULUMS: 'masterCurriculums',
 };
+
+/**
+ * Recursively remove undefined fields from an object for Firestore compatibility
+ */
+function removeUndefinedFields<T>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(removeUndefinedFields) as unknown as T;
+  }
+  const cleaned: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      cleaned[key] = removeUndefinedFields(value);
+    }
+  }
+  return cleaned as T;
+}
 
 /**
  * Generic helper to save or update an entity in Firestore
@@ -46,7 +74,8 @@ export async function saveToFirestore<T extends { id: string }>(
 ): Promise<void> {
   try {
     const docRef = doc(db, collectionName, item.id);
-    const savePromise = setDoc(docRef, item, { merge: true });
+    const cleanedItem = removeUndefinedFields(item);
+    const savePromise = setDoc(docRef, cleanedItem, { merge: true });
     const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('Firestore save timeout')), 4000)
     );

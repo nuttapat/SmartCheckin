@@ -12,12 +12,52 @@ import {
 
 export const API_BASE = '/api';
 
+/**
+ * Safely parses API responses to handle non-JSON / HTML error pages gracefully
+ * and avoid raw SyntaxError exceptions like "Unexpected token '<', ...".
+ */
+async function parseResponse<T = any>(res: Response): Promise<T> {
+  const contentType = res.headers.get('content-type') || '';
+  let data: any = null;
+
+  if (contentType.includes('application/json')) {
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+  } else {
+    const text = await res.text();
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        const isHtml = text.trim().startsWith('<') || text.includes('<html>');
+        if (isHtml) {
+          data = { error: `เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง (${res.status} ${res.statusText || 'Error'})` };
+        } else {
+          data = { error: text.length > 250 ? `เกิดข้อผิดพลาดในการประมวลผล (${res.status})` : text };
+        }
+      }
+    }
+  }
+
+  if (!res.ok) {
+    const rawError = data?.error || data?.message || `เกิดข้อผิดพลาดในการทำรายการ (${res.status})`;
+    const cleanError = typeof rawError === 'string' && (rawError.includes('Unexpected token') || rawError.includes('is not valid JSON'))
+      ? `เกิดข้อผิดพลาดในการเชื่อมต่อระบบ (${res.status})`
+      : rawError;
+    throw new Error(cleanError);
+  }
+
+  return data as T;
+}
+
 export async function fetchCurrentUser(userId?: string): Promise<User> {
   const res = await fetch(`${API_BASE}/users/me`, {
     headers: userId ? { 'x-user-id': userId } : {},
   });
-  if (!res.ok) throw new Error('Failed to fetch user profile');
-  return res.json();
+  return parseResponse<User>(res);
 }
 
 export async function registerUser(userData: Partial<User>): Promise<{ message: string; user: User }> {
@@ -26,9 +66,7 @@ export async function registerUser(userData: Partial<User>): Promise<{ message: 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(userData),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Registration failed');
-  return data;
+  return parseResponse<{ message: string; user: User }>(res);
 }
 
 export async function loginUser(email: string, password?: string, deviceId?: string): Promise<{ message: string; user: User }> {
@@ -37,9 +75,7 @@ export async function loginUser(email: string, password?: string, deviceId?: str
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password, deviceId }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Login failed');
-  return data;
+  return parseResponse<{ message: string; user: User }>(res);
 }
 
 export async function forgotPassword(email: string): Promise<{ message: string; email: string }> {
@@ -48,9 +84,7 @@ export async function forgotPassword(email: string): Promise<{ message: string; 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
+  return parseResponse<{ message: string; email: string }>(res);
 }
 
 export async function updateUserProfile(
@@ -71,9 +105,7 @@ export async function updateUserProfile(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(profileData),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to update profile');
-  return data;
+  return parseResponse<{ message: string; user: User }>(res);
 }
 
 export async function googleLogin(
@@ -106,17 +138,14 @@ export async function googleLogin(
       password,
     }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Google login failed');
-  return data;
+  return parseResponse(res);
 }
 
 export async function fetchCourses(userId: string): Promise<Course[]> {
   const res = await fetch(`${API_BASE}/courses`, {
     headers: { 'x-user-id': userId },
   });
-  if (!res.ok) throw new Error('Failed to fetch courses');
-  return res.json();
+  return parseResponse<Course[]>(res);
 }
 
 export async function createCourse(courseData: Partial<Course>): Promise<{ course: Course }> {
@@ -125,9 +154,7 @@ export async function createCourse(courseData: Partial<Course>): Promise<{ cours
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(courseData),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to create course');
-  return data;
+  return parseResponse<{ course: Course }>(res);
 }
 
 export async function updateCourse(courseId: string, courseData: Partial<Course>): Promise<{ course: Course; sessions: Session[] }> {
@@ -136,9 +163,7 @@ export async function updateCourse(courseId: string, courseData: Partial<Course>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(courseData),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to update course');
-  return data;
+  return parseResponse<{ course: Course; sessions: Session[] }>(res);
 }
 
 export async function deleteCourseApi(courseId: string, teacherId: string, password?: string): Promise<{ message: string; courseId: string }> {
@@ -147,15 +172,12 @@ export async function deleteCourseApi(courseId: string, teacherId: string, passw
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ teacherId, password }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to delete course');
-  return data;
+  return parseResponse<{ message: string; courseId: string }>(res);
 }
 
 export async function fetchCourseDetails(courseId: string) {
   const res = await fetch(`${API_BASE}/courses/${courseId}`);
-  if (!res.ok) throw new Error('Failed to fetch course details');
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function activateSession(
@@ -179,7 +201,7 @@ export async function activateSession(
       isStaticQr,
     }),
   });
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function toggleGpsCheck(targetId: string, isGpsCheckEnabled: boolean) {
@@ -188,7 +210,7 @@ export async function toggleGpsCheck(targetId: string, isGpsCheckEnabled: boolea
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ isGpsCheckEnabled }),
   });
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function toggleQrMode(targetId: string, isStatic: boolean) {
@@ -197,20 +219,19 @@ export async function toggleQrMode(targetId: string, isStatic: boolean) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ isStatic }),
   });
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function deactivateSession(sessionId: string) {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/deactivate`, {
     method: 'POST',
   });
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function fetchActiveSessions() {
   const res = await fetch(`${API_BASE}/sessions/active`);
-  if (!res.ok) throw new Error('Failed to fetch active sessions');
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function submitCheckin(params: {
@@ -233,11 +254,7 @@ export async function submitCheckin(params: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Check-in failed');
-  }
-  return data;
+  return parseResponse(res);
 }
 
 export async function createQuickEvent(title: string, lat: number, lng: number, teacherId: string, isGpsCheckEnabled: boolean = true): Promise<QuickEvent> {
@@ -246,19 +263,17 @@ export async function createQuickEvent(title: string, lat: number, lng: number, 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, teacherLat: lat, teacherLng: lng, teacherId, isGpsCheckEnabled }),
   });
-  return res.json();
+  return parseResponse<QuickEvent>(res);
 }
 
 export async function fetchTeachers(): Promise<User[]> {
   const res = await fetch(`${API_BASE}/teachers`);
-  if (!res.ok) throw new Error('Failed to fetch teachers list');
-  return res.json();
+  return parseResponse<User[]>(res);
 }
 
 export async function fetchStudents(): Promise<User[]> {
   const res = await fetch(`${API_BASE}/students`);
-  if (!res.ok) throw new Error('Failed to fetch students list');
-  return res.json();
+  return parseResponse<User[]>(res);
 }
 
 export async function inviteStudentToCourse(courseId: string, studentUserId: string) {
@@ -267,9 +282,7 @@ export async function inviteStudentToCourse(courseId: string, studentUserId: str
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ studentUserId }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to invite student');
-  return data;
+  return parseResponse(res);
 }
 
 export async function inviteTeacherToCourse(courseId: string, teacherUserId: string, role: string) {
@@ -278,9 +291,7 @@ export async function inviteTeacherToCourse(courseId: string, teacherUserId: str
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ teacherUserId, role }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to invite teacher');
-  return data;
+  return parseResponse(res);
 }
 
 export async function updateCourseMemberRole(courseId: string, memberId: string, role: string) {
@@ -289,18 +300,14 @@ export async function updateCourseMemberRole(courseId: string, memberId: string,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to update member role');
-  return data;
+  return parseResponse(res);
 }
 
 export async function removeCourseMember(courseId: string, memberId: string) {
   const res = await fetch(`${API_BASE}/courses/${courseId}/members/${memberId}`, {
     method: 'DELETE',
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to remove course member');
-  return data;
+  return parseResponse(res);
 }
 
 export async function generateInviteLink(courseId: string, role: string): Promise<InviteLink> {
@@ -309,7 +316,7 @@ export async function generateInviteLink(courseId: string, role: string): Promis
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role }),
   });
-  return res.json();
+  return parseResponse<InviteLink>(res);
 }
 
 export async function joinCourseByInvite(code: string, userId: string) {
@@ -318,9 +325,7 @@ export async function joinCourseByInvite(code: string, userId: string) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code, userId }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to join course');
-  return data;
+  return parseResponse(res);
 }
 
 export async function submitTeacherCheckin(params: {
@@ -481,6 +486,92 @@ export async function resetUserDevice(userId: string) {
   return data;
 }
 
+export async function adminResetUserPassword(userId: string, newPassword: string) {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}/reset-password`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ newPassword }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to reset password');
+  return data;
+}
+
+export async function adminUpdateUserDetails(userId: string, userDetails: any) {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}/details`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(userDetails),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to update user details');
+  return data;
+}
+
+export async function adminToggleUserStatus(userId: string, isSuspended: boolean, suspendedReason?: string) {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}/status`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ isSuspended, suspendedReason }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to change user status');
+  return data;
+}
+
+export async function adminDeleteUser(userId: string) {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
+    method: 'DELETE',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to delete user');
+  return data;
+}
+
+export async function adminBulkUserRole(userIds: string[], role: string) {
+  const res = await fetch(`${API_BASE}/admin/users/bulk-role`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userIds, role }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to perform bulk role update');
+  return data;
+}
+
+export async function adminBulkUserStatus(userIds: string[], isSuspended: boolean, suspendedReason?: string) {
+  const res = await fetch(`${API_BASE}/admin/users/bulk-status`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userIds, isSuspended, suspendedReason }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to perform bulk status update');
+  return data;
+}
+
+export async function adminBulkDeleteUsers(userIds: string[]) {
+  const res = await fetch(`${API_BASE}/admin/users/bulk-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userIds }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to perform bulk delete');
+  return data;
+}
+
+export async function adminBulkResetDevices(userIds: string[]) {
+  const res = await fetch(`${API_BASE}/admin/users/bulk-reset-devices`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userIds }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to perform bulk device reset');
+  return data;
+}
+
 export async function getUserDevices(userId: string) {
   const res = await fetch(`${API_BASE}/users/${userId}/devices`);
   const data = await res.json();
@@ -531,4 +622,86 @@ export async function overrideAttendanceRecord(params: {
   if (!res.ok) throw new Error(data.error || 'Failed to override attendance');
   return data;
 }
+
+// System Settings API
+export async function fetchSystemSettings() {
+  const res = await fetch(`${API_BASE}/system/settings`);
+  return parseResponse(res);
+}
+
+export async function updateSystemSettings(settings: any) {
+  const res = await fetch(`${API_BASE}/admin/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  return parseResponse(res);
+}
+
+// Master Departments API
+export async function fetchMasterDepartments() {
+  const res = await fetch(`${API_BASE}/admin/master/departments`);
+  return parseResponse(res);
+}
+
+export async function saveMasterDepartment(dep: any) {
+  const res = await fetch(`${API_BASE}/admin/master/departments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dep),
+  });
+  return parseResponse(res);
+}
+
+export async function deleteMasterDepartment(id: string) {
+  const res = await fetch(`${API_BASE}/admin/master/departments/${id}`, {
+    method: 'DELETE',
+  });
+  return parseResponse(res);
+}
+
+// Master Curriculums API
+export async function fetchMasterCurriculums() {
+  const res = await fetch(`${API_BASE}/admin/master/curriculums`);
+  return parseResponse(res);
+}
+
+export async function saveMasterCurriculum(curr: any) {
+  const res = await fetch(`${API_BASE}/admin/master/curriculums`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(curr),
+  });
+  return parseResponse(res);
+}
+
+export async function deleteMasterCurriculum(id: string) {
+  const res = await fetch(`${API_BASE}/admin/master/curriculums/${id}`, {
+    method: 'DELETE',
+  });
+  return parseResponse(res);
+}
+
+// Master Prefixes API
+export async function fetchMasterPrefixes() {
+  const res = await fetch(`${API_BASE}/admin/master/prefixes`);
+  return parseResponse(res);
+}
+
+export async function saveMasterPrefix(prefix: any) {
+  const res = await fetch(`${API_BASE}/admin/master/prefixes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(prefix),
+  });
+  return parseResponse(res);
+}
+
+export async function deleteMasterPrefix(id: string) {
+  const res = await fetch(`${API_BASE}/admin/master/prefixes/${id}`, {
+    method: 'DELETE',
+  });
+  return parseResponse(res);
+}
+
 

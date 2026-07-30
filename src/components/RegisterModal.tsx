@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserRole, User } from '../types';
-import { registerUser, googleLogin } from '../services/api';
+import { registerUser, googleLogin, fetchSystemSettings } from '../services/api';
 import { signInWithGooglePopup } from '../lib/firebaseStore';
 import { X, UserCheck, Mail, ShieldAlert, Smartphone, CheckCircle2, Lock, Eye, EyeOff } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
@@ -31,11 +31,70 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [googleLoading, setGoogleLoading] = useState<boolean>(false);
+  const [sysSettings, setSysSettings] = useState<any>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchSystemSettings().then(setSysSettings).catch(() => {});
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   // Auto generate device ID signature
   const deviceFingerprint = `dev_${Math.random().toString(36).substring(2, 10)}`;
+
+  // Helper to check domain allowance based on dynamic server settings
+  const checkIsDomainAllowed = (emailStr: string, currentSysSettings?: any): { allowed: boolean; reason?: string } => {
+    const clean = emailStr.trim().toLowerCase();
+    if (!clean || !clean.includes('@')) return { allowed: false, reason: 'รูปแบบอีเมลไม่ถูกต้อง' };
+
+    const settingsToUse = currentSysSettings || sysSettings;
+
+    // Check if system settings allow other domains
+    const allowOther = settingsToUse?.allowOtherDomainsSelfRegister ?? settingsToUse?.allowOtherDomains ?? false;
+    if (allowOther) {
+      return { allowed: true };
+    }
+
+    const domain = clean.split('@')[1] || '';
+
+    let sDomains: string[] = settingsToUse?.studentDomains;
+    if (!Array.isArray(sDomains) && settingsToUse?.studentDomain) {
+      sDomains = settingsToUse.studentDomain.split(/[,;\s]+/).filter(Boolean);
+    }
+    if (!Array.isArray(sDomains) || sDomains.length === 0) {
+      sDomains = ['student.mahidol.ac.th', 'student.mahidol.edu'];
+    } else {
+      sDomains = sDomains.map((d: string) => d.trim().toLowerCase().replace(/^@/, ''));
+    }
+
+    let tDomains: string[] = settingsToUse?.teacherDomains;
+    if (!Array.isArray(tDomains) && settingsToUse?.teacherDomain) {
+      tDomains = settingsToUse.teacherDomain.split(/[,;\s]+/).filter(Boolean);
+    }
+    if (!Array.isArray(tDomains) || tDomains.length === 0) {
+      tDomains = ['mahidol.ac.th', 'mahidol.edu'];
+    } else {
+      tDomains = tDomains.map((d: string) => d.trim().toLowerCase().replace(/^@/, ''));
+    }
+
+    const isStudentDomain = sDomains.some((d: string) => domain === d || domain.endsWith('.' + d));
+    const isTeacherDomain = tDomains.some((d: string) => domain === d || domain.endsWith('.' + d));
+
+    if (isStudentDomain || isTeacherDomain) {
+      return { allowed: true };
+    }
+
+    const allowedStudentStr = sDomains.map((d: string) => `@${d}`).join(', ');
+    const allowedTeacherStr = tDomains.map((d: string) => `@${d}`).join(', ');
+    const allowedList = [allowedStudentStr, allowedTeacherStr].filter(Boolean).join(' และ ');
+
+    return {
+      allowed: false,
+      reason: `🚫 โดเมนอีเมล @${domain} ไม่ได้รับอนุญาตให้ลงทะเบียนเข้าใช้งานระบบ (อนุญาตเฉพาะโดเมนสถาบัน: ${allowedList || 'ตามที่กำหนด'} หรือติดต่อผู้ดูแลระบบเพื่อขอเปิดสิทธิ์)`,
+    };
+  };
 
   const handleGoogleRegister = async () => {
     setErrorMsg('');
@@ -51,9 +110,17 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
     try {
       const fbUser = await signInWithGooglePopup();
       if (fbUser && fbUser.email) {
+        const cleanEmail = fbUser.email.trim().toLowerCase();
+        const domainCheck = checkIsDomainAllowed(cleanEmail);
+        if (!domainCheck.allowed) {
+          setErrorMsg(domainCheck.reason || '🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้ลงทะเบียนเข้าใช้งาน');
+          setGoogleLoading(false);
+          return;
+        }
+
         const res = await googleLogin(
-          fbUser.email,
-          fbUser.displayName || `${firstNameTh} ${lastNameTh}`.trim() || fbUser.email.split('@')[0],
+          cleanEmail,
+          fbUser.displayName || `${firstNameTh} ${lastNameTh}`.trim() || cleanEmail.split('@')[0],
           fbUser.photoURL || undefined,
           role,
           finalTitle || (role === UserRole.TEACHER ? 'อ.ดร.' : 'นาย'),
@@ -67,29 +134,41 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
         onSuccess(res.user);
         onClose();
         return;
-      }
-    } catch (err: any) {
-      console.warn('Google Register popup error:', err);
-      // Fallback: If user filled email in field, use it
-      if (email.trim() && email.includes('@')) {
-        try {
+      } else {
+        // Fallback for mobile browser where popup is blocked or storage partitioned
+        if (email.trim() && email.includes('@')) {
+          const cleanEmail = email.trim().toLowerCase();
+          const domainCheck = checkIsDomainAllowed(cleanEmail);
+          if (!domainCheck.allowed) {
+            setErrorMsg(domainCheck.reason || '🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้ลงทะเบียนเข้าใช้งาน');
+            setGoogleLoading(false);
+            return;
+          }
+
           const res = await googleLogin(
-            email.trim().toLowerCase(),
-            `${firstNameTh} ${lastNameTh}`.trim() || email.split('@')[0],
+            cleanEmail,
+            `${firstNameTh} ${lastNameTh}`.trim() || cleanEmail.split('@')[0],
             'https://lh3.googleusercontent.com/a/default-user',
             role,
             finalTitle || (role === UserRole.TEACHER ? 'อ.ดร.' : 'นาย'),
-            role === UserRole.STUDENT ? universityId.trim() : undefined
+            role === UserRole.STUDENT ? universityId.trim() : undefined,
+            firstNameTh.trim() || undefined,
+            lastNameTh.trim() || undefined,
+            firstNameEn.trim() || undefined,
+            lastNameEn.trim() || undefined,
+            password.trim() || undefined
           );
           onSuccess(res.user);
           onClose();
           return;
-        } catch (e: any) {
-          setErrorMsg(e.message || 'การลงทะเบียนด้วย Google ไม่สำเร็จ');
+        } else {
+          setErrorMsg('📱 ระบบตรวจพบเบราว์เซอร์มือถือบล็อก Popup ของ Google กรุณากรอกช่องอีเมลในฟอร์มด้านบน แล้วกดปุ่มลงทะเบียนด้วย Google อีกครั้ง');
         }
-      } else {
-        setErrorMsg('การลงทะเบียนด้วย Google ไม่สำเร็จ กรุณากรอกอีเมลในแบบฟอร์มแล้วลองใหม่อีกครั้ง');
       }
+    } catch (err: any) {
+      console.warn('Google Register popup error:', err);
+      const backendMsg = err?.message || '';
+      setErrorMsg(backendMsg || 'เกิดข้อผิดพลาดในการลงทะเบียนด้วย Google');
     } finally {
       setGoogleLoading(false);
     }
@@ -122,6 +201,12 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
     }
     if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
       setErrorMsg('กรุณากรอกอีเมลในรูปแบบที่ถูกต้อง (เช่น example@gmail.com)');
+      return;
+    }
+
+    const domainCheck = checkIsDomainAllowed(cleanEmail);
+    if (!domainCheck.allowed) {
+      setErrorMsg(domainCheck.reason || '🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้ลงทะเบียนเข้าใช้งาน');
       return;
     }
 

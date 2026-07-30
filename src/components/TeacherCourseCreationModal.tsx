@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Semester, TeachingWeek, Course } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Semester, TeachingWeek, Course, User } from '../types';
 import { createCourse } from '../services/api';
-import { X, Plus, Minus, BookOpen, Calendar, CheckCircle2, MapPin, Globe } from 'lucide-react';
+import { X, Plus, Minus, BookOpen, Calendar, CheckCircle2, MapPin, Globe, UserCheck } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { useTheme } from '../context/ThemeContext';
 
@@ -11,6 +11,7 @@ interface TeacherCourseCreationModalProps {
   onSuccess: (course: Course) => void;
   ownerId: string;
   coordinatorDefault: string;
+  teachersList?: User[];
   isDarkMode?: boolean;
 }
 
@@ -44,6 +45,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
   onSuccess,
   ownerId,
   coordinatorDefault,
+  teachersList,
   isDarkMode: propIsDarkMode,
 }) => {
   const { isDarkMode: themeIsDarkMode } = useTheme();
@@ -52,7 +54,19 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
   const [courseName, setCourseName] = useState<string>('');
   const [academicYear, setAcademicYear] = useState<number>(getCurrentAcademicYear());
   const [semester, setSemester] = useState<Semester>(getCurrentSemester());
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string>(ownerId || '');
   const [coordinatorName, setCoordinatorName] = useState<string>(coordinatorDefault || '');
+
+  useEffect(() => {
+    if (teachersList && teachersList.length > 0) {
+      const defaultTeacher = teachersList.find((t) => t.id === ownerId) || teachersList[0];
+      if (defaultTeacher) {
+        setSelectedTeacherId(defaultTeacher.id);
+        const name = `${defaultTeacher.title || ''}${defaultTeacher.firstNameTh || defaultTeacher.firstName || ''} ${defaultTeacher.lastNameTh || defaultTeacher.lastName || ''}`.trim() || defaultTeacher.email;
+        setCoordinatorName(name);
+      }
+    }
+  }, [teachersList, ownerId]);
 
   // Course GPS default coordinates
   const [defaultLat, setDefaultLat] = useState<number>(13.7988363);
@@ -115,7 +129,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
         academicYear,
         semester,
         coordinatorName: coordinatorName || coordinatorDefault,
-        ownerId,
+        ownerId: selectedTeacherId || ownerId,
         defaultLat,
         defaultLng,
         allowedGpsRadius,
@@ -235,14 +249,42 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
               <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                 อาจารย์ผู้รับผิดชอบรายวิชา
               </label>
-              <input
-                type="text"
-                value={coordinatorName}
-                onChange={(e) => setCoordinatorName(e.target.value)}
-                className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
-                  isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                }`}
-              />
+              {teachersList && teachersList.length > 0 ? (
+                <select
+                  value={selectedTeacherId}
+                  onChange={(e) => {
+                    const tId = e.target.value;
+                    setSelectedTeacherId(tId);
+                    const tObj = teachersList.find((t) => t.id === tId);
+                    if (tObj) {
+                      const name = `${tObj.prefixTh || tObj.title || ''}${tObj.firstNameTh || tObj.firstName || ''} ${tObj.lastNameTh || tObj.lastName || ''}`.trim() || tObj.email;
+                      setCoordinatorName(name);
+                    }
+                  }}
+                  className={`w-full border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-sky-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  {teachersList.map((t) => {
+                    const name = `${t.prefixTh || t.title || ''}${t.firstNameTh || t.firstName || ''} ${t.lastNameTh || t.lastName || ''}`.trim() || t.email;
+                    return (
+                      <option key={t.id} value={t.id}>
+                        {name} ({t.email})
+                      </option>
+                    );
+                  })}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={coordinatorName}
+                  onChange={(e) => setCoordinatorName(e.target.value)}
+                  placeholder="ชื่ออาจารย์ผู้ประสานงาน/ผู้สอน..."
+                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                />
+              )}
             </div>
           </div>
 
