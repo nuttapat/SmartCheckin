@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Semester, TeachingWeek, Course, User } from '../types';
 import { createCourse } from '../services/api';
-import { X, Plus, Minus, BookOpen, Calendar, CheckCircle2, MapPin, Globe, UserCheck } from 'lucide-react';
+import { X, Plus, Minus, BookOpen, Calendar, CheckCircle2, MapPin, Globe, UserCheck, Maximize2, Minimize2 } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { useTheme } from '../context/ThemeContext';
 
@@ -50,6 +50,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
 }) => {
   const { isDarkMode: themeIsDarkMode } = useTheme();
   const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
+  const [isMaximized, setIsMaximized] = useState<boolean>(false);
   const [courseCode, setCourseCode] = useState<string>('');
   const [courseName, setCourseName] = useState<string>('');
   const [academicYear, setAcademicYear] = useState<number>(getCurrentAcademicYear());
@@ -147,7 +148,11 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
-      <div className={`border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col ${
+      <div className={`border transition-all duration-300 shadow-2xl overflow-hidden flex flex-col ${
+        isMaximized
+          ? 'w-full h-full max-w-none max-h-none rounded-none my-0'
+          : 'w-full max-w-2xl rounded-2xl max-h-[92vh] my-auto'
+      } ${
         isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
       }`}>
         {/* Modal Header */}
@@ -163,14 +168,26 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
               <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>กำหนดรายละเอียดวิชาและสัปดาห์การสอน (Teaching Sessions)</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className={`p-1.5 rounded-lg transition shrink-0 ${
-              isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'
-            }`}
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsMaximized(!isMaximized)}
+              title={isMaximized ? 'ย่อขนาดหน้าต่าง' : 'ขยายเต็มหน้าจอ'}
+              className={`p-1.5 rounded-lg transition ${
+                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'
+              }`}
+            >
+              {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </button>
+            <button
+              onClick={onClose}
+              className={`p-1.5 rounded-lg transition ${
+                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'
+              }`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Modal Body */}

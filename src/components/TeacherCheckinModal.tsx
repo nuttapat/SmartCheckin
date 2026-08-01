@@ -17,6 +17,8 @@ import {
   CheckCircle,
   AlertCircle,
   Camera,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 
 interface TeacherCheckinModalProps {
@@ -39,6 +41,7 @@ export const TeacherCheckinModal: React.FC<TeacherCheckinModalProps> = ({
   onCheckinSuccess,
 }) => {
   const [method, setMethod] = useState<'HYBRID' | 'GPS_ONLY' | 'TOKEN' | 'QR_ONLY'>('HYBRID');
+  const [isMaximized, setIsMaximized] = useState<boolean>(false);
   const [courseId, setCourseId] = useState<string>('');
   const [sessionId, setSessionId] = useState<string>('');
   const [buildingRoom, setBuildingRoom] = useState<string>('');
@@ -59,9 +62,13 @@ export const TeacherCheckinModal: React.FC<TeacherCheckinModalProps> = ({
 
   const getSessionsForCourse = (cId: string): Session[] => {
     if (!cId) return [];
-    if (sessionsMap && sessionsMap[cId]) return sessionsMap[cId];
-    const course = courses.find((c) => c.id === cId);
-    return course?.sessions || [];
+    let list: Session[] = [];
+    if (sessionsMap && sessionsMap[cId]) list = sessionsMap[cId];
+    else {
+      const course = courses.find((c) => c.id === cId);
+      list = course?.sessions || [];
+    }
+    return [...list].sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
   };
 
   // Initialize course selection when modal opens
@@ -279,11 +286,15 @@ export const TeacherCheckinModal: React.FC<TeacherCheckinModalProps> = ({
       }`}
     >
       <div
-        className={`border rounded-3xl w-full max-w-lg shadow-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 my-auto max-h-[90vh] overflow-y-auto ${
+        className={`border transition-all duration-300 shadow-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto ${
+          isMaximized
+            ? 'w-full h-full max-w-none max-h-none rounded-none my-0'
+            : 'w-full max-w-lg rounded-3xl max-h-[90vh] my-auto'
+        } ${
           isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
         }`}
       >
-        {/* Header & Close */}
+        {/* Header & Controls */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <UserCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
@@ -291,15 +302,27 @@ export const TeacherCheckinModal: React.FC<TeacherCheckinModalProps> = ({
               เช็คชื่อเข้าสอนอาจารย์ (Teacher Check-in)
             </h3>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className={`p-1.5 rounded-lg transition cursor-pointer ${
-              isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-1">
+            <button
+              type="button"
+              onClick={() => setIsMaximized(!isMaximized)}
+              title={isMaximized ? 'ย่อขนาดหน้าต่าง' : 'ขยายเต็มหน้าจอ'}
+              className={`p-1.5 rounded-lg transition cursor-pointer ${
+                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className={`p-1.5 rounded-lg transition cursor-pointer ${
+                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Check-in Method Selector Tabs */}

@@ -625,8 +625,36 @@ export async function overrideAttendanceRecord(params: {
 
 // System Settings API
 export async function fetchSystemSettings() {
-  const res = await fetch(`${API_BASE}/system/settings`);
-  return parseResponse(res);
+  try {
+    const res = await fetch(`${API_BASE}/system/settings`);
+    return await parseResponse(res);
+  } catch (err) {
+    return {
+      id: 'global_config',
+      academicYear: 2569,
+      academicSemester: 'FIRST',
+      defaultGpsRadiusMeters: 100,
+      dynamicQrIntervalSeconds: 30,
+      maintenanceMode: false,
+      systemMaintenanceMode: false,
+      maintenanceMessage: 'ระบบกำลังปิดปรับปรุงชั่วคราว ขออภัยในความไม่สะดวก',
+      announcementMessage: '',
+      systemAnnouncement: '',
+      allowGoogleAutoRegister: true,
+      maxDevicesPerUser: 1,
+      singleDeviceLockEnabled: true,
+      allowTeacherSelfRegister: true,
+      allowStudentSelfRegister: true,
+      allowOtherDomainsSelfRegister: false,
+      allowOtherDomains: false,
+      teacherDomains: ['mahidol.ac.th', 'mahidol.edu'],
+      studentDomains: ['student.mahidol.ac.th', 'student.mahidol.edu'],
+      teacherDomain: 'mahidol.ac.th, mahidol.edu',
+      studentDomain: 'student.mahidol.ac.th, student.mahidol.edu',
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'system',
+    };
+  }
 }
 
 export async function updateSystemSettings(settings: any) {

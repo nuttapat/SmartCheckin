@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Course, LeaveRequest, LeaveType, LeaveStatus } from '../types';
 import { submitLeaveRequest, fetchStudentLeaveRequests, cancelLeaveRequest, fetchCourseDetails } from '../services/api';
-import { FileText, Calendar, Clock, AlertCircle, CheckCircle, XCircle, Upload, Plus, Trash2, X, Eye, FileCheck, ShieldAlert, Sparkles, CalendarDays } from 'lucide-react';
+import { FileText, Calendar, Clock, AlertCircle, CheckCircle, XCircle, Upload, Plus, Trash2, X, Eye, FileCheck, ShieldAlert, Sparkles, CalendarDays, Maximize2, Minimize2 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 interface StudentLeaveModalProps {
@@ -22,6 +22,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
   const { isDarkMode: themeIsDarkMode } = useTheme();
   const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
 
+  const [isMaximized, setIsMaximized] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'NEW' | 'HISTORY'>('NEW');
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -307,7 +308,11 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
       <div
-        className={`relative w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl border shadow-2xl overflow-hidden transition-all ${
+        className={`relative w-full transition-all duration-300 flex flex-col border shadow-2xl overflow-hidden ${
+          isMaximized
+            ? 'w-full h-full max-w-none max-h-none rounded-none'
+            : 'max-w-3xl max-h-[90vh] rounded-3xl'
+        } ${
           isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
         }`}
       >
@@ -335,14 +340,26 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className={`p-2 rounded-xl transition cursor-pointer ${
-              isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'
-            }`}
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-1">
+            <button
+              type="button"
+              onClick={() => setIsMaximized(!isMaximized)}
+              title={isMaximized ? 'ย่อขนาดหน้าต่าง' : 'ขยายเต็มหน้าจอ'}
+              className={`p-2 rounded-xl transition cursor-pointer ${
+                isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'
+              }`}
+            >
+              {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </button>
+            <button
+              onClick={onClose}
+              className={`p-2 rounded-xl transition cursor-pointer ${
+                isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'
+              }`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Tab Selection */}
@@ -544,7 +561,9 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                       }`}
                     >
                       <option value="" className={isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}>-- ไม่ระบุ / Sync ตามวันที่ --</option>
-                      {selectedCourse?.weeks?.map((w) => (
+                      {[...(selectedCourse?.weeks || [])]
+                        .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0))
+                        .map((w) => (
                         <option key={w.weekNumber} value={w.weekNumber} className={isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}>
                           สัปดาห์ที่ {w.weekNumber}: {w.topic} {w.date ? `(${w.date})` : ''}
                         </option>

@@ -122,12 +122,12 @@ export default function App() {
   const loadGlobalSettings = async () => {
     try {
       const res = await fetchSystemSettings();
-      const settingsObj = res.settings || res.document || res;
-      if (settingsObj) {
+      const settingsObj = res?.settings || res?.document || res;
+      if (settingsObj && typeof settingsObj === 'object') {
         setSystemSettings(settingsObj);
       }
     } catch (err) {
-      console.error('Failed to fetch system settings in App:', err);
+      console.warn('Could not refresh system settings:', err);
     }
   };
 

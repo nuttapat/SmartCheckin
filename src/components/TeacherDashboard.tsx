@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { User, Course, Session, AttendanceRecord, TeacherAttendanceRecord, InviteLink, CourseMember, CourseMemberRole } from '../types';
 import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck, toggleQrMode } from '../services/api';
-import { QrCode, Users, Download, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown, EyeOff, Eye, Lock } from 'lucide-react';
+import { QrCode, Users, Download, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown, EyeOff, Eye, Lock, Maximize2, Minimize2, ZoomIn, ZoomOut } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
@@ -43,6 +43,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [isInviteStudentModalOpen, setIsInviteStudentModalOpen] = useState<boolean>(false);
   const [isLeaveManagementOpen, setIsLeaveManagementOpen] = useState<boolean>(false);
   const [pendingLeaveCount, setPendingLeaveCount] = useState<number>(0);
+  const [isQrModalMaximized, setIsQrModalMaximized] = useState<boolean>(false);
+  const [isStatsModalMaximized, setIsStatsModalMaximized] = useState<boolean>(false);
+  const [isQrEnlarged, setIsQrEnlarged] = useState<boolean>(false);
 
   // Compute teacher role in the currently selected course
   const teacherRoleInfo = useMemo(() => {
@@ -520,7 +523,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
     try {
       const details = await fetchCourseDetails(course.id);
-      setCourseSessions(details.sessions || []);
+      const sortedSessions = (details.sessions || []).sort(
+        (a: any, b: any) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0)
+      );
+      setCourseSessions(sortedSessions);
       setCurrentCourseMembers(details.members || []);
     } catch (err) {
       console.error(err);
@@ -562,7 +568,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           // Generate QR Code Data URL image (Full web URL for native camera scanning)
           const qrText = isEvent ? `EVT:${targetId}:${newToken}` : `SES:${targetId}:${newToken}`;
           const qrFullUrl = `${window.location.origin}/?checkin=${encodeURIComponent(qrText)}`;
-          const url = await QRCode.toDataURL(qrFullUrl, { width: 320, margin: 2, color: { dark: '#090d16', light: '#ffffff' } });
+          const url = await QRCode.toDataURL(qrFullUrl, { width: 600, margin: 2, color: { dark: '#090d16', light: '#ffffff' } });
           setQrDataUrl(url);
         } else if (payload.type === 'CHECKIN_NEW') {
           // Live checkin event received!
@@ -599,7 +605,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       // Render initial QR (Full web URL for native phone camera scanning)
       const initialText = `SES:${session.id}:${res.qrToken || 'active'}`;
       const initialFullUrl = `${window.location.origin}/?checkin=${encodeURIComponent(initialText)}`;
-      const url = await QRCode.toDataURL(initialFullUrl, { width: 320, margin: 2, color: { dark: '#090d16', light: '#ffffff' } });
+      const url = await QRCode.toDataURL(initialFullUrl, { width: 600, margin: 2, color: { dark: '#090d16', light: '#ffffff' } });
       setQrDataUrl(url);
       setQrToken(res.qrToken || '');
 
@@ -991,7 +997,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
               {/* Sessions List */}
               <div className="space-y-3">
-                {courseSessions.map((session) => (
+                {[...courseSessions].sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0)).map((session) => (
                   <div
                     key={session.id}
                     className={`p-4 border rounded-2xl flex items-center justify-between transition ${
@@ -1866,7 +1872,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           </div>
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {currentOverviewItem.sessionDetailsList.map((ses: any) => (
+                            {[...(currentOverviewItem.sessionDetailsList || [])]
+                              .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0))
+                              .map((ses: any) => (
                               <div
                                 key={ses.sessionId}
                                 className={`p-4 rounded-2xl border space-y-2.5 ${
@@ -1945,7 +1953,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       {/* DYNAMIC QR DISPLAY MODAL / SCREEN (Active QR Session) */}
       {activeSession && isQrModalOpen && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
-          <div className={`border rounded-2xl sm:rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col ${
+          <div className={`border shadow-2xl overflow-hidden flex flex-col transition-all duration-300 ${
+            isQrModalMaximized
+              ? 'w-full h-full max-w-none max-h-none rounded-none my-0'
+              : 'w-full max-w-4xl rounded-2xl sm:rounded-3xl max-h-[92vh] sm:max-h-[90vh] my-auto'
+          } ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
           }`}>
             {/* Modal Header */}
@@ -1969,6 +1981,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               <div className="flex items-center space-x-2 shrink-0">
                 <button
                   type="button"
+                  onClick={() => setIsQrModalMaximized(!isQrModalMaximized)}
+                  className={`p-2 rounded-xl border transition cursor-pointer flex items-center justify-center ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                  title={isQrModalMaximized ? 'ย่อขนาดหน้าต่าง' : 'ขยายเต็มหน้าจอ'}
+                >
+                  {isQrModalMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setIsQrModalOpen(false)}
                   className="px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition shadow-sm cursor-pointer"
                   title="ย่อหน้าจอเพื่อเริ่มการสอน (นักศึกษายังคงเช็คอินด้วย GPS Only ได้โดยไม่ต้องเปิด QR ใหม่)"
@@ -1988,76 +2011,117 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </div>
 
             {/* Modal Body Grid */}
-            <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 items-start overflow-y-auto">
+            <div className={`p-4 sm:p-6 grid grid-cols-1 ${isQrEnlarged ? 'grid-cols-1' : 'md:grid-cols-2'} gap-4 sm:gap-6 items-start overflow-y-auto`}>
               {/* Dynamic / Static QR Code Canvas Display */}
-              <div className={`flex flex-col items-center justify-center p-4 sm:p-6 rounded-2xl border space-y-4 ${
+              <div className={`relative flex flex-col items-center justify-center p-4 sm:p-6 rounded-2xl border space-y-4 transition-all duration-300 ${
+                isQrEnlarged ? 'w-full max-w-2xl mx-auto' : ''
+              } ${
                 isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-100/70 border-slate-200'
               }`}>
-                {/* Minimal Segment Toggle Switch: Dynamic / Static */}
-                <div className={`inline-flex p-1 border rounded-xl shadow-inner text-xs font-bold space-x-1 ${
-                  isDarkMode
-                    ? 'bg-slate-900 border-slate-800'
-                    : 'bg-slate-200/80 border-slate-300'
-                }`}>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!isStaticQr) return;
-                      setIsStaticQr(false);
-                      if (activeSession?.id) {
-                        try {
-                          await toggleQrMode(activeSession.id, false);
-                        } catch (err) {
-                          console.error(err);
-                        }
-                      }
-                    }}
-                    className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-all duration-200 cursor-pointer ${
-                      !isStaticQr
-                        ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20 font-extrabold'
-                        : isDarkMode
-                          ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/60'
-                    }`}
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${!isStaticQr ? 'animate-spin' : ''}`} />
-                    <span>Dynamic</span>
-                  </button>
+                {/* Enlarge/Reduce QR Button in Top-Right Corner */}
+                <button
+                  type="button"
+                  onClick={() => setIsQrEnlarged(!isQrEnlarged)}
+                  className={`absolute top-3 right-3 sm:top-4 sm:right-4 p-2 border rounded-xl transition-all duration-200 cursor-pointer shadow-xs ${
+                    isQrEnlarged
+                      ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 hover:bg-amber-500/30 ring-2 ring-amber-500/20'
+                      : isDarkMode
+                        ? 'bg-slate-900/90 border-slate-800 text-slate-400 hover:text-sky-400 hover:bg-slate-800'
+                        : 'bg-white border-slate-200 text-slate-600 hover:text-sky-600 hover:bg-slate-50'
+                  }`}
+                  title={isQrEnlarged ? 'ย่อขนาด QR Code' : 'ขยายขนาด QR Code'}
+                >
+                  {isQrEnlarged ? <ZoomOut className="w-4.5 h-4.5 text-amber-500" /> : <ZoomIn className="w-4.5 h-4.5 text-sky-500" />}
+                </button>
 
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (isStaticQr) return;
-                      setIsStaticQr(true);
-                      if (activeSession?.id) {
-                        try {
-                          await toggleQrMode(activeSession.id, true);
-                        } catch (err) {
-                          console.error(err);
+                {/* Minimal Segment Toggle Switch */}
+                <div className="flex items-center justify-center w-full">
+                  <div className={`inline-flex items-center p-1 border rounded-xl shadow-inner text-xs font-bold space-x-1 ${
+                    isDarkMode
+                      ? 'bg-slate-900 border-slate-800'
+                      : 'bg-slate-200/80 border-slate-300'
+                  }`}>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!isStaticQr) return;
+                        setIsStaticQr(false);
+                        if (activeSession?.id) {
+                          try {
+                            await toggleQrMode(activeSession.id, false);
+                          } catch (err) {
+                            console.error(err);
+                          }
                         }
-                      }
-                    }}
-                    className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-all duration-200 cursor-pointer ${
-                      isStaticQr
-                        ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20 font-extrabold'
-                        : isDarkMode
-                          ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/60'
-                    }`}
-                  >
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Static</span>
-                  </button>
+                      }}
+                      className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-all duration-200 cursor-pointer ${
+                        !isStaticQr
+                          ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20 font-extrabold'
+                          : isDarkMode
+                            ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/60'
+                      }`}
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${!isStaticQr ? 'animate-spin' : ''}`} />
+                      <span>Dynamic</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (isStaticQr) return;
+                        setIsStaticQr(true);
+                        if (activeSession?.id) {
+                          try {
+                            await toggleQrMode(activeSession.id, true);
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-all duration-200 cursor-pointer ${
+                        isStaticQr
+                          ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20 font-extrabold'
+                          : isDarkMode
+                            ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/60'
+                      }`}
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Static</span>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="relative p-3 sm:p-4 bg-white rounded-2xl shadow-xl border border-slate-100">
+                <div
+                  onClick={() => setIsQrEnlarged(!isQrEnlarged)}
+                  title="คลิกเพื่อขยาย / ย่อขนาด QR Code"
+                  className={`relative p-3 sm:p-5 bg-white rounded-2xl shadow-xl border cursor-pointer transition-all duration-300 group ${
+                    isQrEnlarged ? 'border-sky-500/60 shadow-2xl ring-4 ring-sky-500/20 p-6 sm:p-8' : 'border-slate-100 hover:border-sky-300'
+                  }`}
+                >
                   {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="Attendance QR Code" className="w-48 h-48 sm:w-60 sm:h-60 object-contain" />
+                    <img
+                      src={qrDataUrl}
+                      alt="Attendance QR Code"
+                      className={`object-contain transition-all duration-300 ${
+                        isQrEnlarged
+                          ? 'w-72 h-72 sm:w-[380px] sm:h-[380px] md:w-[460px] md:h-[460px]'
+                          : 'w-48 h-48 sm:w-60 sm:h-60'
+                      }`}
+                    />
                   ) : (
-                    <div className="w-48 h-48 sm:w-60 sm:h-60 flex items-center justify-center text-slate-500 text-xs">
+                    <div className={`flex items-center justify-center text-slate-500 text-xs ${
+                      isQrEnlarged ? 'w-72 h-72 sm:w-[380px] sm:h-[380px]' : 'w-48 h-48 sm:w-60 sm:h-60'
+                    }`}>
                       กำลังสร้าง QR Code...
                     </div>
                   )}
+
+                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/90 text-white text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap shadow-md pointer-events-none">
+                    {isQrEnlarged ? '🔍 คลิกเพื่อย่อขนาด' : '🔍 คลิกเพื่อขยายใหญ่'}
+                  </div>
+
                   {isStaticQr ? (
                     <div className="absolute top-2 right-2 px-2.5 py-0.5 bg-sky-600 text-white font-black text-[10px] rounded-full uppercase tracking-wider flex items-center space-x-1 shadow-xs">
                       <Lock className="w-3 h-3" />
@@ -2365,12 +2429,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       />
       {/* SESSION ATTENDANCE LIST MODAL */}
       {selectedSessionModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto">
-          <div className={`border rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden my-6 ${
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
+          <div className={`border shadow-2xl overflow-hidden transition-all duration-300 flex flex-col ${
+            isStatsModalMaximized
+              ? 'w-full h-full max-w-none max-h-none rounded-none my-0'
+              : 'w-full max-w-3xl rounded-3xl max-h-[90vh] my-auto'
+          } ${
             isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
           }`}>
             {/* Modal Header */}
-            <div className={`px-6 py-4 border-b flex items-center justify-between ${
+            <div className={`px-6 py-4 border-b flex items-center justify-between shrink-0 ${
               isDarkMode ? 'bg-slate-800/80 border-slate-800' : 'bg-slate-50 border-slate-100'
             }`}>
               <div className="flex items-center space-x-3">
@@ -2394,15 +2462,27 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setSelectedSessionModal(null)}
-                className={`p-2 rounded-xl transition cursor-pointer ${
-                  isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center space-x-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsStatsModalMaximized(!isStatsModalMaximized)}
+                  title={isStatsModalMaximized ? 'ย่อขนาดหน้าต่าง' : 'ขยายเต็มหน้าจอ'}
+                  className={`p-2 rounded-xl transition cursor-pointer ${
+                    isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {isStatsModalMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSessionModal(null)}
+                  className={`p-2 rounded-xl transition cursor-pointer ${
+                    isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Body */}

@@ -16,6 +16,8 @@ import {
   RefreshCw,
   CheckCircle2,
   ShieldX,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 
 interface StudentCheckinModalProps {
@@ -36,6 +38,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
   onCheckinSuccess,
 }) => {
   const [checkinMode, setCheckinMode] = useState<'HYBRID' | 'GPS_ONLY' | 'TOKEN'>('HYBRID');
+  const [isMaximized, setIsMaximized] = useState<boolean>(false);
   const [scannedResult, setScannedResult] = useState<string>('');
   const [manualInput, setManualInput] = useState<string>('');
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
@@ -289,11 +292,15 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
       }`}
     >
       <div
-        className={`border rounded-3xl w-full max-w-lg shadow-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 my-auto max-h-[88vh] overflow-y-auto ${
+        className={`border transition-all duration-300 shadow-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto ${
+          isMaximized
+            ? 'w-full h-full max-w-none max-h-none rounded-none my-0'
+            : 'w-full max-w-lg rounded-3xl max-h-[88vh] my-auto'
+        } ${
           isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
         }`}
       >
-        {/* Header & Close */}
+        {/* Header & Controls */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Sparkles className="w-5 h-5 text-sky-600 dark:text-sky-400" />
@@ -301,14 +308,26 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
               ระบบเช็คชื่อเข้าเรียน (Student Check-in)
             </h3>
           </div>
-          <button
-            onClick={onClose}
-            className={`p-1.5 rounded-lg transition cursor-pointer ${
-              isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-1">
+            <button
+              type="button"
+              onClick={() => setIsMaximized(!isMaximized)}
+              title={isMaximized ? 'ย่อขนาดหน้าต่าง' : 'ขยายเต็มหน้าจอ'}
+              className={`p-1.5 rounded-lg transition cursor-pointer ${
+                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </button>
+            <button
+              onClick={onClose}
+              className={`p-1.5 rounded-lg transition cursor-pointer ${
+                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {pendingCameraNotice && (
@@ -476,7 +495,9 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
                       : 'bg-white border-slate-300 text-slate-900 focus:border-sky-500 shadow-sm'
                   }`}
                 >
-                  {activeSessionsList.map(({ session: s, course: c }) => (
+                  {[...activeSessionsList]
+                    .sort((a, b) => (Number(a.session.weekNumber) || 0) - (Number(b.session.weekNumber) || 0))
+                    .map(({ session: s, course: c }) => (
                     <option key={s.id} value={s.id}>
                       {c ? `[${c.courseCode}] ${c.courseName}` : 'Ad-hoc Class'} - สัปดาห์ที่ {s.weekNumber}: {s.topic}
                     </option>
@@ -543,7 +564,9 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
                       : 'bg-white border-slate-300 text-slate-900 focus:border-sky-500 shadow-sm'
                   }`}
                 >
-                  {activeSessionsList.map(({ session: s, course: c }) => (
+                  {[...activeSessionsList]
+                    .sort((a, b) => (Number(a.session.weekNumber) || 0) - (Number(b.session.weekNumber) || 0))
+                    .map(({ session: s, course: c }) => (
                     <option key={s.id} value={s.id}>
                       {c ? `[${c.courseCode}] ${c.courseName}` : 'Ad-hoc Class'} - สัปดาห์ที่ {s.weekNumber}: {s.topic}
                     </option>

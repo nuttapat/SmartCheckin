@@ -71,7 +71,7 @@ export const JoinCourseModal: React.FC<JoinCourseModalProps> = ({
             </label>
             <input
               type="text"
-              placeholder="เช่น 8-Character Invite Code"
+              placeholder="4-Character Invite Code"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               required

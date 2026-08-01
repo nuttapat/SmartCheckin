@@ -296,14 +296,15 @@ export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
         return s.courseId === selectedCourseForSessions;
       })
       .sort((a, b) => {
-        if (!sessionSortField) return (a.weekNumber || 0) - (b.weekNumber || 0);
+        if (!sessionSortField || sessionSortField === 'week') {
+          const numA = Number(a.weekNumber) || 0;
+          const numB = Number(b.weekNumber) || 0;
+          return sessionSortDir === 'asc' ? numA - numB : numB - numA;
+        }
         let valA: any = '';
         let valB: any = '';
 
-        if (sessionSortField === 'week') {
-          valA = a.weekNumber || 0;
-          valB = b.weekNumber || 0;
-        } else if (sessionSortField === 'topic') {
+        if (sessionSortField === 'topic') {
           valA = a.topic || '';
           valB = b.topic || '';
         } else if (sessionSortField === 'status') {

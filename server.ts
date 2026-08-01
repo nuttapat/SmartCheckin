@@ -93,6 +93,12 @@ const checkRegistrationDomain = (emailStr: string): { allowed: boolean; forcedRo
     return { allowed: true, forcedRole: UserRole.ADMIN };
   }
 
+  // Check if user is an existing Admin in the system
+  const existingUser = Array.from(users.values()).find((u) => u && u.email && u.email.trim().toLowerCase() === cleanEmail);
+  if (existingUser && existingUser.role === UserRole.ADMIN) {
+    return { allowed: true, forcedRole: UserRole.ADMIN };
+  }
+
   // Parse student domains list
   let studentDomains: string[] = [];
   if (Array.isArray(systemSettings.studentDomains) && systemSettings.studentDomains.length > 0) {
@@ -1062,6 +1068,12 @@ app.get('/api/courses', (req, res) => {
     result = [];
   }
 
+  result.forEach((c) => {
+    if (c.weeks && Array.isArray(c.weeks)) {
+      c.weeks.sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
+    }
+  });
+
   res.json(result);
 });
 
@@ -1081,6 +1093,9 @@ app.post('/api/courses', (req, res) => {
   const lng = parseFloat(defaultLng) || 100.322944;
   const radius = parseFloat(allowedGpsRadius) || 200;
 
+  const initialWeeks = Array.isArray(weeks) ? weeks : [];
+  initialWeeks.sort((a: any, b: any) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
+
   const newCourse: Course = {
     id: `crs_${Date.now()}`,
     courseCode,
@@ -1093,7 +1108,7 @@ app.post('/api/courses', (req, res) => {
     defaultLat: lat,
     defaultLng: lng,
     allowedGpsRadius: radius,
-    weeks: weeks || [],
+    weeks: initialWeeks,
     curriculums: Array.isArray(curriculums) ? curriculums : (curriculums ? [curriculums] : []),
     facultyCode: facultyCode || 'MT',
     departmentCode: departmentCode || 'ID',
@@ -1118,11 +1133,12 @@ app.post('/api/courses', (req, res) => {
 
   // Automatically create session entries for each week
   newCourse.weeks.forEach((w) => {
-    const sesId = `ses_${newCourse.id}_w${w.weekNumber}`;
+    const wNum = Number(w.weekNumber) || 1;
+    const sesId = `ses_${newCourse.id}_w${wNum}`;
     const newSession: Session = {
       id: sesId,
       courseId: newCourse.id,
-      weekNumber: w.weekNumber,
+      weekNumber: wNum,
       topic: w.topic,
       teacherLat: lat,
       teacherLng: lng,
@@ -1142,6 +1158,10 @@ app.get('/api/courses/:id', (req, res) => {
     return res.status(404).json({ error: 'Course not found' });
   }
 
+  if (course.weeks && Array.isArray(course.weeks)) {
+    course.weeks.sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
+  }
+
   const members = courseMembers
     .filter((cm) => cm.courseId === course.id)
     .map((cm) => ({
@@ -1149,7 +1169,9 @@ app.get('/api/courses/:id', (req, res) => {
       user: users.get(cm.userId),
     }));
 
-  const courseSessions = Array.from(sessions.values()).filter((s) => s.courseId === course.id);
+  const courseSessions = Array.from(sessions.values())
+    .filter((s) => s.courseId === course.id)
+    .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
 
   res.json({
     course,
@@ -1209,33 +1231,36 @@ app.put('/api/courses/:id', (req, res) => {
   });
 
   if (Array.isArray(weeks)) {
+    weeks.sort((a: any, b: any) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
     course.weeks = weeks;
 
     // Synchronize sessions Map with updated weeks list
     const existingSessions = Array.from(sessions.values()).filter((s) => s.courseId === courseId);
-    const currentWeekNumbers = new Set(weeks.map((w: any) => w.weekNumber));
+    const currentWeekNumbers = new Set(weeks.map((w: any) => Number(w.weekNumber)));
 
     // Delete sessions for weeks that were removed
     existingSessions.forEach((s) => {
-      if (!currentWeekNumbers.has(s.weekNumber)) {
+      if (!currentWeekNumbers.has(Number(s.weekNumber))) {
         sessions.delete(s.id);
       }
     });
 
     // Create or update sessions for current weeks
     weeks.forEach((w: any) => {
-      const existingSession = existingSessions.find((s) => s.weekNumber === w.weekNumber);
+      const wNum = Number(w.weekNumber) || 1;
+      const existingSession = existingSessions.find((s) => Number(s.weekNumber) === wNum);
       if (existingSession) {
+        existingSession.weekNumber = wNum;
         existingSession.topic = w.topic;
         existingSession.teacherLat = courseLat;
         existingSession.teacherLng = courseLng;
         sessions.set(existingSession.id, existingSession);
       } else {
-        const newSesId = `ses_${courseId}_w${w.weekNumber}_${Date.now()}`;
+        const newSesId = `ses_${courseId}_w${wNum}_${Date.now()}`;
         sessions.set(newSesId, {
           id: newSesId,
           courseId,
-          weekNumber: w.weekNumber,
+          weekNumber: wNum,
           topic: w.topic,
           teacherLat: courseLat,
           teacherLng: courseLng,
@@ -1247,7 +1272,9 @@ app.put('/api/courses/:id', (req, res) => {
   }
 
   courses.set(courseId, course);
-  const updatedSessions = Array.from(sessions.values()).filter((s) => s.courseId === courseId);
+  const updatedSessions = Array.from(sessions.values())
+    .filter((s) => s.courseId === courseId)
+    .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
 
   res.json({
     message: 'Course updated successfully',
@@ -1739,6 +1766,7 @@ app.get('/api/sessions/active', (req, res) => {
       activeSessionsList.push({ session: s, course, activeQR: qrData });
     }
   });
+  activeSessionsList.sort((a, b) => (Number(a.session.weekNumber) || 0) - (Number(b.session.weekNumber) || 0));
   res.json(activeSessionsList);
 });
 
@@ -2203,7 +2231,9 @@ app.get('/api/export-csv/:courseId', (req, res) => {
     return res.status(404).send('Course not found');
   }
 
-  const courseSessions = Array.from(sessions.values()).filter((s) => s.courseId === course.id);
+  const courseSessions = Array.from(sessions.values())
+    .filter((s) => s.courseId === course.id)
+    .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
   const members = courseMembers
     .filter((cm) => cm.courseId === course.id && cm.role === CourseMemberRole.STUDENT)
     .map((cm) => users.get(cm.userId))
@@ -2451,7 +2481,9 @@ app.get('/api/student/:studentId/stats', (req, res) => {
   const studentCourses = enrolledCourseIds.map((id) => courses.get(id)).filter(Boolean) as Course[];
 
   const courseStats = studentCourses.map((c) => {
-    const cSessions = Array.from(sessions.values()).filter((s) => s.courseId === c.id);
+    const cSessions = Array.from(sessions.values())
+      .filter((s) => s.courseId === c.id)
+      .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
 
     let attendedCount = 0;
     let approvedLeaveCount = 0;
@@ -2517,7 +2549,9 @@ app.get('/api/teacher/courses-overview', (req, res) => {
     const studentMembers = membersInCourse.filter((m) => m.role === CourseMemberRole.STUDENT);
     const coTeacherMembers = membersInCourse.filter((m) => m.role === CourseMemberRole.CO_TEACHER);
 
-    const cSessions = Array.from(sessions.values()).filter((s) => s.courseId === course.id);
+    const cSessions = Array.from(sessions.values())
+      .filter((s) => s.courseId === course.id)
+      .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
 
     const studentList = studentMembers.map((m) => {
       const studentUser = users.get(m.userId);
@@ -2576,7 +2610,9 @@ app.get('/api/teacher/courses-overview', (req, res) => {
       };
     });
 
-    const courseSessionsList = Array.from(sessions.values()).filter((s) => s.courseId === course.id);
+    const courseSessionsList = Array.from(sessions.values())
+      .filter((s) => s.courseId === course.id)
+      .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
     const sessionDetailsList = courseSessionsList.map((s) => {
       const recordsForSession = attendanceRecords.filter((r) => r.sessionId === s.id);
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, UserRole, UserDevice } from '../types';
 import { updateUserProfile, getUserDevices, bindUserDeviceApi, deleteUserDeviceApi, resetUserDevice } from '../services/api';
 import { getDeviceInfo, DeviceInfo } from '../utils/deviceHelper';
-import { X, User as UserIcon, Lock, Shield, CheckCircle2, ShieldAlert, Eye, EyeOff, KeyRound, Smartphone, Mail, MapPin, Globe, Tablet, Monitor, Sun, Moon, Trash2, Plus, RefreshCw, AlertCircle, Check, Info } from 'lucide-react';
+import { X, User as UserIcon, Lock, Shield, CheckCircle2, ShieldAlert, Eye, EyeOff, KeyRound, Smartphone, Mail, MapPin, Globe, Tablet, Monitor, Sun, Moon, Trash2, Plus, RefreshCw, AlertCircle, Check, Info, Maximize2, Minimize2 } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { useTheme } from '../context/ThemeContext';
 
@@ -25,6 +25,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
 }) => {
   const { themeMode, setThemeMode, isDarkMode: themeIsDarkMode } = useTheme();
   const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
+  const [isMaximized, setIsMaximized] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'device' | 'gps'>(initialTab);
 
   useEffect(() => {
@@ -264,7 +265,11 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className={`w-full max-w-2xl border rounded-3xl shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh] ${
+      <div className={`w-full border shadow-2xl relative overflow-hidden flex flex-col transition-all duration-300 ${
+        isMaximized
+          ? 'w-full h-full max-w-none max-h-none rounded-none'
+          : 'max-w-2xl max-h-[90vh] rounded-3xl'
+      } ${
         isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
       }`}>
         {/* Header */}
@@ -280,14 +285,26 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className={`p-2 rounded-full transition ${
-              isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsMaximized(!isMaximized)}
+              title={isMaximized ? 'ย่อขนาดหน้าต่าง' : 'ขยายเต็มหน้าจอ'}
+              className={`p-2 rounded-xl transition ${
+                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </button>
+            <button
+              onClick={onClose}
+              className={`p-2 rounded-xl transition ${
+                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Tab Navigation */}

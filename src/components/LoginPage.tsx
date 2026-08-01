@@ -157,15 +157,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       if (fbUser && fbUser.email) {
         const cleanEmail = fbUser.email.trim().toLowerCase();
 
-        // 🛑 STRICT DOMAIN PRE-CHECK BEFORE OPENING REGISTRATION MODAL
-        const domainCheck = checkIsDomainAllowed(cleanEmail, latestSettings);
-        if (!domainCheck.allowed) {
-          setErrorMsg(domainCheck.reason || '🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้เข้าใช้งานระบบ');
-          setIsGoogleModalOpen(false);
-          setGoogleLoading(false);
-          return;
-        }
-
+        // Send auth payload to backend - server handles Super Admin & domain validation securely
         const res = await googleLogin(
           cleanEmail,
           fbUser.displayName || cleanEmail.split('@')[0],
@@ -173,14 +165,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         );
 
         if (res.requiresOnboarding) {
-          // Re-verify domain check for user onboarding
-          const onboardingDomainCheck = checkIsDomainAllowed(cleanEmail, latestSettings);
-          if (!onboardingDomainCheck.allowed) {
-            setErrorMsg(onboardingDomainCheck.reason || '🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้ลงทะเบียนเข้าใช้งาน');
-            setIsGoogleModalOpen(false);
-            return;
-          }
-
           // New allowed Google account - open Onboarding Modal with prefilled default name parts
           setGoogleEmailInput(cleanEmail);
           const rawName = fbUser.displayName || cleanEmail.split('@')[0];
@@ -218,12 +202,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         // Fallback for mobile webview where Google popup is blocked or sessionStorage is partitioned
         if (email && email.includes('@')) {
           const cleanEmail = email.trim().toLowerCase();
-          const domainCheck = checkIsDomainAllowed(cleanEmail, latestSettings);
-          if (!domainCheck.allowed) {
-            setErrorMsg(domainCheck.reason || '🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้เข้าใช้งานระบบ');
-            setIsGoogleModalOpen(false);
-            return;
-          }
           setGoogleEmailInput(cleanEmail);
           setIsGoogleModalOpen(true);
         } else {
@@ -250,15 +228,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       return;
     }
 
-    // STRICT DOMAIN CHECK IN MODAL SUBMIT
+    // Refresh system settings state
     const latestSettings = await fetchSystemSettings().catch(() => sysSettings);
     if (latestSettings) setSysSettings(latestSettings);
-
-    const domainCheck = checkIsDomainAllowed(cleanEmail, latestSettings);
-    if (!domainCheck.allowed) {
-      setErrorMsg(domainCheck.reason || '🚫 โดเมนอีเมลนี้ไม่ได้รับอนุญาตให้ลงทะเบียนเข้าใช้งานระบบ');
-      return;
-    }
 
     if (!googlePasswordInput.trim() || googlePasswordInput.trim().length < 6) {
       setErrorMsg('กรุณากำหนดรหัสผ่านใหม่สำหรับเข้าสู่ระบบด้วยอีเมล อย่างน้อย 6 ตัวอักษร');

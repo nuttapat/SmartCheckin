@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Course, LeaveRequest, LeaveStatus, LeaveType } from '../types';
 import { fetchTeacherLeaveRequests, updateLeaveRequestStatus } from '../services/api';
-import { FileText, CheckCircle, XCircle, Clock, Search, Filter, Eye, X, MessageSquare, AlertCircle, Sparkles, UserCheck, Download } from 'lucide-react';
+import { FileText, CheckCircle, XCircle, Clock, Search, Filter, Eye, X, MessageSquare, AlertCircle, Sparkles, UserCheck, Download, Maximize2, Minimize2 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 interface TeacherLeaveManagementModalProps {
@@ -22,6 +22,7 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
   const { isDarkMode: themeIsDarkMode } = useTheme();
   const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
 
+  const [isMaximized, setIsMaximized] = useState<boolean>(false);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [statusFilter, setStatusFilter] = useState<'ALL' | LeaveStatus>('ALL');
@@ -161,7 +162,11 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
       <div
-        className={`relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-3xl border shadow-2xl overflow-hidden transition-all ${
+        className={`relative w-full transition-all duration-300 flex flex-col border shadow-2xl overflow-hidden ${
+          isMaximized
+            ? 'w-full h-full max-w-none max-h-none rounded-none'
+            : 'max-w-4xl max-h-[90vh] rounded-3xl'
+        } ${
           isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
         }`}
       >
@@ -196,14 +201,26 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className={`p-2 rounded-xl transition cursor-pointer shrink-0 ${
-              isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'
-            }`}
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsMaximized(!isMaximized)}
+              title={isMaximized ? 'ย่อขนาดหน้าต่าง' : 'ขยายเต็มหน้าจอ'}
+              className={`p-2 rounded-xl transition cursor-pointer ${
+                isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'
+              }`}
+            >
+              {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </button>
+            <button
+              onClick={onClose}
+              className={`p-2 rounded-xl transition cursor-pointer ${
+                isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'
+              }`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Filter Toolbar */}
