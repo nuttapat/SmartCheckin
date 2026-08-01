@@ -5,6 +5,7 @@ import { X, BookOpen, Plus, Trash2, Calendar, Save, CheckCircle2, MapPin, Globe,
 import { MapPicker } from './MapPicker';
 import { DeleteCourseConfirmModal } from './DeleteCourseConfirmModal';
 import { useTheme } from '../context/ThemeContext';
+import { addOneWeekToDate } from '../utils/dateHelper';
 
 interface TeacherCourseEditModalProps {
   isOpen: boolean;
@@ -65,14 +66,17 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   if (!isOpen) return null;
 
   const handleAddWeek = () => {
-    const nextWeekNum = weeks.length > 0 ? Math.max(...weeks.map((w) => w.weekNumber)) + 1 : 1;
-    const todayStr = new Date().toISOString().split('T')[0];
+    const sorted = [...weeks].sort((a, b) => a.weekNumber - b.weekNumber);
+    const lastWeek = sorted.length > 0 ? sorted[sorted.length - 1] : null;
+    const nextWeekNum = lastWeek ? lastWeek.weekNumber + 1 : 1;
+    const nextDate = lastWeek && lastWeek.date ? addOneWeekToDate(lastWeek.date) : new Date().toISOString().split('T')[0];
+
     setWeeks((prev) => [
       ...prev,
       {
         weekNumber: nextWeekNum,
         topic: `หัวข้อการสอนสัปดาห์ที่ ${nextWeekNum}`,
-        date: todayStr,
+        date: nextDate,
       },
     ]);
   };
@@ -99,6 +103,15 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
         ...updated[index],
         [field]: value,
       };
+
+      if (field === 'date' && typeof value === 'string') {
+        let currentDate = value;
+        for (let i = index + 1; i < updated.length; i++) {
+          currentDate = addOneWeekToDate(currentDate);
+          updated[i].date = currentDate;
+        }
+      }
+
       return updated;
     });
   };

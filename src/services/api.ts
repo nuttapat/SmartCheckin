@@ -187,7 +187,8 @@ export async function activateSession(
   isGpsCheckEnabled: boolean = true,
   sessionDurationMinutes: number = 30,
   lateThresholdMinutes: number = 15,
-  isStaticQr: boolean = false
+  isStaticQr: boolean = false,
+  qrRefreshIntervalSeconds: number = 30
 ) {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/activate`, {
     method: 'POST',
@@ -199,6 +200,7 @@ export async function activateSession(
       sessionDurationMinutes,
       lateThresholdMinutes,
       isStaticQr,
+      qrRefreshIntervalSeconds,
     }),
   });
   return parseResponse(res);
@@ -218,6 +220,15 @@ export async function toggleQrMode(targetId: string, isStatic: boolean) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ isStatic }),
+  });
+  return parseResponse(res);
+}
+
+export async function updateQrInterval(targetId: string, qrRefreshIntervalSeconds: number) {
+  const res = await fetch(`${API_BASE}/sessions/${targetId}/qr-interval`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ qrRefreshIntervalSeconds }),
   });
   return parseResponse(res);
 }

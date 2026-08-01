@@ -146,6 +146,7 @@ export interface Session {
   sessionDurationMinutes?: number; // e.g. 30 minutes
   lateThresholdMinutes?: number; // e.g. 15 minutes
   isStaticQr?: boolean; // false for Dynamic QR (30s rotation), true for Static QR
+  qrRefreshIntervalSeconds?: number; // Custom QR refresh interval in seconds (e.g. 10, 15, 30, 60, 120)
   qrSecretToken?: string;
   qrExpiresAt?: number;
   createdAt: string;
@@ -167,6 +168,7 @@ export interface AttendanceRecord {
   distanceMeters: number;
   deviceId: string;
   checkinMethod?: 'QR_ONLY' | 'GPS_ONLY' | 'HYBRID' | 'TOKEN';
+  isLate?: boolean;
 }
 
 export interface TeacherAttendanceRecord {
@@ -201,6 +203,7 @@ export interface QuickEvent {
   sessionDurationMinutes?: number;
   lateThresholdMinutes?: number;
   isStaticQr?: boolean;
+  qrRefreshIntervalSeconds?: number;
   createdAt: string;
   isGpsCheckEnabled?: boolean;
 }

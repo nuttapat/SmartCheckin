@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { User, Course, Session, AttendanceRecord, TeacherAttendanceRecord, InviteLink, CourseMember, CourseMemberRole } from '../types';
-import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck, toggleQrMode } from '../services/api';
+import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck, toggleQrMode, updateQrInterval } from '../services/api';
 import { QrCode, Users, Download, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown, EyeOff, Eye, Lock, Maximize2, Minimize2, ZoomIn, ZoomOut } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
 import { getDeviceInfo } from '../utils/deviceHelper';
+import { formatBangkokDateTime, formatBangkokTime } from '../utils/dateHelper';
 import { TeacherCourseEditModal } from './TeacherCourseEditModal';
 import { TeacherLeaveManagementModal } from './TeacherLeaveManagementModal';
 import { DeleteCourseConfirmModal } from './DeleteCourseConfirmModal';
@@ -120,6 +121,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [isQrModalOpen, setIsQrModalOpen] = useState<boolean>(true);
   const [sessionDurationMinutes, setSessionDurationMinutes] = useState<number>(30);
   const [lateThresholdMinutes, setLateThresholdMinutes] = useState<number>(15);
+  const [qrInterval, setQrInterval] = useState<number>(30);
   const [qrCountdown, setQrCountdown] = useState<number>(30);
   const [teacherCoords, setTeacherCoords] = useState<{ lat: number; lng: number }>(() => {
     try {
@@ -183,17 +185,70 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const exportCourseOverviewCSV = (courseOverviewItem: any) => {
     if (!courseOverviewItem) return;
     const course = courseOverviewItem.course;
+    const sessionDetailsList = courseOverviewItem.sessionDetailsList || [];
+
     let csv = `รายงานภาพรวมการเข้าเรียนรายวิชา,${course.courseCode} - ${course.courseName}\n`;
     csv += `อาจารย์ผู้รับผิดชอบ,${course.coordinatorName || course.ownerName}\n`;
     csv += `จำนวนผู้ลงทะเบียน,${courseOverviewItem.totalRegisteredCount} คน,จำนวนคาบเรียนทั้งหมด,${courseOverviewItem.totalSessions} คาบ\n`;
     csv += `อัตราการเข้าเรียนเฉลี่ย,${courseOverviewItem.courseAvgAttendanceRate}%\n\n`;
 
-    csv += `ลำดับ,รหัสนักศึกษา,ชื่อ-นามสกุล,อีเมล,จำนวนคาบที่เข้าเรียน,คาบทั้งหมด,เปอร์เซ็นต์เข้าเรียน,เวลาเข้าเรียนเฉลี่ย,การสแกนล่าสุด,สถานะสิทธิ์สอบ\n`;
+    // Per-session headers: e.g. "สัปดาห์ที่ 1 (บทนำ)", "สัปดาห์ที่ 2 (การออกแบบระบบ)"
+    const sessionHeaders = sessionDetailsList.map((s: any) => {
+      const weekLabel = `สัปดาห์ที่ ${s.weekNumber}`;
+      const topicLabel = s.topic ? ` (${s.topic.replace(/,/g, ' ')})` : '';
+      return `"${weekLabel}${topicLabel}"`;
+    });
 
-    courseOverviewItem.studentList.forEach((st: any, index: number) => {
+    const headers = [
+      'ลำดับ',
+      'รหัสนักศึกษา',
+      'ชื่อ-นามสกุล',
+      'อีเมล',
+      ...sessionHeaders,
+      'จำนวนคาบที่เข้าเรียน',
+      'จำนวนคาบที่ลา',
+      'คาบทั้งหมด',
+      'เปอร์เซ็นต์เข้าเรียน',
+      'เวลาเข้าเรียนเฉลี่ย',
+      'การสแกนล่าสุด (Bangkok Time)',
+      'สถานะสิทธิ์สอบ',
+    ];
+
+    csv += headers.join(',') + '\n';
+
+    (courseOverviewItem.studentList || []).forEach((st: any, index: number) => {
       const examStatus = st.attendancePercent >= 80 ? 'มีสิทธิ์สอบ (80%+)' : 'เสี่ยงหมดสิทธิ์สอบ (ต่ำกว่า 80%)';
-      const lastCheckinStr = st.lastCheckinTime ? new Date(st.lastCheckinTime).toLocaleString('th-TH') : 'ยังไม่เคยสแกน';
-      csv += `${index + 1},"${st.studentIdNum}","${st.studentName}","${st.email}",${st.attendedCount},${st.totalSessionsCount},${st.attendancePercent}%,"${st.avgTimeStr}","${lastCheckinStr}","${examStatus}"\n`;
+      const lastCheckinStr = formatBangkokDateTime(st.lastCheckinTime);
+
+      // Per-session status for this student
+      const sessionCols = sessionDetailsList.map((s: any) => {
+        if (Array.isArray(st.sessionStatuses)) {
+          const match = st.sessionStatuses.find(
+            (ss: any) => ss.sessionId === s.sessionId || String(ss.weekNumber) === String(s.weekNumber)
+          );
+          if (match && match.statusText) {
+            return `"${match.statusText}"`;
+          }
+        }
+        return `"ขาดเรียน"`;
+      });
+
+      const row = [
+        index + 1,
+        `"${st.studentIdNum || '-'}"`,
+        `"${st.studentName || '-'}"`,
+        `"${st.email || '-'}"`,
+        ...sessionCols,
+        st.attendedCount || 0,
+        st.approvedLeaveCount || 0,
+        st.totalSessionsCount || 0,
+        `"${st.attendancePercent || 0}%"`,
+        `"${st.avgTimeStr || '-'}"`,
+        `"${lastCheckinStr}"`,
+        `"${examStatus}"`,
+      ];
+
+      csv += row.join(',') + '\n';
     });
 
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -204,6 +259,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     a.click();
     URL.revokeObjectURL(url);
   };
+
 
   // Invite modal state
   const [inviteModalCode, setInviteModalCode] = useState<InviteLink | null>(null);
@@ -563,7 +619,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           if (payload.data.isStatic !== undefined) {
             setIsStaticQr(payload.data.isStatic);
           }
-          setQrCountdown(30);
+          const currentInterval = payload.data.refreshIntervalSeconds || qrInterval || 30;
+          setQrInterval(currentInterval);
+          setQrCountdown(currentInterval);
 
           // Generate QR Code Data URL image (Full web URL for native camera scanning)
           const qrText = isEvent ? `EVT:${targetId}:${newToken}` : `SES:${targetId}:${newToken}`;
@@ -593,13 +651,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       setIsQrModalOpen(true);
       setLiveCheckins([]);
 
+      const initialInterval = session.qrRefreshIntervalSeconds || qrInterval || 30;
+      setQrInterval(initialInterval);
+      setQrCountdown(initialInterval);
+
       // Prioritize classroom location specified for this course or session
       let currentLat = session.teacherLat || selectedCourse?.defaultLat || teacherCoords.lat;
       let currentLng = session.teacherLng || selectedCourse?.defaultLng || teacherCoords.lng;
 
-      const res = await activateSession(session.id, currentLat, currentLng, isGpsCheckEnabled, duration, lateThreshold, isStaticQr);
+      const res = await activateSession(session.id, currentLat, currentLng, isGpsCheckEnabled, duration, lateThreshold, isStaticQr, initialInterval);
       if (res.isStatic !== undefined) {
         setIsStaticQr(res.isStatic);
+      }
+      if (res.refreshIntervalSeconds) {
+        setQrInterval(res.refreshIntervalSeconds);
+        setQrCountdown(res.refreshIntervalSeconds);
       }
 
       // Render initial QR (Full web URL for native phone camera scanning)
@@ -616,6 +682,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
   };
 
+  // Update QR Token Refresh Interval
+  const handleUpdateQrInterval = async (newInterval: number) => {
+    setQrInterval(newInterval);
+    setQrCountdown(newInterval);
+    if (activeSession?.id) {
+      try {
+        await updateQrInterval(activeSession.id, newInterval);
+      } catch (err) {
+        console.error('Failed to update QR interval:', err);
+      }
+    }
+  };
+
   // Update duration / late threshold on active session
   const handleUpdateDurationAndLate = async (newDuration: number, newLateThreshold: number) => {
     setSessionDurationMinutes(newDuration);
@@ -623,7 +702,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     if (activeSession) {
       let currentLat = activeSession.teacherLat || selectedCourse?.defaultLat || teacherCoords.lat;
       let currentLng = activeSession.teacherLng || selectedCourse?.defaultLng || teacherCoords.lng;
-      await activateSession(activeSession.id, currentLat, currentLng, isGpsCheckEnabled, newDuration, newLateThreshold);
+      await activateSession(activeSession.id, currentLat, currentLng, isGpsCheckEnabled, newDuration, newLateThreshold, isStaticQr, qrInterval);
     }
   };
 
@@ -653,16 +732,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
   };
 
-  // 30-second Countdown Timer Effect for Dynamic QR Code
+  // Dynamic QR Code Countdown Timer Effect
   useEffect(() => {
     if (!activeSession) return;
 
     const timer = setInterval(() => {
-      setQrCountdown((prev) => (prev > 0 ? prev - 1 : 30));
+      setQrCountdown((prev) => (prev > 0 ? prev - 1 : qrInterval));
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [activeSession]);
+  }, [activeSession, qrInterval]);
 
   // Generate Invite Link
   const handleGenerateInvite = async (role: 'STUDENT' | 'CO_TEACHER') => {
@@ -2035,7 +2114,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 </button>
 
                 {/* Minimal Segment Toggle Switch */}
-                <div className="flex items-center justify-center w-full">
+                <div className="flex flex-col items-center justify-center w-full space-y-2">
                   <div className={`inline-flex items-center p-1 border rounded-xl shadow-inner text-xs font-bold space-x-1 ${
                     isDarkMode
                       ? 'bg-slate-900 border-slate-800'
@@ -2129,7 +2208,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     </div>
                   ) : (
                     <div className="absolute top-2 right-2 px-2.5 py-0.5 bg-emerald-500 text-slate-950 font-black text-[10px] rounded-full uppercase tracking-wider flex items-center space-x-1 shadow-xs">
-                      <span>Dynamic 30s</span>
+                      <span>Dynamic {qrInterval}s</span>
                     </div>
                   )}
                 </div>
@@ -2181,19 +2260,48 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     <span className={`text-[11px] font-bold ${isDarkMode ? 'text-sky-300' : 'text-sky-700'}`}>โหมด Static: รหัสคงที่ตลอดคลาส</span>
                   </div>
                 ) : (
-                  <div className="w-full space-y-1">
-                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
-                      <span className="flex items-center space-x-1">
-                        <Clock className="w-3.5 h-3.5 text-blue-400 animate-spin" />
-                        <span>รีเฟรชรหัสถัดไปในอีก:</span>
-                      </span>
-                      <span className="font-mono text-emerald-400 font-bold">{qrCountdown} วินาที</span>
+                  <div className="w-full space-y-2">
+                    <div className="w-full space-y-1">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
+                        <span className="flex items-center space-x-1">
+                          <Clock className="w-3.5 h-3.5 text-blue-400 animate-spin" />
+                          <span>รีเฟรชรหัสถัดไปในอีก:</span>
+                        </span>
+                        <span className="font-mono text-emerald-400 font-bold">{qrCountdown} วินาที</span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-500 transition-all duration-1000 ease-linear"
+                          style={{ width: `${Math.min(100, Math.max(0, (qrCountdown / qrInterval) * 100))}%` }}
+                        ></div>
+                      </div>
                     </div>
-                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-blue-500 transition-all duration-1000 ease-linear"
-                        style={{ width: `${(qrCountdown / 30) * 100}%` }}
-                      ></div>
+
+                    {/* Dynamic Refresh Interval Selector underneath countdown bar */}
+                    <div className="flex flex-col items-center justify-center space-y-1 w-full pt-1">
+                      <span className={`text-[10px] font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                        ⏱️ เลือกรอบเวลารีเฟรช Dynamic QR:
+                      </span>
+                      <div className={`inline-flex items-center p-1 border rounded-xl space-x-1 ${
+                        isDarkMode ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-100 border-slate-300'
+                      }`}>
+                        {[10, 15, 30, 60, 120].map((sec) => (
+                          <button
+                            key={sec}
+                            type="button"
+                            onClick={() => handleUpdateQrInterval(sec)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all duration-150 cursor-pointer ${
+                              qrInterval === sec
+                                ? 'bg-emerald-600 text-white shadow-xs font-black'
+                                : isDarkMode
+                                  ? 'text-slate-400 hover:text-white hover:bg-slate-800'
+                                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                            }`}
+                          >
+                            {sec < 60 ? `${sec}s` : `${sec / 60}m`}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}

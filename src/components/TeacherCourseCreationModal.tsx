@@ -4,6 +4,7 @@ import { createCourse } from '../services/api';
 import { X, Plus, Minus, BookOpen, Calendar, CheckCircle2, MapPin, Globe, UserCheck, Maximize2, Minimize2 } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { useTheme } from '../context/ThemeContext';
+import { addOneWeekToDate } from '../utils/dateHelper';
 
 interface TeacherCourseCreationModalProps {
   isOpen: boolean;
@@ -87,12 +88,14 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
 
   const handleAddWeek = () => {
     const nextNum = weeks.length + 1;
+    const lastWeek = weeks.length > 0 ? weeks[weeks.length - 1] : null;
+    const nextDate = lastWeek && lastWeek.date ? addOneWeekToDate(lastWeek.date) : new Date().toISOString().split('T')[0];
     setWeeks([
       ...weeks,
       {
         weekNumber: nextNum,
         topic: '',
-        date: new Date(Date.now() + nextNum * 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        date: nextDate,
       },
     ]);
   };
@@ -109,9 +112,17 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
     setWeeks(updated);
   };
 
-  const handleWeekDateChange = (index: number, date: string) => {
+  const handleWeekDateChange = (index: number, newDate: string) => {
     const updated = [...weeks];
-    updated[index].date = date;
+    updated[index].date = newDate;
+
+    // Auto-update subsequent weeks (+7 days iteratively from the changed week)
+    let currentDate = newDate;
+    for (let i = index + 1; i < updated.length; i++) {
+      currentDate = addOneWeekToDate(currentDate);
+      updated[i].date = currentDate;
+    }
+
     setWeeks(updated);
   };
 

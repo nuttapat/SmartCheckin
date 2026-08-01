@@ -84,6 +84,43 @@ let systemSettings: SystemSettings = {
   updatedBy: 'system',
 };
 
+// Bangkok Timezone (Asia/Bangkok, UTC+7) Helper Functions
+function formatBangkokDateTime(dateInput: string | number | Date | null | undefined): string {
+  if (!dateInput) return 'ยังไม่เคยสแกน';
+  try {
+    const dt = new Date(dateInput);
+    if (isNaN(dt.getTime())) return 'ยังไม่เคยสแกน';
+    return dt.toLocaleString('th-TH', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+  } catch (e) {
+    return 'ยังไม่เคยสแกน';
+  }
+}
+
+function formatBangkokTime(dateInput: string | number | Date | null | undefined): string {
+  if (!dateInput) return '-';
+  try {
+    const dt = new Date(dateInput);
+    if (isNaN(dt.getTime())) return '-';
+    return dt.toLocaleTimeString('th-TH', {
+      timeZone: 'Asia/Bangkok',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }) + ' น.';
+  } catch (e) {
+    return '-';
+  }
+}
+
 const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || 'nuttapat.anu@gmail.com').trim().toLowerCase();
 
 // Domain check helper function for new user registration
@@ -163,6 +200,8 @@ const checkRegistrationDomain = (emailStr: string): { allowed: boolean; forcedRo
 interface ActiveQR {
   token: string;
   expiresAt: number;
+  refreshIntervalSeconds?: number;
+  nextRefreshAt?: number;
   lat: number;
   lng: number;
   isGpsCheckEnabled?: boolean;
@@ -613,80 +652,87 @@ function generate6CharToken(): string {
   return result;
 }
 
-// Periodic Dynamic QR Code Refresher (every 30 seconds)
+// Periodic Dynamic QR Code Refresher (runs every 2 seconds to check custom refresh intervals)
 setInterval(() => {
   const now = Date.now();
-  // Loop active sessions
-  sessions.forEach((session, sId) => {
-    if (session.isActive) {
-      const existingQR = activeQRCodes.get(sId);
-      if (existingQR && existingQR.isStatic) {
-        existingQR.expiresAt = now + 86400000;
-        activeQRCodes.set(sId, existingQR);
-        activeWsClients.forEach((client) => {
-          if (client.sessionId === sId && client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ type: 'QR_REFRESH', data: existingQR }));
-          }
-        });
-        return;
-      }
 
+  const processQrRefresh = (
+    targetId: string,
+    lat: number,
+    lng: number,
+    isGpsCheckEnabled: boolean,
+    customIntervalSec?: number,
+    isEvent: boolean = false
+  ) => {
+    let existingQR = activeQRCodes.get(targetId);
+
+    if (existingQR && existingQR.isStatic) {
+      if (existingQR.expiresAt - now < 3600000) {
+        existingQR.expiresAt = now + 86400000;
+        activeQRCodes.set(targetId, existingQR);
+      }
+      return;
+    }
+
+    const intervalSec = customIntervalSec || existingQR?.refreshIntervalSeconds || systemSettings.dynamicQrIntervalSeconds || 30;
+    const nextRefresh = existingQR?.nextRefreshAt || 0;
+
+    // Refresh if no QR exists or if time for next refresh has passed
+    if (!existingQR || now >= nextRefresh) {
       const newToken = generate6CharToken();
-      const expiresAt = now + 35000; // valid for 35 seconds (30s cycle + 5s latency grace)
+      const expiresAt = now + (intervalSec * 1000) + 5000; // 5s grace period for latency
+      const nextRefreshAt = now + (intervalSec * 1000);
+
       const qrData: ActiveQR = {
         token: newToken,
         expiresAt,
-        lat: session.teacherLat,
-        lng: session.teacherLng,
-        isGpsCheckEnabled: session.isGpsCheckEnabled !== false,
+        refreshIntervalSeconds: intervalSec,
+        nextRefreshAt,
+        lat,
+        lng,
+        isGpsCheckEnabled,
         isStatic: false,
       };
-      activeQRCodes.set(sId, qrData);
+      activeQRCodes.set(targetId, qrData);
 
-      // Broadcast to clients watching this session
+      // Broadcast to WebSocket clients watching this target
       activeWsClients.forEach((client) => {
-        if (client.sessionId === sId && client.readyState === WebSocket.OPEN) {
+        const matches = isEvent ? client.eventId === targetId : client.sessionId === targetId;
+        if (matches && client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify({ type: 'QR_REFRESH', data: qrData }));
         }
       });
+    }
+  };
+
+  // Loop active sessions
+  sessions.forEach((session, sId) => {
+    if (session.isActive) {
+      processQrRefresh(
+        sId,
+        session.teacherLat,
+        session.teacherLng,
+        session.isGpsCheckEnabled !== false,
+        session.qrRefreshIntervalSeconds,
+        false
+      );
     }
   });
 
   // Loop active quick events
   quickEvents.forEach((qEvent, eId) => {
     if (qEvent.isActive) {
-      const existingQR = activeQRCodes.get(eId);
-      if (existingQR && existingQR.isStatic) {
-        existingQR.expiresAt = now + 86400000;
-        activeQRCodes.set(eId, existingQR);
-        activeWsClients.forEach((client) => {
-          if (client.eventId === eId && client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ type: 'QR_REFRESH', data: existingQR }));
-          }
-        });
-        return;
-      }
-
-      const newToken = generate6CharToken();
-      const expiresAt = now + 35000;
-      const qrData: ActiveQR = {
-        token: newToken,
-        expiresAt,
-        lat: qEvent.teacherLat,
-        lng: qEvent.teacherLng,
-        isGpsCheckEnabled: qEvent.isGpsCheckEnabled !== false,
-        isStatic: false,
-      };
-      activeQRCodes.set(eId, qrData);
-
-      activeWsClients.forEach((client) => {
-        if (client.eventId === eId && client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({ type: 'QR_REFRESH', data: qrData }));
-        }
-      });
+      processQrRefresh(
+        eId,
+        qEvent.teacherLat,
+        qEvent.teacherLng,
+        qEvent.isGpsCheckEnabled !== false,
+        qEvent.qrRefreshIntervalSeconds,
+        true
+      );
     }
   });
-}, 30000);
+}, 2000);
 
 // Helper function to broadcast check-in updates over WebSocket
 function broadcastCheckinEvent(targetId: string, record: AttendanceRecord) {
@@ -1634,7 +1680,7 @@ app.post('/api/invites/join', (req, res) => {
 
 // 3. Active Session & Dynamic QR Management
 app.post('/api/sessions/:id/activate', (req, res) => {
-  const { teacherLat, teacherLng, isGpsCheckEnabled = true, sessionDurationMinutes, lateThresholdMinutes, isStaticQr } = req.body;
+  const { teacherLat, teacherLng, isGpsCheckEnabled = true, sessionDurationMinutes, lateThresholdMinutes, isStaticQr, qrRefreshIntervalSeconds } = req.body;
   const session = sessions.get(req.params.id);
 
   if (!session) {
@@ -1643,12 +1689,15 @@ app.post('/api/sessions/:id/activate', (req, res) => {
 
   const course = courses.get(session.courseId);
 
+  const intervalSec = Math.max(5, Math.min(600, Number(qrRefreshIntervalSeconds) || session.qrRefreshIntervalSeconds || systemSettings.dynamicQrIntervalSeconds || 30));
+
   session.isActive = true;
   session.activatedAt = new Date().toISOString();
   session.isGpsCheckEnabled = isGpsCheckEnabled !== false;
   session.sessionDurationMinutes = sessionDurationMinutes ? Number(sessionDurationMinutes) : (session.sessionDurationMinutes || 30);
   session.lateThresholdMinutes = lateThresholdMinutes ? Number(lateThresholdMinutes) : (session.lateThresholdMinutes || 15);
   session.isStaticQr = isStaticQr === true;
+  session.qrRefreshIntervalSeconds = intervalSec;
 
   let inputLat = teacherLat !== undefined ? parseFloat(teacherLat) : NaN;
   let inputLng = teacherLng !== undefined ? parseFloat(teacherLng) : NaN;
@@ -1672,17 +1721,23 @@ app.post('/api/sessions/:id/activate', (req, res) => {
   // Generate immediate active QR token (6 characters) - fresh for each session
   const token = generate6CharToken();
   const isStatic = isStaticQr === true;
-  const expiresAt = isStatic ? Date.now() + 86400000 : Date.now() + 35000;
-  activeQRCodes.set(session.id, {
+  const now = Date.now();
+  const expiresAt = isStatic ? now + 86400000 : now + (intervalSec * 1000) + 5000;
+  const nextRefreshAt = now + (intervalSec * 1000);
+
+  const qrData: ActiveQR = {
     token,
     expiresAt,
+    refreshIntervalSeconds: intervalSec,
+    nextRefreshAt,
     lat: session.teacherLat,
     lng: session.teacherLng,
     isGpsCheckEnabled: session.isGpsCheckEnabled,
     isStatic,
-  });
+  };
+  activeQRCodes.set(session.id, qrData);
 
-  res.json({ message: 'Session QR code activated', session, qrToken: token, expiresAt, isStatic });
+  res.json({ message: 'Session QR code activated', session, qrToken: token, expiresAt, isStatic, refreshIntervalSeconds: intervalSec });
 });
 
 app.post('/api/sessions/:id/gps-toggle', (req, res) => {
@@ -1719,8 +1774,11 @@ app.post('/api/sessions/:id/qr-mode', (req, res) => {
 
   const activeQR = activeQRCodes.get(targetId);
   if (activeQR) {
+    const now = Date.now();
+    const intervalSec = activeQR.refreshIntervalSeconds || systemSettings.dynamicQrIntervalSeconds || 30;
     activeQR.isStatic = isStaticBool;
-    activeQR.expiresAt = isStaticBool ? Date.now() + 86400000 : Date.now() + 35000;
+    activeQR.expiresAt = isStaticBool ? now + 86400000 : now + (intervalSec * 1000) + 5000;
+    activeQR.nextRefreshAt = now + (intervalSec * 1000);
 
     // Broadcast updated QR data immediately via WebSocket
     activeWsClients.forEach((client) => {
@@ -1731,6 +1789,43 @@ app.post('/api/sessions/:id/qr-mode', (req, res) => {
   }
 
   res.json({ message: 'QR Mode updated successfully', isStatic: isStaticBool, activeQR });
+});
+
+app.post('/api/sessions/:id/qr-interval', (req, res) => {
+  const { qrRefreshIntervalSeconds } = req.body;
+  const targetId = req.params.id;
+  const intervalSec = Math.max(5, Math.min(600, Number(qrRefreshIntervalSeconds) || 30));
+
+  const session = sessions.get(targetId);
+  if (session) {
+    session.qrRefreshIntervalSeconds = intervalSec;
+  }
+  const qEvt = quickEvents.get(targetId);
+  if (qEvt) {
+    qEvt.qrRefreshIntervalSeconds = intervalSec;
+  }
+
+  const activeQR = activeQRCodes.get(targetId);
+  const now = Date.now();
+  if (activeQR) {
+    activeQR.refreshIntervalSeconds = intervalSec;
+    if (!activeQR.isStatic) {
+      // Immediately issue a fresh token with new refresh cycle
+      const newToken = generate6CharToken();
+      activeQR.token = newToken;
+      activeQR.expiresAt = now + (intervalSec * 1000) + 5000;
+      activeQR.nextRefreshAt = now + (intervalSec * 1000);
+    }
+
+    // Broadcast updated QR data immediately via WebSocket
+    activeWsClients.forEach((client) => {
+      if ((client.sessionId === targetId || client.eventId === targetId) && client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ type: 'QR_REFRESH', data: activeQR }));
+      }
+    });
+  }
+
+  res.json({ message: 'QR Refresh Interval updated', qrRefreshIntervalSeconds: intervalSec, activeQR });
 });
 
 app.post('/api/sessions/:id/deactivate', (req, res) => {
@@ -2239,12 +2334,13 @@ app.get('/api/export-csv/:courseId', (req, res) => {
     .map((cm) => users.get(cm.userId))
     .filter(Boolean) as User[];
 
-  // Header row: Student ID, Title, Name TH, Name EN, Email, Week 1, Week 2, ..., Overall %
-  let csv = 'Student ID,Title,Full Name (TH),Full Name (EN),Email';
+  // Header row: Student ID, Title, Name TH, Name EN, Email, สัปดาห์ที่ 1, ..., Overall %
+  let csv = 'รหัสนักศึกษา,คำนำหน้า,ชื่อ-นามสกุล (TH),Full Name (EN),อีเมล';
   courseSessions.forEach((s) => {
-    csv += `,Week ${s.weekNumber} (${s.topic.replace(/,/g, ' ')})`;
+    const topicStr = s.topic ? ` (${s.topic.replace(/,/g, ' ')})` : '';
+    csv += `,"สัปดาห์ที่ ${s.weekNumber}${topicStr}"`;
   });
-  csv += ',Attended Sessions,Total Sessions,Attendance Rate (%)\n';
+  csv += ',จำนวนคาบที่เข้าเรียน,คาบทั้งหมด,เปอร์เซ็นต์เข้าเรียน (%)\n';
 
   members.forEach((st) => {
     let attendedCount = 0;
@@ -2259,14 +2355,17 @@ app.get('/api/export-csv/:courseId', (req, res) => {
             : approvedLeave.leaveType === LeaveType.PERSONAL
             ? 'ลากิจ'
             : 'ลาอื่นๆ';
-        weekCols += `,LEAVE (${leaveTypeLabel})`;
+        weekCols += `,"ลาเรียน (${leaveTypeLabel})"`;
       } else {
         const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === st.id);
         if (rec) {
           attendedCount++;
-          weekCols += `,PRESENT (${new Date(rec.timestamp).toLocaleTimeString()})`;
+          const checkinTimeBkk = formatBangkokTime(rec.timestamp);
+          const isLate = rec.status === AttendanceStatus.LATE || Boolean(rec.isLate);
+          const statusText = isLate ? `มาสาย (${checkinTimeBkk})` : `มาเรียน (${checkinTimeBkk})`;
+          weekCols += `,"${statusText}"`;
         } else {
-          weekCols += `,ABSENT`;
+          weekCols += `,"ขาดเรียน"`;
         }
       }
     });
@@ -2274,7 +2373,7 @@ app.get('/api/export-csv/:courseId', (req, res) => {
     const total = courseSessions.length || 1;
     const rate = Math.round((attendedCount / total) * 100);
 
-    csv += `"${st.universityId}","${st.title}","${st.firstNameTh} ${st.lastNameTh}","${st.firstNameEn} ${st.lastNameEn}","${st.email}"${weekCols},${attendedCount},${total},${rate}%\n`;
+    csv += `"${st.universityId || '-'}","${st.title || ''}","${st.firstNameTh || ''} ${st.lastNameTh || ''}","${st.firstNameEn || ''} ${st.lastNameEn || ''}","${st.email}"${weekCols},${attendedCount},${total},${rate}%\n`;
   });
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -2300,7 +2399,7 @@ app.get('/api/export-teacher-csv', (req, res) => {
 
   let csv = 'อาจารย์ผู้สอน,รหัสวิชา,ชื่อรายวิชา,ห้องเรียน/อาคาร,หัวข้อคาบเรียน,วิธีเช็คชื่อ,ละติจูด,ลองจิจูด,วันเวลาลงชื่อ,หมายเหตุ\n';
   records.forEach((r) => {
-    const timeStr = new Date(r.timestamp).toLocaleString('th-TH');
+    const timeStr = formatBangkokDateTime(r.timestamp);
     csv += `"${r.teacherName || ''}","${r.courseCode || ''}","${r.courseName || ''}","${r.buildingRoom || ''}","${r.sessionTopic || ''}","${r.checkinMethod || ''}",${r.lat},${r.lng},"${timeStr}","${r.notes || ''}"\n`;
   });
 
@@ -2312,6 +2411,7 @@ app.get('/api/export-teacher-csv', (req, res) => {
   // Add UTF-8 BOM for Thai character encoding in Excel
   res.send('\uFEFF' + csv);
 });
+
 
 // 7. LEAVE REQUEST ENDPOINTS
 // Submit leave request (นักศึกษาส่งใบลาเรียน)
@@ -2566,17 +2666,60 @@ app.get('/api/teacher/courses-overview', (req, res) => {
       let lastCheckinMethod: string | null = null;
       const validCheckinTimes: Date[] = [];
 
-      cSessions.forEach((s) => {
+      const sessionStatuses = cSessions.map((s) => {
         const approvedLeave = getApprovedLeaveForSession(m.userId, course.id, s);
         if (approvedLeave) {
           approvedLeaveCount++;
+          const leaveTypeLabel =
+            approvedLeave.leaveType === LeaveType.SICK
+              ? 'ลาป่วย'
+              : approvedLeave.leaveType === LeaveType.PERSONAL
+              ? 'ลากิจ'
+              : 'ลาอื่นๆ';
+          return {
+            sessionId: s.id,
+            weekNumber: s.weekNumber,
+            topic: s.topic,
+            status: 'LEAVE',
+            statusText: `ลาเรียน (${leaveTypeLabel})`,
+            shortStatus: leaveTypeLabel,
+            checkinTime: null,
+            checkinTimeBangkok: null,
+          };
         } else {
           const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === m.userId);
           if (rec) {
             attendedCount++;
-            validCheckinTimes.push(new Date(rec.timestamp));
-            lastCheckinTime = rec.timestamp;
-            lastCheckinMethod = rec.checkinMethod;
+            const recDt = new Date(rec.timestamp);
+            validCheckinTimes.push(recDt);
+            if (!lastCheckinTime || new Date(rec.timestamp).getTime() > new Date(lastCheckinTime).getTime()) {
+              lastCheckinTime = rec.timestamp;
+              lastCheckinMethod = rec.checkinMethod;
+            }
+            const timeBkk = formatBangkokTime(rec.timestamp);
+            const isLate = rec.status === AttendanceStatus.LATE || Boolean(rec.isLate);
+            const statusLabel = isLate ? `มาสาย (${timeBkk})` : `มาเรียน (${timeBkk})`;
+            return {
+              sessionId: s.id,
+              weekNumber: s.weekNumber,
+              topic: s.topic,
+              status: isLate ? 'LATE' : 'PRESENT',
+              statusText: statusLabel,
+              shortStatus: isLate ? 'มาสาย' : 'มาเรียน',
+              checkinTime: rec.timestamp,
+              checkinTimeBangkok: timeBkk,
+            };
+          } else {
+            return {
+              sessionId: s.id,
+              weekNumber: s.weekNumber,
+              topic: s.topic,
+              status: 'ABSENT',
+              statusText: 'ขาดเรียน',
+              shortStatus: 'ขาดเรียน',
+              checkinTime: null,
+              checkinTimeBangkok: null,
+            };
           }
         }
       });
@@ -2586,7 +2729,11 @@ app.get('/api/teacher/courses-overview', (req, res) => {
 
       let avgTimeStr = '-';
       if (validCheckinTimes.length > 0) {
-        const totalMinutes = validCheckinTimes.reduce((acc, dt) => acc + (dt.getHours() * 60 + dt.getMinutes()), 0);
+        const totalMinutes = validCheckinTimes.reduce((acc, dt) => {
+          const bkkHour = parseInt(dt.toLocaleTimeString('en-US', { timeZone: 'Asia/Bangkok', hour: '2-digit', hour12: false }), 10) || 0;
+          const bkkMin = parseInt(dt.toLocaleTimeString('en-US', { timeZone: 'Asia/Bangkok', minute: '2-digit' }), 10) || 0;
+          return acc + (bkkHour * 60 + bkkMin);
+        }, 0);
         const avgMin = Math.round(totalMinutes / validCheckinTimes.length);
         const hrs = Math.floor(avgMin / 60).toString().padStart(2, '0');
         const mins = (avgMin % 60).toString().padStart(2, '0');
@@ -2607,7 +2754,9 @@ app.get('/api/teacher/courses-overview', (req, res) => {
         avgTimeStr,
         lastCheckinTime,
         lastCheckinMethod,
+        sessionStatuses,
       };
+
     });
 
     const courseSessionsList = Array.from(sessions.values())
