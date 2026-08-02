@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bot, Shield, Wrench, RefreshCw, LogOut, Radio, X } from 'lucide-react';
+import { Bot, Shield, Wrench, RefreshCw, LogOut, Radio, X, Zap } from 'lucide-react';
 import { User, UserRole, SystemSettings } from './types';
 import { fetchCurrentUser, fetchSystemSettings } from './services/api';
 import { Navbar } from './components/Navbar';
@@ -12,6 +12,7 @@ import { UserSettingsModal } from './components/UserSettingsModal';
 import { LoginPage } from './components/LoginPage';
 import { TestingAgentModal } from './components/TestingAgentModal';
 import { AdminDashboard } from './components/AdminDashboard';
+import { DemoAccountsModal } from './components/DemoAccountsModal';
 import { useTheme } from './context/ThemeContext';
 import { parseCheckinToken } from './utils/qrParser';
 
@@ -167,8 +168,22 @@ export default function App() {
   const [isCreateCourseOpen, setIsCreateCourseOpen] = useState<boolean>(false);
   const [isJoinCourseOpen, setIsJoinCourseOpen] = useState<boolean>(false);
   const [isTestingAgentOpen, setIsTestingAgentOpen] = useState<boolean>(false);
+  const [isDemoAccountsModalOpen, setIsDemoAccountsModalOpen] = useState<boolean>(false);
   const [refreshKey, setRefreshKey] = useState<number>(0);
   const [quickEventTrigger, setQuickEventTrigger] = useState<number>(0);
+
+  const handleSelectDemoUser = (user: User) => {
+    if (currentUser && currentUser.role === UserRole.ADMIN && user.id !== currentUser.id) {
+      setSwitchedFromAdmin(currentUser);
+      try {
+        localStorage.setItem('smart_attendance_switched_from_admin', JSON.stringify(currentUser));
+      } catch (e) {
+        console.error('Failed to save switched_from_admin:', e);
+      }
+    }
+    handleSelectUser(user);
+    setIsDemoAccountsModalOpen(false);
+  };
 
   const handleOpenUserSettings = (tab: 'profile' | 'password' | 'device' | 'gps' = 'profile') => {
     setUserSettingsTab(tab);
@@ -470,7 +485,7 @@ export default function App() {
           อัปเดตล่าสุด: 26 กรกฎาคม 2569
         </p>
         {(currentUser.role === UserRole.ADMIN || isUserAdmin) && (
-          <div className="pt-2 flex justify-center">
+          <div className="pt-2 flex justify-center items-center space-x-2 sm:space-x-3 flex-wrap gap-y-2">
             <button
               onClick={() => setIsTestingAgentOpen(true)}
               className={`inline-flex items-center space-x-2 px-4 py-2 rounded-2xl border text-xs font-bold transition shadow-sm cursor-pointer ${
@@ -482,6 +497,19 @@ export default function App() {
             >
               <Bot className="w-4 h-4 text-sky-500 shrink-0" />
               <span>🤖 Agent ทดสอบระบบ (Admin)</span>
+            </button>
+
+            <button
+              onClick={() => setIsDemoAccountsModalOpen(true)}
+              className={`inline-flex items-center space-x-2 px-4 py-2 rounded-2xl border text-xs font-bold transition shadow-sm cursor-pointer ${
+                isDarkMode 
+                  ? 'bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-yellow-500/20 text-amber-300 border-amber-500/40 hover:border-amber-400 hover:bg-amber-500/30' 
+                  : 'bg-gradient-to-r from-amber-50 via-orange-50 to-yellow-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+              }`}
+              title="สลับเข้าใช้งานบัญชีทดสอบระบบ (Demo Accounts)"
+            >
+              <Zap className="w-4 h-4 text-amber-500 shrink-0 fill-current" />
+              <span>⚡ เข้าใช้งานบัญชีทดสอบ</span>
             </button>
           </div>
         )}
@@ -525,6 +553,14 @@ export default function App() {
         isOpen={isTestingAgentOpen}
         onClose={() => setIsTestingAgentOpen(false)}
         currentUser={currentUser}
+        isDarkMode={isDarkMode}
+      />
+
+      <DemoAccountsModal
+        isOpen={isDemoAccountsModalOpen}
+        onClose={() => setIsDemoAccountsModalOpen(false)}
+        allUsers={allUsers}
+        onSelectUser={handleSelectDemoUser}
         isDarkMode={isDarkMode}
       />
     </div>
