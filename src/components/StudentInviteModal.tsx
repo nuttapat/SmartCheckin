@@ -1,7 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { X, UserPlus, Link, Copy, Check, Users, Search, Trash2, GraduationCap, UserCheck, Maximize2, Minimize2 } from 'lucide-react';
+import {
+  X,
+  UserPlus,
+  Link,
+  Copy,
+  Check,
+  Users,
+  Search,
+  Trash2,
+  GraduationCap,
+  UserCheck,
+  Maximize2,
+  Minimize2,
+  CheckSquare,
+  Square,
+  AlertTriangle,
+} from 'lucide-react';
 import { Course, CourseMember, CourseMemberRole, User as UserType } from '../types';
-import { fetchStudents, inviteStudentToCourse, removeCourseMember, generateInviteLink } from '../services/api';
+import {
+  fetchStudents,
+  inviteStudentToCourse,
+  removeCourseMember,
+  removeCourseMembersBatch,
+  generateInviteLink,
+} from '../services/api';
 import { useTheme } from '../context/ThemeContext';
 
 interface StudentInviteModalProps {
@@ -35,6 +57,11 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Selection & Bulk Delete state
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [deleteConfirmModalOpen, setDeleteConfirmModalOpen] = useState<boolean>(false);
+  const [deleteTargetMembers, setDeleteTargetMembers] = useState<CourseMember[]>([]);
+
   // Invite Link State
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
@@ -49,6 +76,7 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
       loadStudents();
       setError(null);
       setSuccessMsg(null);
+      setSelectedMemberIds([]);
       fetchStudentInviteLink();
     }
   }, [isOpen]);
@@ -100,22 +128,6 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
     }
   };
 
-  const handleRemoveMember = async (memberId: string, name: string) => {
-    if (!confirm(`คุณต้องการลบนักศึกษา ${name} ออกจากรายวิชานี้ใช่หรือไม่?`)) {
-      return;
-    }
-    try {
-      setLoading(true);
-      await removeCourseMember(course.id, memberId);
-      setSuccessMsg(`ลบ ${name} ออกจากรายวิชาเรียบร้อยแล้ว`);
-      triggerRefresh();
-    } catch (err: any) {
-      setError(err.message || 'เกิดข้อผิดพลาดในการลบสมาชิก');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Filter existing enrolled student members
   const studentMembersInCourse = (courseMembers || []).filter(
     (m) => m.courseId === course.id && m.role === CourseMemberRole.STUDENT
@@ -144,26 +156,100 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
     return fullName.includes(q) || universityId.includes(q) || email.includes(q);
   });
 
+  // Checkbox selection handlers
+  const toggleSelectAll = () => {
+    const filteredIds = filteredEnrolledStudents.map((m) => m.id);
+    const isAllSelected = filteredIds.every((id) => selectedMemberIds.includes(id));
+
+    if (isAllSelected) {
+      setSelectedMemberIds((prev) => prev.filter((id) => !filteredIds.includes(id)));
+    } else {
+      setSelectedMemberIds((prev) => Array.from(new Set([...prev, ...filteredIds])));
+    }
+  };
+
+  const toggleSelectMember = (memberId: string) => {
+    setSelectedMemberIds((prev) =>
+      prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]
+    );
+  };
+
+  // Open confirmation modal for single member
+  const handleRequestSingleDelete = (member: CourseMember) => {
+    setDeleteTargetMembers([member]);
+    setDeleteConfirmModalOpen(true);
+  };
+
+  // Open confirmation modal for bulk selected members
+  const handleRequestBulkDelete = () => {
+    const targets = studentMembersInCourse.filter((m) => selectedMemberIds.includes(m.id));
+    if (targets.length === 0) return;
+    setDeleteTargetMembers(targets);
+    setDeleteConfirmModalOpen(true);
+  };
+
+  // Execute deletion after user confirms in modal
+  const handleConfirmDelete = async () => {
+    if (deleteTargetMembers.length === 0) return;
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      setLoading(true);
+      if (deleteTargetMembers.length === 1) {
+        const target = deleteTargetMembers[0];
+        const u = target.user;
+        const name = u ? `${u.title || ''} ${u.firstNameTh || ''} ${u.lastNameTh || ''}`.trim() : 'นักศึกษา';
+        await removeCourseMember(course.id, target.id);
+        setSuccessMsg(`ลบ ${name} ออกจากรายวิชาเรียบร้อยแล้ว`);
+      } else {
+        const targetIds = deleteTargetMembers.map((m) => m.id);
+        const res = await removeCourseMembersBatch(course.id, targetIds);
+        setSuccessMsg(res.message || `ลบนักศึกษาจำนวน ${deleteTargetMembers.length} คน เรียบร้อยแล้ว`);
+      }
+
+      // Clear selections for deleted items
+      const deletedSet = new Set(deleteTargetMembers.map((m) => m.id));
+      setSelectedMemberIds((prev) => prev.filter((id) => !deletedSet.has(id)));
+      setDeleteConfirmModalOpen(false);
+      setDeleteTargetMembers([]);
+      triggerRefresh();
+    } catch (err: any) {
+      setError(err.message || 'เกิดข้อผิดพลาดในการลบสมาชิกออกจากรายวิชา');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const courseCodeStr = course.courseCode || course.code || '';
   const courseNameStr = course.courseName || course.nameTh || '';
 
+  const isAllFilteredSelected =
+    filteredEnrolledStudents.length > 0 &&
+    filteredEnrolledStudents.every((m) => selectedMemberIds.includes(m.id));
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
-      <div className={`border shadow-2xl overflow-hidden transition-all duration-300 flex flex-col ${
-        isMaximized
-          ? 'w-full h-full max-w-none max-h-none rounded-none my-0'
-          : 'w-full max-w-2xl rounded-2xl max-h-[92vh] my-auto'
-      } ${
-        isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
-      }`}>
+      <div
+        className={`border shadow-2xl overflow-hidden transition-all duration-300 flex flex-col ${
+          isMaximized
+            ? 'w-full h-full max-w-none max-h-none rounded-none my-0'
+            : 'w-full max-w-2xl rounded-2xl max-h-[92vh] my-auto'
+        } ${
+          isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+        }`}
+      >
         {/* Header */}
-        <div className={`px-5 sm:px-6 py-4 sm:py-5 border-b flex items-center justify-between shrink-0 ${
-          isDarkMode ? 'bg-slate-800/60 border-slate-800' : 'bg-sky-50/70 border-sky-100'
-        }`}>
+        <div
+          className={`px-5 sm:px-6 py-4 sm:py-5 border-b flex items-center justify-between shrink-0 ${
+            isDarkMode ? 'bg-slate-800/60 border-slate-800' : 'bg-sky-50/70 border-sky-100'
+          }`}
+        >
           <div className="flex items-center space-x-3">
-            <div className={`w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-500/30 flex items-center justify-center shrink-0 ${
-              isDarkMode ? 'text-sky-400' : 'text-sky-600'
-            }`}>
+            <div
+              className={`w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-500/30 flex items-center justify-center shrink-0 ${
+                isDarkMode ? 'text-sky-400' : 'text-sky-600'
+              }`}
+            >
               <GraduationCap className="w-5 h-5" />
             </div>
             <div>
@@ -181,7 +267,9 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
               onClick={() => setIsMaximized(!isMaximized)}
               title={isMaximized ? 'ย่อขนาดหน้าต่าง' : 'ขยายเต็มหน้าจอ'}
               className={`p-1.5 rounded-lg transition cursor-pointer ${
-                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'
+                isDarkMode
+                  ? 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'
               }`}
             >
               {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
@@ -189,7 +277,9 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
             <button
               onClick={onClose}
               className={`p-1.5 rounded-lg transition shrink-0 cursor-pointer ${
-                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'
+                isDarkMode
+                  ? 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'
               }`}
               title="ปิด"
             >
@@ -202,16 +292,20 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
         <div className={`p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 ${isDarkMode ? 'bg-slate-900' : 'bg-white'}`}>
           {/* Status Alerts */}
           {error && (
-            <div className={`p-3 rounded-xl border text-xs font-semibold ${
-              isDarkMode ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-700'
-            }`}>
+            <div
+              className={`p-3 rounded-xl border text-xs font-semibold ${
+                isDarkMode ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-700'
+              }`}
+            >
               {error}
             </div>
           )}
           {successMsg && (
-            <div className={`p-3 rounded-xl border text-xs font-semibold ${
-              isDarkMode ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-            }`}>
+            <div
+              className={`p-3 rounded-xl border text-xs font-semibold ${
+                isDarkMode ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+              }`}
+            >
               {successMsg}
             </div>
           )}
@@ -224,8 +318,8 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
                 activeTab === 'db'
                   ? 'border-sky-600 text-sky-600 bg-sky-500/10'
                   : isDarkMode
-                    ? 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/50'
-                    : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  ? 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/50'
+                  : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
               <UserCheck className="w-4 h-4 text-sky-500" />
@@ -237,8 +331,8 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
                 activeTab === 'link'
                   ? 'border-sky-600 text-sky-600 bg-sky-500/10'
                   : isDarkMode
-                    ? 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/50'
-                    : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  ? 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/50'
+                  : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
               <Link className="w-4 h-4 text-sky-500" />
@@ -249,23 +343,29 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
           {/* Tab 1: Invite from Database */}
           {activeTab === 'db' && (
             <div className="space-y-4">
-              <div className={`p-4 rounded-2xl border space-y-3 ${
-                isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'
-              }`}>
+              <div
+                className={`p-4 rounded-2xl border space-y-3 ${
+                  isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'
+                }`}
+              >
                 <label className={`block text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
                   1. ค้นหาและเลือกนักศึกษาที่มีรายชื่ออยู่ในฐานข้อมูล
                 </label>
 
                 {/* Search input */}
                 <div className="relative">
-                  <Search className={`w-4 h-4 absolute left-3 top-2.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                  <Search
+                    className={`w-4 h-4 absolute left-3 top-2.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}
+                  />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="ค้นหานักศึกษาจากชื่อ, รหัสนักศึกษา หรืออีเมล..."
                     className={`w-full pl-9 pr-3 py-2 text-xs rounded-xl border font-semibold focus:outline-none focus:border-sky-500 transition ${
-                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
+                      isDarkMode
+                        ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500'
+                        : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
                     }`}
                   />
                 </div>
@@ -281,7 +381,8 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
                   <option value="">-- เลือกนักศึกษาที่ยังไม่ได้เข้าร่วมวิชา ({filteredAvailableStudents.length} คน) --</option>
                   {filteredAvailableStudents.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.universityId ? `[${s.universityId}] ` : ''}{s.title || ''} {s.firstNameTh} {s.lastNameTh} ({s.email})
+                      {s.universityId ? `[${s.universityId}] ` : ''}
+                      {s.title || ''} {s.firstNameTh} {s.lastNameTh} ({s.email})
                     </option>
                   ))}
                 </select>
@@ -301,23 +402,29 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
           {/* Tab 2: Static Invite Link */}
           {activeTab === 'link' && (
             <div className="space-y-4">
-              <div className={`p-4 rounded-2xl border space-y-3 ${
-                isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'
-              }`}>
+              <div
+                className={`p-4 rounded-2xl border space-y-3 ${
+                  isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'
+                }`}
+              >
                 <label className={`block text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
                   รหัสเชิญชวนนักศึกษาเข้าร่วมชั้นเรียน
                 </label>
 
                 {generatedCode ? (
-                  <div className={`mt-2 p-4 rounded-2xl border space-y-3 ${
-                    isDarkMode ? 'border-sky-500/30 bg-sky-500/10' : 'border-sky-200 bg-sky-50'
-                  }`}>
+                  <div
+                    className={`mt-2 p-4 rounded-2xl border space-y-3 ${
+                      isDarkMode ? 'border-sky-500/30 bg-sky-500/10' : 'border-sky-200 bg-sky-50'
+                    }`}
+                  >
                     <div className={`text-xs font-bold ${isDarkMode ? 'text-sky-300' : 'text-sky-900'}`}>
                       รหัสเชิญชวนประจำรายวิชา (Static Code 4 ตัวอักษร):
                     </div>
-                    <div className={`text-2xl sm:text-3xl font-mono font-bold tracking-widest text-center py-2.5 rounded-xl border shadow-inner ${
-                      isDarkMode ? 'bg-slate-900 border-slate-700 text-sky-400' : 'bg-white border-sky-200 text-sky-700'
-                    }`}>
+                    <div
+                      className={`text-2xl sm:text-3xl font-mono font-bold tracking-widest text-center py-2.5 rounded-xl border shadow-inner ${
+                        isDarkMode ? 'bg-slate-900 border-slate-700 text-sky-400' : 'bg-white border-sky-200 text-sky-700'
+                      }`}
+                    >
                       {generatedCode}
                     </div>
 
@@ -334,7 +441,9 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
                           setTimeout(() => setCopied(false), 2000);
                         }}
                         className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 active:scale-95 cursor-pointer ${
-                          isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-white border border-slate-700' : 'bg-slate-800 hover:bg-slate-900 text-white'
+                          isDarkMode
+                            ? 'bg-slate-800 hover:bg-slate-700 text-white border border-slate-700'
+                            : 'bg-slate-800 hover:bg-slate-900 text-white'
                         }`}
                       >
                         <Copy className="w-4 h-4" />
@@ -374,71 +483,179 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
           {/* Current Enrolled Students List - Always visible below tabs */}
           <div className={`pt-3 border-t space-y-3 ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <h3 className={`text-xs font-extrabold flex items-center justify-between uppercase tracking-wider ${
-                isDarkMode ? 'text-slate-300' : 'text-slate-700'
-              }`}>
-                <span>นักศึกษาทั้งหมดในรายวิชา ({studentMembersInCourse.length} คน)</span>
+              <h3
+                className={`text-xs font-extrabold flex items-center space-x-2 uppercase tracking-wider ${
+                  isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                }`}
+              >
+                <span>นักศึกษาในรายวิชา ({studentMembersInCourse.length} คน)</span>
               </h3>
 
-              {/* Filter enrolled list if needed */}
-              {studentMembersInCourse.length > 5 && (
-                <div className="relative w-full sm:w-56">
-                  <Search className={`w-3.5 h-3.5 absolute left-2.5 top-2.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
-                  <input
-                    type="text"
-                    value={listSearchQuery}
-                    onChange={(e) => setListSearchQuery(e.target.value)}
-                    placeholder="กรองรายชื่อในรายวิชา..."
-                    className={`w-full pl-8 pr-2.5 py-1.5 text-xs rounded-xl border font-semibold ${
-                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
-                    }`}
-                  />
-                </div>
-              )}
+              {/* Filter enrolled list */}
+              <div className="relative w-full sm:w-60">
+                <Search
+                  className={`w-3.5 h-3.5 absolute left-2.5 top-2.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}
+                />
+                <input
+                  type="text"
+                  value={listSearchQuery}
+                  onChange={(e) => setListSearchQuery(e.target.value)}
+                  placeholder="ค้นหาชื่อ, รหัส, อีเมล..."
+                  className={`w-full pl-8 pr-2.5 py-1.5 text-xs rounded-xl border font-semibold focus:outline-none focus:border-sky-500 ${
+                    isDarkMode
+                      ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500'
+                      : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
+                  }`}
+                />
+              </div>
             </div>
 
+            {/* Bulk Selection and Action Bar */}
+            {filteredEnrolledStudents.length > 0 && (
+              <div
+                className={`p-2.5 rounded-xl border flex items-center justify-between transition-all ${
+                  isDarkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-100/80 border-slate-200'
+                }`}
+              >
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={toggleSelectAll}
+                    className={`flex items-center space-x-2 text-xs font-bold transition cursor-pointer select-none ${
+                      isDarkMode ? 'text-slate-200 hover:text-white' : 'text-slate-700 hover:text-slate-900'
+                    }`}
+                  >
+                    {isAllFilteredSelected ? (
+                      <CheckSquare className="w-4 h-4 text-sky-500" />
+                    ) : (
+                      <Square className={`w-4 h-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                    )}
+                    <span>
+                      เลือกทั้งหมด {listSearchQuery.trim() ? `(${filteredEnrolledStudents.length} คนที่ค้นพบ)` : ''}
+                    </span>
+                  </button>
+
+                  {selectedMemberIds.length > 0 && (
+                    <span
+                      className={`px-2 py-0.5 rounded-lg text-[11px] font-bold ${
+                        isDarkMode ? 'bg-sky-500/20 text-sky-300' : 'bg-sky-100 text-sky-800'
+                      }`}
+                    >
+                      เลือกแล้ว {selectedMemberIds.length} คน
+                    </span>
+                  )}
+                </div>
+
+                {selectedMemberIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleRequestBulkDelete}
+                    disabled={loading}
+                    className="py-1.5 px-3 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl transition shadow-md shadow-rose-600/20 flex items-center space-x-1.5 cursor-pointer active:scale-95 shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>ลบที่เลือก ({selectedMemberIds.length} คน)</span>
+                  </button>
+                )}
+              </div>
+            )}
+
             {studentMembersInCourse.length === 0 ? (
-              <div className={`p-6 rounded-2xl text-center text-xs font-semibold border border-dashed ${
-                isDarkMode ? 'border-slate-800 text-slate-400 bg-slate-800/20' : 'border-slate-300 text-slate-500 bg-slate-50'
-              }`}>
-                ยังไม่มีนักศึกษาลงทะเบียนในรายวิชานี้ สามารถเลือกเชิญนักศึกษาจากฐานข้อมูล หรือคัดลอกรหัสเชิญชวนส่งให้นักศึกษาลงทะเบียนได้
+              <div
+                className={`p-6 rounded-2xl text-center text-xs font-semibold border border-dashed ${
+                  isDarkMode
+                    ? 'border-slate-800 text-slate-400 bg-slate-800/20'
+                    : 'border-slate-300 text-slate-500 bg-slate-50'
+                }`}
+              >
+                ยังไม่มีนักศึกษาลงทะเบียนในรายวิชานี้ สามารถเลือกเชิญนักศึกษาจากฐานข้อมูล
+                หรือคัดลอกรหัสเชิญชวนส่งให้นักศึกษาลงทะเบียนได้
+              </div>
+            ) : filteredEnrolledStudents.length === 0 ? (
+              <div
+                className={`p-6 rounded-2xl text-center text-xs font-semibold border ${
+                  isDarkMode ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'
+                }`}
+              >
+                ไม่พบรายชื่อนักศึกษาที่ตรงกับคำค้นหา "{listSearchQuery}"
               </div>
             ) : (
-              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                 {filteredEnrolledStudents.map((m) => {
                   const u = m.user;
                   const displayName = u
                     ? `${u.title || ''} ${u.firstNameTh || ''} ${u.lastNameTh || ''}`.trim() || u.email
                     : `นักศึกษา (${m.userId})`;
                   const codeStr = u?.universityId || '';
+                  const isSelected = selectedMemberIds.includes(m.id);
 
                   return (
                     <div
                       key={m.id}
-                      className={`p-3 rounded-xl border flex items-center justify-between ${
-                        isDarkMode ? 'bg-slate-800/60 border-slate-700/80' : 'bg-slate-50 border-slate-200'
+                      onClick={() => toggleSelectMember(m.id)}
+                      className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition select-none ${
+                        isSelected
+                          ? isDarkMode
+                            ? 'bg-sky-950/40 border-sky-500/50 shadow-sm'
+                            : 'bg-sky-50/90 border-sky-300 shadow-sm'
+                          : isDarkMode
+                          ? 'bg-slate-800/60 border-slate-700/80 hover:bg-slate-800'
+                          : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
                       <div className="flex items-center space-x-3 min-w-0">
-                        <div className={`w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center font-bold text-sm shrink-0 ${
-                          isDarkMode ? 'text-sky-400' : 'text-sky-600'
-                        }`}>
+                        {/* Checkbox */}
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSelectMember(m.id);
+                          }}
+                          className="shrink-0 cursor-pointer p-0.5"
+                        >
+                          {isSelected ? (
+                            <CheckSquare className="w-4 h-4 text-sky-500" />
+                          ) : (
+                            <Square
+                              className={`w-4 h-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}
+                            />
+                          )}
+                        </div>
+
+                        <div
+                          className={`w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center font-bold text-sm shrink-0 ${
+                            isDarkMode ? 'text-sky-400' : 'text-sky-600'
+                          }`}
+                        >
                           🎓
                         </div>
                         <div className="min-w-0">
-                          <div className={`text-xs sm:text-sm font-bold truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                          <div
+                            className={`text-xs sm:text-sm font-bold truncate ${
+                              isDarkMode ? 'text-white' : 'text-slate-900'
+                            }`}
+                          >
                             {displayName}
                           </div>
-                          <p className={`text-xs font-medium truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                            {codeStr ? `รหัสนักศึกษา: ${codeStr} • ` : ''}{u?.email || ''}
+                          <p
+                            className={`text-xs font-medium truncate ${
+                              isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                            }`}
+                          >
+                            {codeStr ? `รหัสนักศึกษา: ${codeStr} • ` : ''}
+                            {u?.email || ''}
                           </p>
                         </div>
                       </div>
 
                       <button
-                        onClick={() => handleRemoveMember(m.id, displayName)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRequestSingleDelete(m);
+                        }}
                         className={`p-1.5 rounded-lg transition cursor-pointer shrink-0 ${
-                          isDarkMode ? 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/20' : 'text-slate-500 hover:text-rose-600 hover:bg-rose-50'
+                          isDarkMode
+                            ? 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/20'
+                            : 'text-slate-500 hover:text-rose-600 hover:bg-rose-50'
                         }`}
                         title="ลบออกจากรายวิชา"
                       >
@@ -453,20 +670,115 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className={`px-5 sm:px-6 py-3.5 border-t flex justify-end shrink-0 ${
-          isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-100'
-        }`}>
+        <div
+          className={`px-5 sm:px-6 py-3.5 border-t flex justify-between items-center shrink-0 ${
+            isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-100'
+          }`}
+        >
+          <div className={`text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+            {selectedMemberIds.length > 0 ? `เลือกไว้ ${selectedMemberIds.length} รายการ` : ''}
+          </div>
           <button
             onClick={onClose}
             className={`px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${
-              isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700' : 'bg-slate-200 hover:bg-slate-300 text-slate-800'
+              isDarkMode
+                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                : 'bg-slate-200 hover:bg-slate-300 text-slate-800'
             }`}
           >
             ปิดหน้าต่าง
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog Modal */}
+      {deleteConfirmModalOpen && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
+          <div
+            className={`w-full max-w-md p-6 rounded-2xl border shadow-2xl space-y-4 animate-in fade-in zoom-in-95 ${
+              isDarkMode ? 'bg-slate-900 border-rose-500/30 text-white' : 'bg-white border-rose-200 text-slate-900'
+            }`}
+          >
+            <div className="flex items-start space-x-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-500 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-rose-500">
+                  ยืนยันการลบนักศึกษาออกจากรายวิชา
+                </h3>
+                <p className={`text-xs mt-1 font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                  คุณกำลังจะลบนักศึกษา{' '}
+                  <strong className="text-rose-500 font-bold">
+                    {deleteTargetMembers.length} คน
+                  </strong>{' '}
+                  ออกจากรายวิชา{' '}
+                  <span className="font-bold">
+                    {courseCodeStr} - {courseNameStr}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            {/* List Preview */}
+            <div
+              className={`p-3 rounded-xl border max-h-36 overflow-y-auto space-y-1.5 text-xs ${
+                isDarkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-50 border-slate-200'
+              }`}
+            >
+              <div className={`font-bold mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                รายชื่อนักศึกษาที่จะถูกลบ:
+              </div>
+              {deleteTargetMembers.map((m) => {
+                const u = m.user;
+                const displayName = u
+                  ? `${u.title || ''} ${u.firstNameTh || ''} ${u.lastNameTh || ''}`.trim() || u.email
+                  : `นักศึกษา (${m.userId})`;
+                return (
+                  <div key={m.id} className="flex items-center justify-between text-xs font-semibold">
+                    <span className="truncate">• {displayName}</span>
+                    <span className={`text-[11px] font-mono shrink-0 ml-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {u?.universityId ? `[${u.universityId}]` : ''}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <p className={`text-[11px] font-bold ${isDarkMode ? 'text-rose-400/80' : 'text-rose-600'}`}>
+              ⚠️ การลบจะทำให้สิทธิ์การเข้าร่วมวิชาและการเช็กชื่อของนักศึกษาถูกลบออก
+            </p>
+
+            <div className="flex items-center justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteConfirmModalOpen(false);
+                  setDeleteTargetMembers([]);
+                }}
+                disabled={loading}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  isDarkMode
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
+              >
+                ยกเลิก
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={loading}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl transition shadow-md shadow-rose-600/20 flex items-center space-x-1.5 cursor-pointer disabled:opacity-50 active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{loading ? 'กำลังลบ...' : 'ยืนยันลบออกจากรายวิชา'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-

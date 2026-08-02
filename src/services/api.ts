@@ -321,6 +321,15 @@ export async function removeCourseMember(courseId: string, memberId: string) {
   return parseResponse(res);
 }
 
+export async function removeCourseMembersBatch(courseId: string, memberIds: string[]) {
+  const res = await fetch(`${API_BASE}/courses/${courseId}/members/batch-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ memberIds }),
+  });
+  return parseResponse(res);
+}
+
 export async function generateInviteLink(courseId: string, role: string): Promise<InviteLink> {
   const res = await fetch(`${API_BASE}/courses/${courseId}/invite`, {
     method: 'POST',

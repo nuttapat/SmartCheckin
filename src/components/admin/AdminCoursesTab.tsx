@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, Course } from '../../types';
+import { User, Course, CourseMember } from '../../types';
 import {
   fetchAdminCollection,
   saveAdminDocument,
   deleteAdminDocument,
   fetchTeachers,
+  fetchCourseDetails,
 } from '../../services/api';
 import { TeacherCourseCreationModal } from '../TeacherCourseCreationModal';
 import { TeacherCourseEditModal } from '../TeacherCourseEditModal';
+import { StudentInviteModal } from '../StudentInviteModal';
 import {
   BookOpen,
   Search,
@@ -22,6 +24,7 @@ import {
   Play,
   Square,
   Sparkles,
+  Users,
 } from 'lucide-react';
 
 interface AdminCoursesTabProps {
@@ -58,8 +61,32 @@ export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
   const [isEditCourseModalOpen, setIsEditCourseModalOpen] = useState<boolean>(false);
   const [editingCourse, setEditingCourse] = useState<any | null>(null);
 
+  const [studentModalCourse, setStudentModalCourse] = useState<any | null>(null);
+  const [studentModalMembers, setStudentModalMembers] = useState<CourseMember[]>([]);
+
   const [sessionModalOpen, setSessionModalOpen] = useState<boolean>(false);
   const [editingSessionData, setEditingSessionData] = useState<any | null>(null);
+
+  const handleOpenStudentsModal = async (course: any) => {
+    setStudentModalCourse(course);
+    setStudentModalMembers([]);
+    try {
+      const details = await fetchCourseDetails(course.id);
+      setStudentModalMembers(details.members || []);
+    } catch (err) {
+      console.error('Failed to load course details for student modal:', err);
+    }
+  };
+
+  const handleRefreshStudentModalMembers = async () => {
+    if (!studentModalCourse) return;
+    try {
+      const details = await fetchCourseDetails(studentModalCourse.id);
+      setStudentModalMembers(details.members || []);
+    } catch (err) {
+      console.error('Failed to refresh course members:', err);
+    }
+  };
 
   const loadCoursesAndSessionsData = async (silent = false) => {
     try {
@@ -447,6 +474,18 @@ export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
                         <td className="p-3.5 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end space-x-1.5">
                             <button
+                              onClick={() => handleOpenStudentsModal(crs)}
+                              className={`px-2 py-1 rounded-lg border text-[10px] font-bold flex items-center space-x-1 cursor-pointer transition ${
+                                isDarkMode
+                                  ? 'bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border-sky-500/30'
+                                  : 'bg-sky-100 hover:bg-sky-200 text-sky-800 border-sky-300'
+                              }`}
+                              title="ดูรายชื่อและจัดการนักศึกษาในรายวิชา"
+                            >
+                              <Users className="w-3 h-3" />
+                              <span>นักศึกษา</span>
+                            </button>
+                            <button
                               onClick={() => handleGenerateSessionsFromWeeks(crs)}
                               className={`px-2 py-1 rounded-lg border text-[10px] font-bold flex items-center space-x-1 cursor-pointer transition ${
                                 isDarkMode
@@ -807,6 +846,19 @@ export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Student Management & Invite Modal for Admin */}
+      {studentModalCourse && (
+        <StudentInviteModal
+          isOpen={!!studentModalCourse}
+          onClose={() => setStudentModalCourse(null)}
+          course={studentModalCourse}
+          courseMembers={studentModalMembers}
+          onRefresh={handleRefreshStudentModalMembers}
+          onMembersUpdated={handleRefreshStudentModalMembers}
+          isDarkMode={isDarkMode}
+        />
       )}
     </div>
   );

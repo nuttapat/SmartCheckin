@@ -60,8 +60,11 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
 
   // Sync selected session when modal opens or active sessions update
   useEffect(() => {
-    if (activeSessionsList.length > 0 && !selectedSessionId) {
-      setSelectedSessionId(activeSessionsList[0].session.id);
+    if (activeSessionsList.length > 0) {
+      const isValid = activeSessionsList.some(item => item.session.id === selectedSessionId);
+      if (!selectedSessionId || !isValid) {
+        setSelectedSessionId(activeSessionsList[0].session.id);
+      }
     }
   }, [activeSessionsList, selectedSessionId]);
 
@@ -93,14 +96,14 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
             const tokenToUse = parsed.qrToken || parsed.rawToken;
             setScannedResult(tokenToUse);
             setManualInput(tokenToUse);
-            setCheckinMode('TOKEN');
+            setCheckinMode('HYBRID');
             setPendingCameraNotice(`สแกนจากกล้องมือถือ: ตรวจพบรหัส [${tokenToUse}] ระบบกำลังเช็คชื่อให้อัตโนมัติ...`);
 
             // Trigger immediate automatic check-in without requiring re-scanning
             if (!autoSubmittedRef.current) {
               autoSubmittedRef.current = true;
               setTimeout(() => {
-                handleProcessCheckin(data.rawToken, 'TOKEN');
+                handleProcessCheckin(data.rawToken, 'HYBRID');
               }, 150);
             }
           }
@@ -235,11 +238,15 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
       const rawInput = qrPayloadText || scannedResult || manualInput.trim();
       const parsedToken = parseCheckinToken(rawInput);
       const tokenToSubmit = parsedToken.qrToken || parsedToken.rawToken;
-      const targetSessionId = parsedToken.targetId || selectedSessionId || undefined;
+      const targetSessionId = parsedToken.targetId || selectedSessionId || (activeSessionsList.length > 0 ? activeSessionsList[0].session.id : undefined);
+
+      if (!targetSessionId) {
+        throw new Error('ไม่พบคาบเรียนที่กำลังเปิดเช็คชื่ออยู่ในขณะนี้ กรุณาให้อาจารย์ผู้สอนเปิดระบบเช็คชื่อก่อน');
+      }
 
       const res = await submitCheckin({
         studentId: student.id,
-        qrToken: tokenToSubmit,
+        qrToken: mode === 'GPS_ONLY' ? undefined : tokenToSubmit,
         sessionId: targetSessionId,
         scannedLat: currentLat,
         scannedLng: currentLng,
@@ -267,8 +274,6 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
       // Clear pending token so stale data won't persist
       sessionStorage.removeItem('pending_qr_checkin');
       
-      // Automatically switch back to HYBRID (QR + GPS) tab for easy re-scanning
-      setCheckinMode('HYBRID');
       setScannedResult('');
       setManualInput('');
       setPendingCameraNotice(null);

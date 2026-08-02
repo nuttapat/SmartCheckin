@@ -1553,6 +1553,33 @@ app.delete('/api/courses/:id/members/:memberId', async (req, res) => {
   res.json({ message: 'ลบสมาชิกออกจากรายวิชาเรียบร้อยแล้ว', memberId: removed.id });
 });
 
+app.post('/api/courses/:id/members/batch-delete', async (req, res) => {
+  const { id: courseId } = req.params;
+  const { memberIds } = req.body as { memberIds: string[] };
+
+  if (!Array.isArray(memberIds) || memberIds.length === 0) {
+    return res.status(400).json({ error: 'กรุณาระบุรายชื่อสมาชิกที่ต้องการลบ' });
+  }
+
+  const idsToDeleteSet = new Set(memberIds);
+  const removedMembers: CourseMember[] = [];
+
+  for (let i = courseMembers.length - 1; i >= 0; i--) {
+    const m = courseMembers[i];
+    if (m.courseId === courseId && (idsToDeleteSet.has(m.id) || idsToDeleteSet.has(m.userId))) {
+      const removed = courseMembers.splice(i, 1)[0];
+      removedMembers.push(removed);
+      await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, removed.id);
+    }
+  }
+
+  res.json({
+    message: `ลบสมาชิกออกจากรายวิชาเรียบร้อยแล้ว ${removedMembers.length} คน`,
+    count: removedMembers.length,
+    removedIds: removedMembers.map((m) => m.id),
+  });
+});
+
 // Helper for static 4-character invite token generation
 function generateStatic4CharToken(courseId: string, role: string): string {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -1926,21 +1953,24 @@ app.post('/api/checkin', (req, res) => {
     lat === undefined || lng === undefined || isNaN(lat) || isNaN(lng) ||
     (Math.abs(lat - 13.7563) < 0.05 && Math.abs(lng - 100.5018) < 0.05);
 
-  let lat1 = activeQR ? activeQR.lat : session.teacherLat;
-  let lon1 = activeQR ? activeQR.lng : session.teacherLng;
+  let lat1: number | undefined;
+  let lon1: number | undefined;
 
-  // In GPS_ONLY mode or when coordinates are generic defaults, prioritize course's registered classroom location
-  if (checkinMode === 'GPS_ONLY') {
-    if (course && course.defaultLat && course.defaultLng) {
-      lat1 = course.defaultLat;
-      lon1 = course.defaultLng;
-    } else if (session.teacherLat !== undefined && session.teacherLng !== undefined) {
-      lat1 = session.teacherLat;
-      lon1 = session.teacherLng;
-    }
-  } else if (course && course.defaultLat && course.defaultLng && isGenericDefault(lat1, lon1)) {
+  if (activeQR && activeQR.lat !== undefined && !isNaN(activeQR.lat) && activeQR.lng !== undefined && !isNaN(activeQR.lng)) {
+    lat1 = activeQR.lat;
+    lon1 = activeQR.lng;
+  }
+  if ((lat1 === undefined || isGenericDefault(lat1, lon1)) && session.teacherLat !== undefined && !isNaN(session.teacherLat)) {
+    lat1 = session.teacherLat;
+    lon1 = session.teacherLng;
+  }
+  if ((lat1 === undefined || isGenericDefault(lat1, lon1)) && course && course.defaultLat && course.defaultLng) {
     lat1 = course.defaultLat;
     lon1 = course.defaultLng;
+  }
+  if (lat1 === undefined || isNaN(lat1) || lon1 === undefined || isNaN(lon1)) {
+    lat1 = 13.7563;
+    lon1 = 100.5018;
   }
 
   // Determine if GPS Geofence Check is required
@@ -2239,19 +2269,23 @@ app.post('/api/checkin/quick', (req, res) => {
     saveToFirestore(COLLECTIONS.USERS, student);
   }
 
+  const checkinMode = req.body.checkinMode || 'HYBRID';
   const activeQR = activeQRCodes.get(eventId);
-  let inputToken = qrToken ? qrToken.trim() : '';
-  if (inputToken.includes(':')) {
-    const parts = inputToken.split(':');
-    inputToken = parts[parts.length - 1];
+
+  if (checkinMode === 'QR_ONLY' || checkinMode === 'HYBRID' || checkinMode === 'TOKEN') {
+    let inputToken = qrToken ? qrToken.trim() : '';
+    if (inputToken.includes(':')) {
+      const parts = inputToken.split(':');
+      inputToken = parts[parts.length - 1];
+    }
+
+    if (!activeQR || (activeQR.token.toUpperCase() !== inputToken.toUpperCase() && activeQR.token !== inputToken)) {
+      return res.status(400).json({ error: 'Invalid or expired event QR code.' });
+    }
   }
 
-  if (!activeQR || (activeQR.token.toUpperCase() !== inputToken.toUpperCase() && activeQR.token !== inputToken)) {
-    return res.status(400).json({ error: 'Invalid or expired event QR code.' });
-  }
-
-  const lat1 = activeQR ? activeQR.lat : qEvent.teacherLat;
-  const lon1 = activeQR ? activeQR.lng : qEvent.teacherLng;
+  let lat1 = activeQR?.lat ?? qEvent.teacherLat ?? 13.7563;
+  let lon1 = activeQR?.lng ?? qEvent.teacherLng ?? 100.5018;
 
   const eventGpsEnabled = qEvent.isGpsCheckEnabled !== false;
   const qrGpsEnabled = activeQR ? activeQR.isGpsCheckEnabled !== false : true;
