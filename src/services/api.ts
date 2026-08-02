@@ -618,11 +618,26 @@ export async function bindUserDeviceApi(userId: string, deviceInfo: {
 
 export async function deleteUserDeviceApi(userId: string, devId: string) {
   const targetDevId = devId || '';
+
+  // Try POST endpoint first to prevent URL encoding path issues in iframe/sandboxed environments
+  try {
+    const res = await fetch(`${API_BASE}/users/${userId}/devices/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ devId: targetDevId, targetId: targetDevId, deviceId: targetDevId }),
+    });
+    const data = await res.json();
+    if (res.ok) return data;
+  } catch (err) {
+    console.warn('POST device delete failed, trying DELETE fallback', err);
+  }
+
+  // Fallback DELETE endpoint
   const res = await fetch(`${API_BASE}/users/${userId}/devices/${encodeURIComponent(targetDevId)}`, {
     method: 'DELETE',
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to delete device');
+  if (!res.ok) throw new Error(data.error || 'ไม่สามารถยกเลิกการผูกอุปกรณ์ได้');
   return data;
 }
 

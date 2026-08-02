@@ -36,6 +36,8 @@ import {
   FileText,
   UserPlus,
   Pencil,
+  Smartphone,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface AdminSystemTabProps {
@@ -358,7 +360,7 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-6">
             {/* 1.1 Maintenance & Announcement */}
             <div className={`p-5 rounded-2xl border space-y-4 ${
               isDarkMode ? 'bg-slate-800/40 border-slate-700/60' : 'bg-slate-50 border-slate-200'
@@ -452,8 +454,8 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
                     <label className={`font-extrabold block ${isDarkMode ? 'text-amber-400' : 'text-amber-800'}`}>ขอยกเว้นลงทะเบียนโดเมนอื่นๆ</label>
                     <span className={`text-[10px] block ${isDarkMode ? 'text-amber-400/80' : 'text-amber-700/90'}`}>
                       {systemForm.allowOtherDomainsSelfRegister
-                        ? '🟢 เปิดใช้งาน: อนุญาตให้อีเมลภายนอกทุกโดเมน (เช่น @gmail.com, @hotmail.com) สมัครเข้าใช้งานได้'
-                        : '🔴 ปิดใช้งาน (แนะนำ): บล็อกอีเมลทั่วไป จะสมัครได้เฉพาะโดเมนสถาบันที่ระบุด้านล่างเท่านั้น'}
+                        ? '🟢 เปิดใช้งาน: อนุญาตให้อีเมลภายนอกทุกโดเมน (เช่น @gmail.com) สมัครได้'
+                        : '🔴 ปิดใช้งาน (แนะนำ): สมัครได้เฉพาะโดเมนสถาบัน'}
                     </span>
                   </div>
                   <CustomSwitch
@@ -462,6 +464,102 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
                     activeColor="amber"
                     isDarkMode={isDarkMode}
                   />
+                </div>
+              </div>
+            </div>
+
+            {/* 1.3 Device Limits & Anti-Proxy Policy */}
+            <div className={`p-5 rounded-2xl border space-y-4 ${
+              isDarkMode ? 'bg-slate-800/40 border-slate-700/60' : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div className={`flex items-center space-x-2 font-extrabold text-xs uppercase tracking-wider ${
+                isDarkMode ? 'text-purple-400' : 'text-purple-700'
+              }`}>
+                <Smartphone className="w-4 h-4" />
+                <span>1.3 นโยบายจำกัดอุปกรณ์ (Device Policy)</span>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                {/* Single Device Lock Toggle */}
+                <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                  isDarkMode ? 'bg-slate-800/20 border-slate-700/40' : 'bg-white border-slate-200/80'
+                }`}>
+                  <div>
+                    <label className={`font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                      ล็อกการใช้งานอุปกรณ์ประจำตัว
+                    </label>
+                    <span className={`text-[10px] block ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                      เปิดการตรวจฮาร์ดแวร์เพื่อป้องกันการฝากเช็คชื่อ
+                    </span>
+                  </div>
+                  <CustomSwitch
+                    checked={systemForm.singleDeviceLockEnabled}
+                    onChange={(checked) => setSystemForm({ ...systemForm, singleDeviceLockEnabled: checked })}
+                    activeColor="purple"
+                    isDarkMode={isDarkMode}
+                  />
+                </div>
+
+                {/* Max Devices Input */}
+                <div className={`p-3 rounded-xl border space-y-2.5 transition-opacity ${
+                  systemForm.singleDeviceLockEnabled
+                    ? (isDarkMode ? 'bg-purple-500/10 border-purple-500/25' : 'bg-purple-50/80 border-purple-200')
+                    : (isDarkMode ? 'bg-slate-800/20 border-slate-700/40 opacity-50' : 'bg-white border-slate-200/80 opacity-50')
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <label className={`font-extrabold text-xs block ${isDarkMode ? 'text-purple-300' : 'text-purple-900'}`}>
+                      จำนวนอุปกรณ์สูงสุดที่ผูกได้
+                    </label>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-purple-600 text-white shrink-0">
+                      {systemForm.maxDevicesPerUser} เครื่อง / คน
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      disabled={!systemForm.singleDeviceLockEnabled}
+                      value={systemForm.maxDevicesPerUser}
+                      onChange={(e) => {
+                        const val = Math.max(1, Math.min(10, parseInt(e.target.value) || 1));
+                        setSystemForm({ ...systemForm, maxDevicesPerUser: val });
+                      }}
+                      className={`w-20 p-2 rounded-xl border text-center font-extrabold text-xs ${
+                        isDarkMode ? 'bg-slate-900 border-purple-500/40 text-purple-300' : 'bg-white border-purple-300 text-purple-900'
+                      }`}
+                    />
+
+                    {/* Quick selection preset buttons */}
+                    <div className="flex items-center gap-1 flex-1">
+                      {[1, 2, 3, 5].map((num) => (
+                        <button
+                          key={num}
+                          type="button"
+                          disabled={!systemForm.singleDeviceLockEnabled}
+                          onClick={() => setSystemForm({ ...systemForm, maxDevicesPerUser: num })}
+                          className={`flex-1 py-1.5 rounded-lg font-extrabold text-[10px] border transition cursor-pointer ${
+                            systemForm.maxDevicesPerUser === num
+                              ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                              : isDarkMode
+                              ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                              : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                          }`}
+                        >
+                          {num} เครื่อง
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className={`p-2 rounded-lg text-[10px] leading-relaxed border ${
+                    isDarkMode ? 'bg-purple-950/40 border-purple-800/40 text-purple-200' : 'bg-purple-100/50 border-purple-200 text-purple-900'
+                  }`}>
+                    <span className="font-bold block mb-0.5">📌 ขอบเขตการบังคับใช้นโยบายอุปกรณ์:</span>
+                    • <span className="font-semibold text-purple-600 dark:text-purple-300">นักศึกษา (Student):</span> จำกัดสูงสุด <b>{systemForm.maxDevicesPerUser} เครื่อง</b><br />
+                    • <span className="font-semibold text-emerald-600 dark:text-emerald-400">อาจารย์ & Admin:</span> <b>ไม่จำกัดจำนวนอุปกรณ์ (Unlimited)</b>
+                  </div>
                 </div>
               </div>
             </div>

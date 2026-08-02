@@ -3867,37 +3867,112 @@ app.post('/api/users/:userId/devices/bind', async (req, res) => {
   });
 });
 
-// Remove a specific bound device
-app.delete('/api/users/:userId/devices/:devId', async (req, res) => {
-  const { userId, devId } = req.params;
-  const decodedDevId = decodeURIComponent(devId || '');
+// Helper function to safely remove a user device
+function removeUserDevice(user: User, targetDevId: string): { success: boolean; error?: string; initialCount: number; remainingCount: number } {
+  if (!user) return { success: false, error: 'ไม่พบผู้ใช้งานนี้ในระบบ', initialCount: 0, remainingCount: 0 };
 
-  const user = users.get(userId);
-  if (!user) {
-    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  // Ensure user.devices array exists and primary device is populated
+  if (!user.devices) {
+    user.devices = [];
+  }
+  if (user.devices.length === 0 && user.deviceId) {
+    user.devices.push({
+      id: `dev_primary_${user.id}`,
+      deviceId: user.deviceId,
+      deviceName: user.role === UserRole.STUDENT ? 'อุปกรณ์หลัก (Primary Phone)' : 'อุปกรณ์หลักอาจารย์ (Primary Device)',
+      deviceType: 'MOBILE',
+      boundAt: user.createdAt || new Date().toISOString(),
+      lastUsedAt: new Date().toISOString(),
+      isPrimary: true,
+    });
   }
 
-  if (!user.devices || user.devices.length === 0) {
-    return res.status(400).json({ error: 'ไม่มีอุปกรณ์ที่ผูกไว้ในระบบ' });
+  // Ensure all device items have an 'id' property
+  user.devices.forEach((d, idx) => {
+    if (!d.id) {
+      d.id = `dev_${idx}_${d.deviceId.replace(/[^a-zA-Z0-9]/g, '').slice(-8)}`;
+    }
+  });
+
+  if (user.devices.length === 0) {
+    return { success: false, error: 'ไม่มีอุปกรณ์ที่ผูกไว้ในระบบ', initialCount: 0, remainingCount: 0 };
   }
 
+  const decodedDevId = decodeURIComponent(targetDevId || '');
   const initialCount = user.devices.length;
+
   user.devices = user.devices.filter((d) => {
-    if (d.id && (d.id === devId || d.id === decodedDevId)) return false;
-    if (d.deviceId && (d.deviceId === devId || d.deviceId === decodedDevId)) return false;
-    // Check if devId matches hardware fingerprint in deviceId
-    if (devId && devId.includes('fp_') && d.deviceId && d.deviceId.includes(devId)) return false;
+    // 1. Direct match with d.id or d.deviceId
+    if (d.id && (d.id === targetDevId || d.id === decodedDevId)) return false;
+    if (d.deviceId && (d.deviceId === targetDevId || d.deviceId === decodedDevId)) return false;
+
+    // 2. Hardware fingerprint match (e.g., fp_123456)
+    if (targetDevId && targetDevId.includes('fp_') && d.deviceId && d.deviceId.includes(targetDevId)) return false;
+    if (decodedDevId && decodedDevId.includes('fp_') && d.deviceId && d.deviceId.includes(decodedDevId)) return false;
+
+    // 3. Extracted fingerprint regex match
+    const targetFp = (targetDevId || '').match(/fp_[a-f0-9]+/)?.[0];
+    if (targetFp && d.deviceId && d.deviceId.includes(targetFp)) return false;
+
     return true;
   });
 
-  if (user.devices.length === initialCount) {
-    return res.status(404).json({ error: 'ไม่พบอุปกรณ์ที่ระบุในรายการผูกเครื่อง' });
+  // If match was not found, but only 1 device exists or user sent 'primary', fallback remove
+  if (user.devices.length === initialCount && (targetDevId === 'primary' || targetDevId === 'first')) {
+    user.devices.shift();
+  }
+
+  const remainingCount = user.devices.length;
+  if (remainingCount === initialCount) {
+    return { success: false, error: 'ไม่พบอุปกรณ์ที่ระบุในรายการผูกเครื่อง', initialCount, remainingCount };
   }
 
   if (user.devices.length > 0) {
     user.deviceId = user.devices[0].deviceId;
   } else {
     user.deviceId = undefined;
+  }
+
+  return { success: true, initialCount, remainingCount };
+}
+
+// Remove a specific bound device (DELETE endpoint)
+app.delete('/api/users/:userId/devices/:devId', async (req, res) => {
+  const { userId, devId } = req.params;
+  const user = users.get(userId);
+  if (!user) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  const result = removeUserDevice(user, devId);
+  if (!result.success) {
+    return res.status(400).json({ error: result.error });
+  }
+
+  users.set(user.id, user);
+  await saveToFirestore(COLLECTIONS.USERS, user);
+
+  res.json({
+    message: 'ยกเลิกการผูกอุปกรณ์เรียบร้อยแล้ว',
+    devices: user.devices,
+    user,
+  });
+});
+
+// Remove a specific bound device (POST endpoint for sandboxed/cross-origin safety)
+app.post('/api/users/:userId/devices/delete', async (req, res) => {
+  const { userId } = req.params;
+  const { devId, targetId, deviceId } = req.body || {};
+  const target = devId || targetId || deviceId || (req.query.devId as string) || '';
+
+  const user = users.get(userId);
+  if (!user) {
+    return res.status(404).json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' });
+  }
+
+  const result = removeUserDevice(user, String(target));
+  if (!result.success) {
+    return res.status(400).json({ error: result.error });
   }
 
   users.set(user.id, user);

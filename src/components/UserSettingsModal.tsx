@@ -58,10 +58,12 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
 
   // Device Management State
   const [boundDevices, setBoundDevices] = useState<UserDevice[]>(currentUser.devices || []);
-  const [maxDevicesLimit, setMaxDevicesLimit] = useState<number | null>(currentUser.role === UserRole.STUDENT ? 3 : null);
+  const [maxDevicesLimit, setMaxDevicesLimit] = useState<number | null>(null);
   const [fetchingDevices, setFetchingDevices] = useState<boolean>(false);
   const [deviceActionLoading, setDeviceActionLoading] = useState<boolean>(false);
   const [currentDevInfo, setCurrentDevInfo] = useState<DeviceInfo>(getDeviceInfo());
+  const [deviceToDelete, setDeviceToDelete] = useState<{ id: string; deviceId: string; name: string } | null>(null);
+  const [showResetAllConfirm, setShowResetAllConfirm] = useState<boolean>(false);
 
   // Status
   const [loading, setLoading] = useState<boolean>(false);
@@ -227,12 +229,13 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     }
   };
 
-  const handleDeleteDevice = async (targetId: string, deviceName: string) => {
+  const confirmDeleteDevice = async () => {
+    if (!deviceToDelete) return;
+    const targetId = deviceToDelete.id || deviceToDelete.deviceId;
     if (!targetId) {
       setErrorMsg('ไม่พบรหัสอุปกรณ์ที่ต้องการยกเลิกการผูก');
       return;
     }
-    if (!window.confirm(`คุณต้องการยกเลิกการผูกอุปกรณ์ "${deviceName || 'อุปกรณ์ผูกประจำตัว'}" ใช่หรือไม่?`)) return;
     setErrorMsg('');
     setSuccessMsg('');
     try {
@@ -240,8 +243,10 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
       const res = await deleteUserDeviceApi(currentUser.id, targetId);
       setBoundDevices(res.devices || []);
       if (res.user) onUpdateUser(res.user);
-      setSuccessMsg('ยกเลิกการผูกอุปกรณ์เรียบร้อยแล้ว');
+      setSuccessMsg(`ยกเลิกการผูกอุปกรณ์ "${deviceToDelete.name}" เรียบร้อยแล้ว`);
+      setDeviceToDelete(null);
       setTimeout(() => setSuccessMsg(''), 4000);
+      await loadDevices();
     } catch (err: any) {
       setErrorMsg(err.message || 'ไม่สามารถยกเลิกการผูกอุปกรณ์ได้');
     } finally {
@@ -249,17 +254,18 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     }
   };
 
-  const handleResetAllDevices = async () => {
-    if (!window.confirm('คุณต้องการปลดล็อกและรีเซ็ตอุปกรณ์ทั้งหมดใช่หรือไม่? (รายการผูกเครื่องเดิมจะถูกลบออก)')) return;
+  const confirmResetAllDevices = async () => {
     setErrorMsg('');
     setSuccessMsg('');
     try {
       setDeviceActionLoading(true);
       const res = await resetUserDevice(currentUser.id);
       setBoundDevices([]);
+      setShowResetAllConfirm(false);
       if (res.user) onUpdateUser(res.user);
       setSuccessMsg('รีเซ็ตการผูกอุปกรณ์ทั้งหมดเรียบร้อยแล้ว');
       setTimeout(() => setSuccessMsg(''), 4000);
+      await loadDevices();
     } catch (err: any) {
       setErrorMsg(err.message || 'ไม่สามารถรีเซ็ตอุปกรณ์ได้');
     } finally {
@@ -268,7 +274,8 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
       <div className={`w-full border shadow-2xl relative overflow-hidden flex flex-col transition-all duration-300 ${
         isMaximized
           ? 'w-full h-full max-w-none max-h-none rounded-none'
@@ -908,11 +915,11 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                    {boundDevices.map((dev) => {
+                    {boundDevices.map((dev, idx) => {
                       const isCurrent = dev.deviceId === currentDevInfo.deviceId || (currentDevInfo.hardwareFingerprint && dev.deviceId.includes(currentDevInfo.hardwareFingerprint));
                       return (
                         <div
-                          key={dev.id}
+                          key={dev.id || dev.deviceId || `dev_${idx}`}
                           className={`p-3 rounded-xl border flex items-center justify-between transition ${
                             isCurrent
                               ? isDarkMode
@@ -950,21 +957,23 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                                 )}
                               </div>
                               <div className={`font-mono text-[10px] mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                UUID: {dev.deviceId.slice(0, 18)}...
+                                UUID: {dev.deviceId ? dev.deviceId.slice(0, 18) : 'N/A'}...
                               </div>
                               <div className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                ผูกเมื่อ: {new Date(dev.boundAt).toLocaleDateString('th-TH')} | ใช้งานล่าสุด: {new Date(dev.lastUsedAt).toLocaleDateString('th-TH')}
+                                ผูกเมื่อ: {new Date(dev.boundAt || Date.now()).toLocaleDateString('th-TH')} | ใช้งานล่าสุด: {new Date(dev.lastUsedAt || Date.now()).toLocaleDateString('th-TH')}
                               </div>
                             </div>
                           </div>
 
                           <button
-                            onClick={() => handleDeleteDevice(dev.id || dev.deviceId, dev.deviceName)}
+                            type="button"
+                            onClick={() => setDeviceToDelete({ id: dev.id, deviceId: dev.deviceId, name: dev.deviceName || 'อุปกรณ์ผูกประจำตัว' })}
                             disabled={deviceActionLoading}
-                            className="p-2 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition disabled:opacity-50 cursor-pointer"
+                            className="p-2 rounded-xl text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 dark:text-rose-400 dark:hover:text-rose-300 transition disabled:opacity-50 cursor-pointer flex items-center space-x-1 border border-rose-500/20"
                             title="ยกเลิกการผูกอุปกรณ์นี้"
                           >
                             <Trash2 className="w-4 h-4" />
+                            <span className="text-[11px] font-extrabold sm:inline hidden">ยกเลิกผูก</span>
                           </button>
                         </div>
                       );
@@ -977,12 +986,13 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
               {boundDevices.length > 0 && (
                 <div className="pt-2 flex justify-end">
                   <button
-                    onClick={handleResetAllDevices}
+                    type="button"
+                    onClick={() => setShowResetAllConfirm(true)}
                     disabled={deviceActionLoading}
-                    className="py-2 px-3 rounded-xl text-[11px] font-semibold text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 transition disabled:opacity-50 cursor-pointer flex items-center space-x-1"
+                    className="py-2 px-3 rounded-xl text-[11px] font-bold text-rose-500 hover:bg-rose-500/10 border border-rose-500/30 transition disabled:opacity-50 cursor-pointer flex items-center space-x-1"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>ยกเลิกผูกอุปกรณ์ทั้งหมด (Reset Devices)</span>
+                    <span>ยกเลิกผูกอุปกรณ์ทั้งหมด (Reset All)</span>
                   </button>
                 </div>
               )}
@@ -990,6 +1000,94 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
           )}
         </div>
       </div>
-    </div>
+
+      {/* Confirmation Modal for Single Device Deletion */}
+      {deviceToDelete && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className={`max-w-md w-full p-6 rounded-2xl border shadow-2xl space-y-4 ${
+            isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
+          }`}>
+            <div className="flex items-center space-x-3 text-rose-500">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center font-bold shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base">ยืนยันยกเลิกการผูกอุปกรณ์</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">การยกเลิกผูกอุปกรณ์จะปลดการล็อกเครื่องออกจากบัญชี</p>
+              </div>
+            </div>
+
+            <div className={`p-3.5 rounded-xl border text-xs space-y-1 ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+              <span className="font-bold block text-slate-600 dark:text-slate-400">อุปกรณ์ที่จะยกเลิก:</span>
+              <span className="text-rose-600 dark:text-rose-400 font-black text-sm block">{deviceToDelete.name}</span>
+            </div>
+
+            <div className="flex items-center justify-end space-x-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeviceToDelete(null)}
+                disabled={deviceActionLoading}
+                className={`px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                  isDarkMode ? 'border-slate-700 hover:bg-slate-800 text-slate-300' : 'border-slate-300 hover:bg-slate-100 text-slate-700'
+                }`}
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteDevice}
+                disabled={deviceActionLoading}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/20 active:scale-95 transition cursor-pointer flex items-center space-x-2"
+              >
+                {deviceActionLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                <span>ยืนยันปลดอุปกรณ์</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Resetting All Devices */}
+      {showResetAllConfirm && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className={`max-w-md w-full p-6 rounded-2xl border shadow-2xl space-y-4 ${
+            isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
+          }`}>
+            <div className="flex items-center space-x-3 text-rose-500">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center font-bold shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base">ยืนยันรีเซ็ตการผูกอุปกรณ์ทั้งหมด</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">รายการอุปกรณ์ที่ผูกไว้ทั้งหมด ({boundDevices.length} เครื่อง) จะถูกลบออก</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowResetAllConfirm(false)}
+                disabled={deviceActionLoading}
+                className={`px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                  isDarkMode ? 'border-slate-700 hover:bg-slate-800 text-slate-300' : 'border-slate-300 hover:bg-slate-100 text-slate-700'
+                }`}
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={confirmResetAllDevices}
+                disabled={deviceActionLoading}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/20 active:scale-95 transition cursor-pointer flex items-center space-x-2"
+              >
+                {deviceActionLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                <span>ยืนยันรีเซ็ตทั้งหมด</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
+    </>
   );
 };
