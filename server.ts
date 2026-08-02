@@ -343,7 +343,22 @@ function bindUserDevice(
     }
   }
 
-  const existingDevice = user.devices.find((d) => d.deviceId === deviceId);
+  // Extract hardware fingerprint hash if present (e.g. fp_a1b2c3d4)
+  const incomingFp = deviceId.match(/fp_[a-f0-9]+/)?.[0];
+
+  // 1. Find existing device by exact ID, or hardware fingerprint, or identical OS + Browser + DeviceName signature
+  const existingDevice = user.devices.find((d) => {
+    if (d.deviceId === deviceId) return true;
+    if (incomingFp && d.deviceId) {
+      const existingFp = d.deviceId.match(/fp_[a-f0-9]+/)?.[0];
+      if (existingFp && existingFp === incomingFp) return true;
+    }
+    // Matching by identical OS + Browser + DeviceName
+    if (deviceName && d.deviceName === deviceName && os && d.os === os && browser && d.browser === browser) {
+      return true;
+    }
+    return false;
+  });
 
   if (existingDevice) {
     existingDevice.lastUsedAt = new Date().toISOString();
@@ -351,6 +366,10 @@ function bindUserDevice(
     if (deviceType) existingDevice.deviceType = deviceType as any;
     if (browser) existingDevice.browser = browser;
     if (os) existingDevice.os = os;
+    // Update deviceId with latest fingerprint if needed
+    if (incomingFp && !existingDevice.deviceId.includes(incomingFp)) {
+      existingDevice.deviceId = deviceId;
+    }
     user.deviceId = user.deviceId || deviceId;
     return { success: true, user, isNewDevice: false };
   }
@@ -361,9 +380,19 @@ function bindUserDevice(
   const maxAllowedDevices = systemSettings.maxDevicesPerUser || 1;
 
   if (isStudent && isLockEnabled && user.devices.length >= maxAllowedDevices) {
+    // Check if we can auto-merge with the oldest inactive device of the same OS/type to handle incognito fallback
+    const sameOsDevice = user.devices.find((d) => os && d.os === os);
+    if (sameOsDevice) {
+      sameOsDevice.lastUsedAt = new Date().toISOString();
+      sameOsDevice.deviceId = deviceId;
+      if (deviceName) sameOsDevice.deviceName = deviceName;
+      if (browser) sameOsDevice.browser = browser;
+      return { success: true, user, isNewDevice: false };
+    }
+
     return {
       success: false,
-      error: `[Anti-Proxy Device Limit] บัญชีนักศึกษานี้ผูกอุปกรณ์ครบ ${maxAllowedDevices} เครื่องแล้ว (สิทธิ์สูงสุด ${maxAllowedDevices} เครื่องตามนโยบายระบบ) อุปกรณ์นี้ยังไม่ได้ผูกในระบบ กรุณาเข้าเมนู "ตั้งค่าบัญชี" เพื่อยกเลิกอุปกรณ์เดิม หรือติดต่ออาจารย์/แอดมินเพื่อรีเซ็ตอุปกรณ์`,
+      error: `[Anti-Proxy Device Limit] บัญชีนักศึกษานี้ผูกอุปกรณ์ครบ ${maxAllowedDevices} เครื่องแล้ว (สิทธิ์สูงสุด ${maxAllowedDevices} เครื่องตามนโยบายระบบ) อุปกรณ์นี้ยังไม่ได้ผูกในระบบ กรุณาเข้าเมนู "ตั้งค่าบัญชี" -> "การผูกอุปกรณ์" เพื่อยกเลิกอุปกรณ์เดิม หรือติดต่ออาจารย์/แอดมินเพื่อรีเซ็ตอุปกรณ์`,
       user,
     };
   }
@@ -3841,6 +3870,7 @@ app.post('/api/users/:userId/devices/bind', async (req, res) => {
 // Remove a specific bound device
 app.delete('/api/users/:userId/devices/:devId', async (req, res) => {
   const { userId, devId } = req.params;
+  const decodedDevId = decodeURIComponent(devId || '');
 
   const user = users.get(userId);
   if (!user) {
@@ -3852,7 +3882,13 @@ app.delete('/api/users/:userId/devices/:devId', async (req, res) => {
   }
 
   const initialCount = user.devices.length;
-  user.devices = user.devices.filter((d) => d.id !== devId && d.deviceId !== devId);
+  user.devices = user.devices.filter((d) => {
+    if (d.id && (d.id === devId || d.id === decodedDevId)) return false;
+    if (d.deviceId && (d.deviceId === devId || d.deviceId === decodedDevId)) return false;
+    // Check if devId matches hardware fingerprint in deviceId
+    if (devId && devId.includes('fp_') && d.deviceId && d.deviceId.includes(devId)) return false;
+    return true;
+  });
 
   if (user.devices.length === initialCount) {
     return res.status(404).json({ error: 'ไม่พบอุปกรณ์ที่ระบุในรายการผูกเครื่อง' });
@@ -3984,28 +4020,46 @@ app.post('/api/admin/attendance/override', async (req, res) => {
 // Firestore Database Sync Handler
 async function syncFromFirestore() {
   try {
+    const fsSettings = await getAllFromFirestore<SystemSettings>(COLLECTIONS.SYSTEM_SETTINGS);
+    const hasInitializedConfig = fsSettings && fsSettings.length > 0;
+
+    if (hasInitializedConfig) {
+      const config = fsSettings.find((s) => s.id === 'global_config') || fsSettings[0];
+      if (config) {
+        systemSettings = { ...systemSettings, ...config };
+      }
+    } else {
+      await saveToFirestore(COLLECTIONS.SYSTEM_SETTINGS, { id: 'global_config', ...systemSettings });
+    }
+
     const fsUsers = await getAllFromFirestore<User>(COLLECTIONS.USERS);
     if (fsUsers && fsUsers.length > 0) {
+      users.clear();
       for (const u of fsUsers) {
         if (u && u.id) {
           users.set(u.id, u);
         }
       }
-    } else {
+    } else if (!hasInitializedConfig) {
       for (const u of users.values()) {
         await saveToFirestore(COLLECTIONS.USERS, u);
       }
+    } else {
+      users.clear();
     }
 
     const fsCourses = await getAllFromFirestore<Course>(COLLECTIONS.COURSES);
     if (fsCourses && fsCourses.length > 0) {
+      courses.clear();
       for (const c of fsCourses) {
         courses.set(c.id, c);
       }
-    } else {
+    } else if (!hasInitializedConfig) {
       for (const c of courses.values()) {
         await saveToFirestore(COLLECTIONS.COURSES, c);
       }
+    } else {
+      courses.clear();
     }
 
     const fsMembers = await getAllFromFirestore<CourseMember>(COLLECTIONS.COURSE_MEMBERS);
@@ -4018,14 +4072,17 @@ async function syncFromFirestore() {
         }
         courseMembers.push(cm);
       }
-    } else {
+    } else if (!hasInitializedConfig) {
       for (const cm of courseMembers) {
         await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, cm);
       }
+    } else {
+      courseMembers.length = 0;
     }
 
     const fsSessions = await getAllFromFirestore<Session>(COLLECTIONS.SESSIONS);
     if (fsSessions && fsSessions.length > 0) {
+      sessions.clear();
       for (const s of fsSessions) {
         if (s.courseId === 'crs_mtid204') {
           s.courseId = 'crs_test101';
@@ -4033,51 +4090,48 @@ async function syncFromFirestore() {
         }
         sessions.set(s.id, s);
       }
-    } else {
+    } else if (!hasInitializedConfig) {
       for (const s of sessions.values()) {
         await saveToFirestore(COLLECTIONS.SESSIONS, s);
       }
+    } else {
+      sessions.clear();
     }
 
     const fsAttendance = await getAllFromFirestore<AttendanceRecord>(COLLECTIONS.ATTENDANCE);
     if (fsAttendance && fsAttendance.length > 0) {
       attendanceRecords.length = 0;
       attendanceRecords.push(...fsAttendance);
-    } else {
+    } else if (!hasInitializedConfig) {
       for (const ar of attendanceRecords) {
         await saveToFirestore(COLLECTIONS.ATTENDANCE, ar);
       }
+    } else {
+      attendanceRecords.length = 0;
     }
 
     const fsLeaves = await getAllFromFirestore<LeaveRequest>(COLLECTIONS.LEAVE_REQUESTS);
     if (fsLeaves && fsLeaves.length > 0) {
       leaveRequests.length = 0;
       leaveRequests.push(...fsLeaves);
-    } else {
+    } else if (!hasInitializedConfig) {
       for (const lr of leaveRequests) {
         await saveToFirestore(COLLECTIONS.LEAVE_REQUESTS, lr);
       }
+    } else {
+      leaveRequests.length = 0;
     }
 
     const fsTeacherAttendance = await getAllFromFirestore<TeacherAttendanceRecord>(COLLECTIONS.TEACHER_ATTENDANCE);
     if (fsTeacherAttendance && fsTeacherAttendance.length > 0) {
       teacherAttendanceRecords.length = 0;
       teacherAttendanceRecords.push(...fsTeacherAttendance);
-    } else {
+    } else if (!hasInitializedConfig) {
       for (const tar of teacherAttendanceRecords) {
         await saveToFirestore(COLLECTIONS.TEACHER_ATTENDANCE, tar);
       }
-    }
-
-    // Sync System Settings
-    const fsSettings = await getAllFromFirestore<SystemSettings>(COLLECTIONS.SYSTEM_SETTINGS);
-    if (fsSettings && fsSettings.length > 0) {
-      const config = fsSettings.find((s) => s.id === 'global_config') || fsSettings[0];
-      if (config) {
-        systemSettings = { ...systemSettings, ...config };
-      }
     } else {
-      await saveToFirestore(COLLECTIONS.SYSTEM_SETTINGS, { id: 'global_config', ...systemSettings });
+      teacherAttendanceRecords.length = 0;
     }
 
     // Sync Master Departments

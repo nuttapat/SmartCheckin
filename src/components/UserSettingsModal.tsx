@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, UserRole, UserDevice } from '../types';
 import { updateUserProfile, getUserDevices, bindUserDeviceApi, deleteUserDeviceApi, resetUserDevice } from '../services/api';
 import { getDeviceInfo, DeviceInfo } from '../utils/deviceHelper';
-import { X, User as UserIcon, Lock, Shield, CheckCircle2, ShieldAlert, Eye, EyeOff, KeyRound, Smartphone, Mail, MapPin, Globe, Tablet, Monitor, Sun, Moon, Trash2, Plus, RefreshCw, AlertCircle, Check, Info, Maximize2, Minimize2 } from 'lucide-react';
+import { X, User as UserIcon, Lock, Shield, ShieldCheck, CheckCircle2, ShieldAlert, Eye, EyeOff, KeyRound, Smartphone, Mail, MapPin, Globe, Tablet, Monitor, Sun, Moon, Trash2, Plus, RefreshCw, AlertCircle, Check, Info, Maximize2, Minimize2 } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { useTheme } from '../context/ThemeContext';
 
@@ -227,13 +227,17 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     }
   };
 
-  const handleDeleteDevice = async (devId: string, deviceName: string) => {
-    if (!window.confirm(`คุณต้องการยกเลิกการผูกอุปกรณ์ "${deviceName}" ใช่หรือไม่?`)) return;
+  const handleDeleteDevice = async (targetId: string, deviceName: string) => {
+    if (!targetId) {
+      setErrorMsg('ไม่พบรหัสอุปกรณ์ที่ต้องการยกเลิกการผูก');
+      return;
+    }
+    if (!window.confirm(`คุณต้องการยกเลิกการผูกอุปกรณ์ "${deviceName || 'อุปกรณ์ผูกประจำตัว'}" ใช่หรือไม่?`)) return;
     setErrorMsg('');
     setSuccessMsg('');
     try {
       setDeviceActionLoading(true);
-      const res = await deleteUserDeviceApi(currentUser.id, devId);
+      const res = await deleteUserDeviceApi(currentUser.id, targetId);
       setBoundDevices(res.devices || []);
       if (res.user) onUpdateUser(res.user);
       setSuccessMsg('ยกเลิกการผูกอุปกรณ์เรียบร้อยแล้ว');
@@ -812,6 +816,17 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                     `🔒 สำหรับนักศึกษา สามารถผูกอุปกรณ์ประจำตัวได้สูงสุด ${maxDevicesLimit} เครื่อง ตามที่ผู้ดูแลระบบกำหนด เพื่อป้องกันการส่งรหัสให้ผู้อื่นเช็คชื่อแทน`
                   )}
                 </p>
+
+                {/* Smart Hardware Fingerprint Banner */}
+                <div className={`p-3 rounded-xl border flex items-start space-x-2 text-[11px] leading-relaxed ${
+                  isDarkMode ? 'bg-sky-950/30 border-sky-800/40 text-sky-200' : 'bg-sky-50 border-sky-200 text-sky-900'
+                }`}>
+                  <ShieldCheck className="w-4 h-4 text-sky-500 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">💡 คำแนะนำสำหรับการเข้าใช้งานแบบส่วนตัว (Incognito/Private Browsing):</span>
+                    ระบบใช้ระบบ <span className="font-semibold text-emerald-500 dark:text-emerald-400">Smart Hardware Fingerprint</span> ในการวิเคราะห์และจดจำฮาร์ดแวร์ประจำเครื่อง ทำให้อุปกรณ์ของคุณยังคงถูกจดจำว่าเป็นเครื่องเดิมแม้เปิดในโหมดท่องเว็บส่วนตัว หากมีการสลับเครื่องใหม่และโควตาเต็ม สามารถกดรูปถังขยะ <Trash2 className="w-3 h-3 inline text-rose-400" /> เพื่อปลดล็อกอุปกรณ์เดิมได้เองทันที
+                  </div>
+                </div>
               </div>
 
               {/* Current Device Box */}
@@ -823,10 +838,10 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                     <Smartphone className="w-4 h-4" />
                     <span>อุปกรณ์ที่คุณกำลังใช้งานขณะนี้ (This Current Device)</span>
                   </div>
-                  {boundDevices.some((d) => d.deviceId === currentDevInfo.deviceId) ? (
+                  {boundDevices.some((d) => d.deviceId === currentDevInfo.deviceId || (currentDevInfo.hardwareFingerprint && d.deviceId.includes(currentDevInfo.hardwareFingerprint))) ? (
                     <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center space-x-1">
                       <Check className="w-3 h-3" />
-                      <span>ผูกอยู่ในระบบแล้ว</span>
+                      <span>ผูกอยู่ในระบบแล้ว (Smart Protected)</span>
                     </span>
                   ) : (
                     <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center space-x-1">
@@ -894,7 +909,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                 ) : (
                   <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                     {boundDevices.map((dev) => {
-                      const isCurrent = dev.deviceId === currentDevInfo.deviceId;
+                      const isCurrent = dev.deviceId === currentDevInfo.deviceId || (currentDevInfo.hardwareFingerprint && dev.deviceId.includes(currentDevInfo.hardwareFingerprint));
                       return (
                         <div
                           key={dev.id}
@@ -944,7 +959,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                           </div>
 
                           <button
-                            onClick={() => handleDeleteDevice(dev.id, dev.deviceName)}
+                            onClick={() => handleDeleteDevice(dev.id || dev.deviceId, dev.deviceName)}
                             disabled={deviceActionLoading}
                             className="p-2 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition disabled:opacity-50 cursor-pointer"
                             title="ยกเลิกการผูกอุปกรณ์นี้"

@@ -617,7 +617,8 @@ export async function bindUserDeviceApi(userId: string, deviceInfo: {
 }
 
 export async function deleteUserDeviceApi(userId: string, devId: string) {
-  const res = await fetch(`${API_BASE}/users/${userId}/devices/${devId}`, {
+  const targetDevId = devId || '';
+  const res = await fetch(`${API_BASE}/users/${userId}/devices/${encodeURIComponent(targetDevId)}`, {
     method: 'DELETE',
   });
   const data = await res.json();

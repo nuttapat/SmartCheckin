@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { UserRole, User } from '../types';
 import { registerUser, googleLogin, fetchSystemSettings } from '../services/api';
 import { signInWithGooglePopup } from '../lib/firebaseStore';
+import { getDeviceInfo } from '../utils/deviceHelper';
 import { X, UserCheck, Mail, ShieldAlert, Smartphone, CheckCircle2, Lock, Eye, EyeOff } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -41,8 +42,8 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
 
   if (!isOpen) return null;
 
-  // Auto generate device ID signature
-  const deviceFingerprint = `dev_${Math.random().toString(36).substring(2, 10)}`;
+  // Auto generate device ID signature from stable hardware fingerprint
+  const deviceFingerprint = getDeviceInfo().deviceId;
 
   // Helper to check domain allowance based on dynamic server settings
   const checkIsDomainAllowed = (emailStr: string, currentSysSettings?: any): { allowed: boolean; reason?: string } => {
