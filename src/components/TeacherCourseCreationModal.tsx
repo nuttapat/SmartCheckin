@@ -210,7 +210,11 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
           )}
 
           {/* Basic Course Info */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="space-y-3">
+            <h3 className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`}>
+              ข้อมูลทั่วไปของรายวิชา (GENERAL INFORMATION)
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                 รหัสวิชา (Course Code) <span className="text-rose-500">*</span>
@@ -314,6 +318,7 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
                 />
               )}
             </div>
+          </div>
           </div>
 
           {/* Course GPS Default Location */}

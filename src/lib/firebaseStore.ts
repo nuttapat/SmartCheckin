@@ -8,6 +8,7 @@ import {
   getDoc,
   setDoc,
   deleteDoc,
+  writeBatch,
   query,
   where,
 } from 'firebase/firestore';
@@ -66,7 +67,7 @@ function removeUndefinedFields<T>(obj: T): T {
 }
 
 /**
- * Generic helper to save or update an entity in Firestore
+ * Generic helper to save or update an entity in Firestore with 15s timeout
  */
 export async function saveToFirestore<T extends { id: string }>(
   collectionName: string,
@@ -77,30 +78,75 @@ export async function saveToFirestore<T extends { id: string }>(
     const cleanedItem = removeUndefinedFields(item);
     const savePromise = setDoc(docRef, cleanedItem, { merge: true });
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Firestore save timeout')), 4000)
+      setTimeout(() => reject(new Error('Firestore save timeout (25s)')), 25000)
     );
     await Promise.race([savePromise, timeoutPromise]);
-  } catch (err) {
-    console.error(`[Firestore Save Warning] Collection: ${collectionName}, ID: ${item.id}`, err);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (msg.includes('Quota limit exceeded')) {
+      console.warn(`[Firestore Quota Exceeded] Save skipped for '${collectionName}/${item.id}'. Saved locally.`);
+    } else {
+      console.warn(`[Firestore Save Notice] Collection: ${collectionName}, ID: ${item.id}: ${msg}`);
+    }
+  }
+}
+
+/**
+ * Batch save helper to write multiple items in atomic chunks (up to 400 docs per batch)
+ */
+export async function batchSaveToFirestore<T extends { id: string }>(
+  collectionName: string,
+  items: T[]
+): Promise<void> {
+  if (!items || items.length === 0) return;
+
+  const CHUNK_SIZE = 400; // Firestore limit is 500 writes per batch
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const chunk = items.slice(i, i + CHUNK_SIZE);
+    try {
+      const batch = writeBatch(db);
+      for (const item of chunk) {
+        const docRef = doc(db, collectionName, item.id);
+        const cleanedItem = removeUndefinedFields(item);
+        batch.set(docRef, cleanedItem, { merge: true });
+      }
+      const commitPromise = batch.commit();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore batch commit timeout (20s)')), 20000)
+      );
+      await Promise.race([commitPromise, timeoutPromise]);
+    } catch (err) {
+      console.warn(`[Firestore Batch Save Warning] Chunk starting at index ${i} failed, falling back to individual saves:`, err);
+      // Fallback to individual saveToFirestore with concurrency control
+      for (const item of chunk) {
+        await saveToFirestore(collectionName, item);
+      }
+    }
   }
 }
 
 /**
  * Generic helper to fetch all documents in a collection from Firestore
+ * Returns null if fetch fails (e.g. quota limit, timeout, network error), or T[] if succeeded.
  */
-export async function getAllFromFirestore<T>(collectionName: string): Promise<T[]> {
+export async function getAllFromFirestore<T>(collectionName: string): Promise<T[] | null> {
   try {
     const colRef = collection(db, collectionName);
     const fetchPromise = getDocs(colRef).then((snapshot) =>
       snapshot.docs.map((docSnap) => docSnap.data() as T)
     );
     const timeoutPromise = new Promise<T[]>((_, reject) =>
-      setTimeout(() => reject(new Error('Firestore fetch timeout')), 3000)
+      setTimeout(() => reject(new Error('Firestore fetch timeout (15s)')), 15000)
     );
     return await Promise.race([fetchPromise, timeoutPromise]);
-  } catch (err) {
-    console.error(`[Firestore Fetch Warning] Collection: ${collectionName}`, err);
-    return [];
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (msg.includes('Quota limit exceeded')) {
+      console.warn(`[Firestore Quota Exceeded] Collection '${collectionName}' reached free tier quota. Operating safely on local persistent cache.`);
+    } else {
+      console.warn(`[Firestore Fetch Notice] Collection '${collectionName}': ${msg}`);
+    }
+    return null;
   }
 }
 
@@ -114,7 +160,12 @@ export async function deleteFromFirestore(
   try {
     const docRef = doc(db, collectionName, docId);
     await deleteDoc(docRef);
-  } catch (err) {
-    console.error(`[Firestore Delete Error] Collection: ${collectionName}, ID: ${docId}`, err);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (msg.includes('Quota limit exceeded')) {
+      console.warn(`[Firestore Quota Exceeded] Delete skipped for '${collectionName}/${docId}'. Handled locally via tombstone.`);
+    } else {
+      console.warn(`[Firestore Delete Notice] Collection: ${collectionName}, ID: ${docId}: ${msg}`);
+    }
   }
 }

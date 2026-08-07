@@ -15,11 +15,15 @@ import {
   CheckSquare,
   Square,
   AlertTriangle,
+  FileText,
+  ListChecks,
+  CheckCircle2,
 } from 'lucide-react';
 import { Course, CourseMember, CourseMemberRole, User as UserType } from '../types';
 import {
   fetchStudents,
   inviteStudentToCourse,
+  inviteStudentsBatchToCourse,
   removeCourseMember,
   removeCourseMembersBatch,
   generateInviteLink,
@@ -48,14 +52,21 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
   const { isDarkMode: themeIsDarkMode } = useTheme();
   const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [isMaximized, setIsMaximized] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'db' | 'link'>('db');
+  const [activeTab, setActiveTab] = useState<'db' | 'paste' | 'link'>('db');
   const [students, setStudents] = useState<UserType[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [selectedAvailableStudentIds, setSelectedAvailableStudentIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [listSearchQuery, setListSearchQuery] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Bulk Paste / Match State
+  const [pasteText, setPasteText] = useState<string>('');
+  const [parsedMatchedStudents, setParsedMatchedStudents] = useState<UserType[]>([]);
+  const [parsedUnmatchedTokens, setParsedUnmatchedTokens] = useState<string[]>([]);
+  const [hasParsed, setHasParsed] = useState<boolean>(false);
 
   // Selection & Bulk Delete state
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
@@ -77,6 +88,11 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
       setError(null);
       setSuccessMsg(null);
       setSelectedMemberIds([]);
+      setSelectedAvailableStudentIds([]);
+      setPasteText('');
+      setParsedMatchedStudents([]);
+      setParsedUnmatchedTokens([]);
+      setHasParsed(false);
       fetchStudentInviteLink();
     }
   }, [isOpen]);
@@ -108,7 +124,7 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleAddStudent = async () => {
+  const handleAddSingleStudent = async () => {
     if (!selectedStudentId) {
       setError('กรุณาเลือกนักศึกษาที่ต้องการเพิ่มจากรายชื่อในระบบ');
       return;
@@ -120,6 +136,98 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
       const res = await inviteStudentToCourse(course.id, selectedStudentId);
       setSuccessMsg(res.message || 'เพิ่มนักศึกษาเข้าร่วมรายวิชาสำเร็จ');
       setSelectedStudentId('');
+      triggerRefresh();
+    } catch (err: any) {
+      setError(err.message || 'เกิดข้อผิดพลาดในการเพิ่มนักศึกษา');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddSelectedAvailableStudents = async () => {
+    if (selectedAvailableStudentIds.length === 0) {
+      setError('กรุณาเลือกนักศึกษาอย่างน้อย 1 คน');
+      return;
+    }
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      setLoading(true);
+      const res = await inviteStudentsBatchToCourse(course.id, selectedAvailableStudentIds);
+      setSuccessMsg(res.message || `เพิ่มนักศึกษาจำนวน ${selectedAvailableStudentIds.length} คน เข้าร่วมรายวิชาสำเร็จ`);
+      setSelectedAvailableStudentIds([]);
+      setSelectedStudentId('');
+      triggerRefresh();
+    } catch (err: any) {
+      setError(err.message || 'เกิดข้อผิดพลาดในการเพิ่มนักศึกษาแบบกลุ่ม');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleParsePasteText = () => {
+    setError(null);
+    setSuccessMsg(null);
+    if (!pasteText.trim()) {
+      setError('กรุณาป้อนหรือวางรหัสนักศึกษา/อีเมลก่อนทำการตรวจสอบ');
+      return;
+    }
+
+    const tokens = pasteText
+      .split(/[\n,\t\s]+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+
+    if (tokens.length === 0) {
+      setError('ไม่พบข้อมูลรหัสนักศึกษาหรืออีเมลในข้อความที่วาง');
+      return;
+    }
+
+    const matched: UserType[] = [];
+    const unmatched: string[] = [];
+    const matchedSet = new Set<string>();
+
+    tokens.forEach((token) => {
+      const lower = token.toLowerCase();
+      const found = availableStudents.find(
+        (s) =>
+          (s.universityId && s.universityId.toLowerCase() === lower) ||
+          (s.email && s.email.toLowerCase() === lower)
+      );
+
+      if (found) {
+        if (!matchedSet.has(found.id)) {
+          matchedSet.add(found.id);
+          matched.push(found);
+        }
+      } else {
+        if (!unmatched.includes(token)) {
+          unmatched.push(token);
+        }
+      }
+    });
+
+    setParsedMatchedStudents(matched);
+    setParsedUnmatchedTokens(unmatched);
+    setHasParsed(true);
+  };
+
+  const handleAddParsedStudents = async () => {
+    if (parsedMatchedStudents.length === 0) {
+      setError('ไม่พบรายชื่อนักศึกษาที่ตรงกับระบบเพื่อทำการเพิ่ม');
+      return;
+    }
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      setLoading(true);
+      const studentIds = parsedMatchedStudents.map((s) => s.id);
+      const res = await inviteStudentsBatchToCourse(course.id, studentIds);
+      setSuccessMsg(res.message || `เพิ่มนักศึกษาจำนวน ${studentIds.length} คน เข้าร่วมรายวิชาสำเร็จ`);
+      setPasteText('');
+      setParsedMatchedStudents([]);
+      setParsedUnmatchedTokens([]);
+      setHasParsed(false);
       triggerRefresh();
     } catch (err: any) {
       setError(err.message || 'เกิดข้อผิดพลาดในการเพิ่มนักศึกษา');
@@ -146,6 +254,23 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
     return fullName.includes(q) || universityId.includes(q) || email.includes(q);
   });
 
+  const toggleSelectAllAvailable = () => {
+    const filteredIds = filteredAvailableStudents.map((s) => s.id);
+    const isAllSelected = filteredIds.every((id) => selectedAvailableStudentIds.includes(id));
+
+    if (isAllSelected) {
+      setSelectedAvailableStudentIds((prev) => prev.filter((id) => !filteredIds.includes(id)));
+    } else {
+      setSelectedAvailableStudentIds((prev) => Array.from(new Set([...prev, ...filteredIds])));
+    }
+  };
+
+  const toggleSelectAvailableStudent = (studentId: string) => {
+    setSelectedAvailableStudentIds((prev) =>
+      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
+    );
+  };
+
   const filteredEnrolledStudents = studentMembersInCourse.filter((m) => {
     const u = m.user;
     if (!u) return true;
@@ -156,7 +281,7 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
     return fullName.includes(q) || universityId.includes(q) || email.includes(q);
   });
 
-  // Checkbox selection handlers
+  // Checkbox selection handlers for enrolled list
   const toggleSelectAll = () => {
     const filteredIds = filteredEnrolledStudents.map((m) => m.id);
     const isAllSelected = filteredIds.every((id) => selectedMemberIds.includes(id));
@@ -174,13 +299,11 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
     );
   };
 
-  // Open confirmation modal for single member
   const handleRequestSingleDelete = (member: CourseMember) => {
     setDeleteTargetMembers([member]);
     setDeleteConfirmModalOpen(true);
   };
 
-  // Open confirmation modal for bulk selected members
   const handleRequestBulkDelete = () => {
     const targets = studentMembersInCourse.filter((m) => selectedMemberIds.includes(m.id));
     if (targets.length === 0) return;
@@ -188,7 +311,6 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
     setDeleteConfirmModalOpen(true);
   };
 
-  // Execute deletion after user confirms in modal
   const handleConfirmDelete = async () => {
     if (deleteTargetMembers.length === 0) return;
     setError(null);
@@ -207,7 +329,6 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
         setSuccessMsg(res.message || `ลบนักศึกษาจำนวน ${deleteTargetMembers.length} คน เรียบร้อยแล้ว`);
       }
 
-      // Clear selections for deleted items
       const deletedSet = new Set(deleteTargetMembers.map((m) => m.id));
       setSelectedMemberIds((prev) => prev.filter((id) => !deletedSet.has(id)));
       setDeleteConfirmModalOpen(false);
@@ -227,13 +348,17 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
     filteredEnrolledStudents.length > 0 &&
     filteredEnrolledStudents.every((m) => selectedMemberIds.includes(m.id));
 
+  const isAllAvailableSelected =
+    filteredAvailableStudents.length > 0 &&
+    filteredAvailableStudents.every((s) => selectedAvailableStudentIds.includes(s.id));
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
       <div
         className={`border shadow-2xl overflow-hidden transition-all duration-300 flex flex-col ${
           isMaximized
             ? 'w-full h-full max-w-none max-h-none rounded-none my-0'
-            : 'w-full max-w-2xl rounded-2xl max-h-[92vh] my-auto'
+            : 'w-full max-w-3xl rounded-2xl max-h-[92vh] my-auto'
         } ${
           isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
         }`}
@@ -311,10 +436,10 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
           )}
 
           {/* Tab Selection */}
-          <div className={`flex border-b space-x-2 px-1 ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+          <div className={`flex border-b space-x-1 sm:space-x-2 px-1 overflow-x-auto ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
             <button
               onClick={() => setActiveTab('db')}
-              className={`pb-2.5 px-3.5 font-bold text-xs transition border-b-2 flex items-center space-x-2 rounded-t-xl cursor-pointer ${
+              className={`pb-2.5 px-3 font-bold text-xs transition border-b-2 flex items-center space-x-1.5 rounded-t-xl cursor-pointer whitespace-nowrap ${
                 activeTab === 'db'
                   ? 'border-sky-600 text-sky-600 bg-sky-500/10'
                   : isDarkMode
@@ -323,11 +448,26 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
               }`}
             >
               <UserCheck className="w-4 h-4 text-sky-500" />
-              <span>เชิญนักศึกษาในระบบ</span>
+              <span>เลือกจากฐานข้อมูล (เดี่ยว/กลุ่ม)</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('paste')}
+              className={`pb-2.5 px-3 font-bold text-xs transition border-b-2 flex items-center space-x-1.5 rounded-t-xl cursor-pointer whitespace-nowrap ${
+                activeTab === 'paste'
+                  ? 'border-sky-600 text-sky-600 bg-sky-500/10'
+                  : isDarkMode
+                  ? 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/50'
+                  : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <FileText className="w-4 h-4 text-purple-500" />
+              <span>วางรหัสนักศึกษา/อีเมล (Bulk Paste)</span>
+            </button>
+
             <button
               onClick={() => setActiveTab('link')}
-              className={`pb-2.5 px-3.5 font-bold text-xs transition border-b-2 flex items-center space-x-2 rounded-t-xl cursor-pointer ${
+              className={`pb-2.5 px-3 font-bold text-xs transition border-b-2 flex items-center space-x-1.5 rounded-t-xl cursor-pointer whitespace-nowrap ${
                 activeTab === 'link'
                   ? 'border-sky-600 text-sky-600 bg-sky-500/10'
                   : isDarkMode
@@ -335,12 +475,12 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
                   : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
-              <Link className="w-4 h-4 text-sky-500" />
+              <Link className="w-4 h-4 text-emerald-500" />
               <span>สร้างลิงก์/รหัสเชิญ</span>
             </button>
           </div>
 
-          {/* Tab 1: Invite from Database */}
+          {/* Tab 1: Invite from Database with Multi-select / Bulk Add */}
           {activeTab === 'db' && (
             <div className="space-y-4">
               <div
@@ -348,9 +488,35 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
                   isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'
                 }`}
               >
-                <label className={`block text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
-                  1. ค้นหาและเลือกนักศึกษาที่มีรายชื่ออยู่ในฐานข้อมูล
-                </label>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label className={`block text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                    1. ค้นหาและเลือกนักศึกษา (สามารถเลือกพร้อมกันหลายคนได้)
+                  </label>
+
+                  {/* Dropdown for quick single select */}
+                  <div className="w-full sm:w-auto">
+                    <select
+                      value={selectedStudentId}
+                      onChange={(e) => {
+                        setSelectedStudentId(e.target.value);
+                        if (e.target.value && !selectedAvailableStudentIds.includes(e.target.value)) {
+                          setSelectedAvailableStudentIds((prev) => [...prev, e.target.value]);
+                        }
+                      }}
+                      className={`w-full sm:w-64 p-2 text-xs rounded-xl border font-bold focus:outline-none focus:border-sky-500 transition ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                      }`}
+                    >
+                      <option value="">-- เลือกเร็วรายบุคคล ({filteredAvailableStudents.length} คน) --</option>
+                      {filteredAvailableStudents.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.universityId ? `[${s.universityId}] ` : ''}
+                          {s.title || ''} {s.firstNameTh} {s.lastNameTh} ({s.email})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
                 {/* Search input */}
                 <div className="relative">
@@ -370,36 +536,243 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
                   />
                 </div>
 
-                {/* Select box */}
-                <select
-                  value={selectedStudentId}
-                  onChange={(e) => setSelectedStudentId(e.target.value)}
-                  className={`w-full p-2.5 text-xs rounded-xl border font-bold focus:outline-none focus:border-sky-500 transition ${
-                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                  }`}
-                >
-                  <option value="">-- เลือกนักศึกษาที่ยังไม่ได้เข้าร่วมวิชา ({filteredAvailableStudents.length} คน) --</option>
-                  {filteredAvailableStudents.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.universityId ? `[${s.universityId}] ` : ''}
-                      {s.title || ''} {s.firstNameTh} {s.lastNameTh} ({s.email})
-                    </option>
-                  ))}
-                </select>
+                {/* Multi-select controls */}
+                {filteredAvailableStudents.length > 0 && (
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      type="button"
+                      onClick={toggleSelectAllAvailable}
+                      className={`flex items-center space-x-2 text-xs font-bold transition cursor-pointer select-none ${
+                        isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-700 hover:text-sky-900'
+                      }`}
+                    >
+                      {isAllAvailableSelected ? (
+                        <CheckSquare className="w-4 h-4 text-sky-500" />
+                      ) : (
+                        <Square className={`w-4 h-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                      )}
+                      <span>
+                        เลือกทั้งหมด {searchQuery.trim() ? `(${filteredAvailableStudents.length} คนจากคำค้นหา)` : `(${filteredAvailableStudents.length} คน)`}
+                      </span>
+                    </button>
 
-                <button
-                  onClick={handleAddStudent}
-                  disabled={loading || !selectedStudentId}
-                  className="w-full mt-2 py-2.5 px-4 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl transition shadow-md shadow-sky-600/20 disabled:opacity-50 cursor-pointer flex items-center justify-center space-x-2 active:scale-95"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>ยืนยันเพิ่มนักศึกษาเข้าร่วมรายวิชา</span>
-                </button>
+                    <span className={`text-xs font-bold ${isDarkMode ? 'text-sky-300' : 'text-sky-800'}`}>
+                      เลือกไว้ {selectedAvailableStudentIds.length} คน
+                    </span>
+                  </div>
+                )}
+
+                {/* Scrollable list of available students with checkboxes */}
+                <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 pt-1">
+                  {filteredAvailableStudents.length === 0 ? (
+                    <div className={`p-4 text-center text-xs font-semibold rounded-xl border border-dashed ${isDarkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-500'}`}>
+                      {searchQuery.trim() ? `ไม่พบนักศึกษาที่ตรงกับคำค้นหา "${searchQuery}"` : 'นักศึกษาทั้งหมดในระบบอยู่ในวิชานี้เรียบร้อยแล้ว'}
+                    </div>
+                  ) : (
+                    filteredAvailableStudents.map((s) => {
+                      const isSelected = selectedAvailableStudentIds.includes(s.id);
+                      const displayName = `${s.title || ''} ${s.firstNameTh || ''} ${s.lastNameTh || ''}`.trim() || s.email;
+
+                      return (
+                        <div
+                          key={s.id}
+                          onClick={() => toggleSelectAvailableStudent(s.id)}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition select-none ${
+                            isSelected
+                              ? isDarkMode
+                                ? 'bg-sky-950/50 border-sky-500/50 text-white'
+                                : 'bg-sky-50 border-sky-300 text-slate-900'
+                              : isDarkMode
+                              ? 'bg-slate-800/80 border-slate-700/70 hover:bg-slate-800 text-slate-300'
+                              : 'bg-white border-slate-200 hover:bg-slate-100 text-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center space-x-2.5 min-w-0">
+                            <div className="shrink-0 p-0.5">
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-sky-500" />
+                              ) : (
+                                <Square className={`w-4 h-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-bold truncate">{displayName}</div>
+                              <div className={`text-[11px] font-medium truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                {s.universityId ? `รหัส: ${s.universityId} • ` : ''}
+                                {s.email}
+                              </div>
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-sky-500/20 text-sky-500 border border-sky-500/30 shrink-0 ml-2">
+                              เลือกแล้ว
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="pt-2 flex items-center space-x-2">
+                  <button
+                    onClick={handleAddSelectedAvailableStudents}
+                    disabled={loading || selectedAvailableStudentIds.length === 0}
+                    className="flex-1 py-2.5 px-4 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl transition shadow-md shadow-sky-600/20 disabled:opacity-50 cursor-pointer flex items-center justify-center space-x-2 active:scale-95"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>
+                      {selectedAvailableStudentIds.length > 0
+                        ? `ยืนยันเพิ่มนักศึกษาที่เลือก (${selectedAvailableStudentIds.length} คน) เข้าร่วมรายวิชา`
+                        : 'ยืนยันเพิ่มนักศึกษาเข้าร่วมรายวิชา'}
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
-          {/* Tab 2: Static Invite Link */}
+          {/* Tab 2: Bulk Paste / Import via Student IDs or Emails */}
+          {activeTab === 'paste' && (
+            <div className="space-y-4">
+              <div
+                className={`p-4 rounded-2xl border space-y-3 ${
+                  isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'
+                }`}
+              >
+                <div>
+                  <label className={`block text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                    ป้อนหรือวางรหัสนักศึกษา หรือ อีเมล (แยกด้วยบรรทัดใหม่ คอมมา หรือเว้นวรรค)
+                  </label>
+                  <p className={`text-[11px] font-medium mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    ระบบจะแมตช์รหัสนักศึกษากับฐานข้อมูลให้อัตโนมัติและแสดงรายการที่พบให้กดยืนยันเพิ่ม
+                  </p>
+                </div>
+
+                <textarea
+                  rows={5}
+                  value={pasteText}
+                  onChange={(e) => {
+                    setPasteText(e.target.value);
+                    setHasParsed(false);
+                  }}
+                  placeholder={`ตัวอย่างเช่น:\n64010001\n64010002\n64010003\nstudent1@university.ac.th, student2@university.ac.th`}
+                  className={`w-full p-3 text-xs font-mono rounded-xl border focus:outline-none focus:border-sky-500 transition ${
+                    isDarkMode
+                      ? 'bg-slate-900 border-slate-700 text-white placeholder-slate-600'
+                      : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
+                  }`}
+                />
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={handleParsePasteText}
+                    disabled={!pasteText.trim()}
+                    className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50 ${
+                      isDarkMode
+                        ? 'bg-purple-600/80 hover:bg-purple-600 text-white border border-purple-500/30'
+                        : 'bg-purple-600 hover:bg-purple-700 text-white shadow-sm'
+                    }`}
+                  >
+                    <ListChecks className="w-4 h-4" />
+                    <span>ตรวจสอบและค้นหารายชื่อในระบบ</span>
+                  </button>
+                  {pasteText.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPasteText('');
+                        setParsedMatchedStudents([]);
+                        setParsedUnmatchedTokens([]);
+                        setHasParsed(false);
+                      }}
+                      className={`py-2 px-3 rounded-xl text-xs font-semibold cursor-pointer ${
+                        isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      ล้างข้อมูล
+                    </button>
+                  )}
+                </div>
+
+                {/* Parsed Results Preview */}
+                {hasParsed && (
+                  <div className="space-y-3 pt-2">
+                    {/* Matched Students List */}
+                    <div
+                      className={`p-3 rounded-xl border space-y-2 ${
+                        isDarkMode ? 'bg-emerald-950/30 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className={`text-xs font-bold flex items-center space-x-1.5 ${isDarkMode ? 'text-emerald-300' : 'text-emerald-800'}`}>
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          <span>พบรหัสนักศึกษาในฐานข้อมูล: {parsedMatchedStudents.length} คน</span>
+                        </span>
+                      </div>
+
+                      {parsedMatchedStudents.length === 0 ? (
+                        <div className={`text-xs font-medium py-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                          ไม่พบนักศึกษาที่แมตช์ตรงกับฐานข้อมูลจากข้อมูลที่วางไว้
+                        </div>
+                      ) : (
+                        <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                          {parsedMatchedStudents.map((s) => (
+                            <div
+                              key={s.id}
+                              className={`p-2 rounded-lg border text-xs flex items-center justify-between ${
+                                isDarkMode ? 'bg-slate-900/80 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
+                              }`}
+                            >
+                              <div className="truncate font-semibold">
+                                {s.universityId ? `[${s.universityId}] ` : ''}
+                                {s.title || ''} {s.firstNameTh} {s.lastNameTh}
+                              </div>
+                              <div className={`text-[11px] font-mono shrink-0 ml-2 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                                {s.email}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Unmatched Warning List */}
+                    {parsedUnmatchedTokens.length > 0 && (
+                      <div
+                        className={`p-3 rounded-xl border space-y-1 ${
+                          isDarkMode ? 'bg-amber-950/30 border-amber-500/30' : 'bg-amber-50 border-amber-200'
+                        }`}
+                      >
+                        <div className={`text-xs font-bold flex items-center space-x-1.5 ${isDarkMode ? 'text-amber-300' : 'text-amber-800'}`}>
+                          <AlertTriangle className="w-4 h-4 text-amber-500" />
+                          <span>ไม่พบในฐานข้อมูล ({parsedUnmatchedTokens.length} รายการ):</span>
+                        </div>
+                        <div className={`text-[11px] font-mono leading-relaxed truncate ${isDarkMode ? 'text-amber-200/80' : 'text-amber-900'}`}>
+                          {parsedUnmatchedTokens.join(', ')}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Final Add Action Button */}
+                    {parsedMatchedStudents.length > 0 && (
+                      <button
+                        onClick={handleAddParsedStudents}
+                        disabled={loading}
+                        className="w-full mt-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition shadow-md shadow-emerald-600/20 disabled:opacity-50 cursor-pointer flex items-center justify-center space-x-2 active:scale-95"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        <span>ยืนยันเพิ่มนักศึกษาที่พบ ({parsedMatchedStudents.length} คน) เข้าร่วมรายวิชา</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Tab 3: Static Invite Link */}
           {activeTab === 'link' && (
             <div className="space-y-4">
               <div

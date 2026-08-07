@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Course, TeachingWeek, Semester, User } from '../types';
 import { updateCourse } from '../services/api';
-import { X, BookOpen, Plus, Trash2, Calendar, Save, CheckCircle2, MapPin, Globe, Maximize2, Minimize2 } from 'lucide-react';
+import { X, BookOpen, Plus, Minus, Trash2, Calendar, Save, CheckCircle2, MapPin, Globe, Maximize2, Minimize2 } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { DeleteCourseConfirmModal } from './DeleteCourseConfirmModal';
 import { useTheme } from '../context/ThemeContext';
@@ -66,34 +66,27 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   if (!isOpen) return null;
 
   const handleAddWeek = () => {
-    const sorted = [...weeks].sort((a, b) => a.weekNumber - b.weekNumber);
-    const lastWeek = sorted.length > 0 ? sorted[sorted.length - 1] : null;
-    const nextWeekNum = lastWeek ? lastWeek.weekNumber + 1 : 1;
+    const nextNum = weeks.length + 1;
+    const lastWeek = weeks.length > 0 ? weeks[weeks.length - 1] : null;
     const nextDate = lastWeek && lastWeek.date ? addOneWeekToDate(lastWeek.date) : new Date().toISOString().split('T')[0];
-
-    setWeeks((prev) => [
-      ...prev,
+    setWeeks([
+      ...weeks,
       {
-        weekNumber: nextWeekNum,
-        topic: `หัวข้อการสอนสัปดาห์ที่ ${nextWeekNum}`,
+        weekNumber: nextNum,
+        topic: '',
         date: nextDate,
       },
     ]);
   };
 
-  const handleRemoveWeek = (weekNumber: number) => {
+  const handleRemoveWeek = (index: number) => {
     if (weeks.length <= 1) {
       setErrorMsg('ต้องมีสัปดาห์การสอนอย่างน้อย 1 สัปดาห์');
       return;
     }
     setErrorMsg('');
-    const filtered = weeks.filter((w) => w.weekNumber !== weekNumber);
-    // Re-index week numbers sequentially
-    const reindexed = filtered.map((w, index) => ({
-      ...w,
-      weekNumber: index + 1,
-    }));
-    setWeeks(reindexed);
+    const updated = weeks.filter((_, i) => i !== index).map((w, idx) => ({ ...w, weekNumber: idx + 1 }));
+    setWeeks(updated);
   };
 
   const handleWeekChange = (index: number, field: keyof TeachingWeek, value: string | number) => {
@@ -229,7 +222,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
           {/* Basic Course Details */}
           <div className="space-y-4">
             <h3 className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`}>
-              ข้อมูลทั่วไปของรายวิชา (General Information)
+              ข้อมูลทั่วไปของรายวิชา (GENERAL INFORMATION)
             </h3>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -441,71 +434,66 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
             </div>
           </div>
 
-          {/* Teaching Weeks Management */}
-          <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between">
-              <h3 className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-                กำหนดสัปดาห์การสอน &amp; หัวข้อวิชา ({weeks.length} สัปดาห์)
-              </h3>
+          {/* Dynamic Session Weeks Section */}
+          <div className="pt-2">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className={`text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5 ${
+                  isDarkMode ? 'text-sky-400' : 'text-sky-600'
+                }`}>
+                  <Calendar className="w-4 h-4" />
+                  <span>กำหนดสัปดาห์การเรียนการสอน (DYNAMIC TEACHING WEEKS)</span>
+                </h3>
+                <p className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  เพิ่มหรือลดสัปดาห์สอนด้วยปุ่ม [+] และ [-] เพื่อสร้างสถิติการเข้าเรียน
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={handleAddWeek}
-                className="px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-xs font-bold flex items-center space-x-1 transition"
+                className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center space-x-1 transition shadow-sm"
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>+ เพิ่มสัปดาห์สอน</span>
+                <Plus className="w-4 h-4" />
+                <span>เพิ่มสัปดาห์ [+]</span>
               </button>
             </div>
 
-            <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
-              {weeks.map((week, idx) => (
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              {weeks.map((w, index) => (
                 <div
-                  key={idx}
-                  className={`p-3.5 border rounded-2xl flex items-center gap-3 transition ${
-                    isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'
+                  key={index}
+                  className={`flex items-center space-x-2 p-2.5 rounded-xl border ${
+                    isDarkMode ? 'bg-slate-800/80 border-slate-700/80' : 'bg-slate-50 border-slate-200'
                   }`}
                 >
-                  <div className="shrink-0 w-16 text-center">
-                    <span className="inline-block px-2.5 py-1 rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-300 text-xs font-mono font-bold">
-                      W{week.weekNumber}
-                    </span>
-                  </div>
-
-                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <div className="sm:col-span-2">
-                      <input
-                        type="text"
-                        value={week.topic}
-                        onChange={(e) => handleWeekChange(idx, 'topic', e.target.value)}
-                        placeholder="หัวข้อการสอน"
-                        required
-                        className={`w-full border rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-sky-500 ${
-                          isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                        }`}
-                      />
-                    </div>
-                    <div>
-                      <div className="relative flex items-center">
-                        <Calendar className="w-3.5 h-3.5 absolute left-2.5 text-slate-400" />
-                        <input
-                          type="date"
-                          value={week.date}
-                          onChange={(e) => handleWeekChange(idx, 'date', e.target.value)}
-                          className={`w-full border rounded-xl pl-8 pr-2 py-1.5 text-xs focus:outline-none focus:border-sky-500 ${
-                            isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                          }`}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
+                  <span className="w-16 text-center text-xs font-bold text-blue-600 dark:text-blue-300 bg-blue-500/10 py-1 rounded-lg border border-blue-500/20 shrink-0 font-mono">
+                    สัปดาห์ {w.weekNumber}
+                  </span>
+                  <input
+                    type="text"
+                    value={w.topic}
+                    onChange={(e) => handleWeekChange(index, 'topic', e.target.value)}
+                    placeholder="เช่น Course orientation"
+                    className={`flex-grow border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-sky-500 ${
+                      isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                    }`}
+                  />
+                  <input
+                    type="date"
+                    value={w.date}
+                    onChange={(e) => handleWeekChange(index, 'date', e.target.value)}
+                    className={`w-32 border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-sky-500 shrink-0 ${
+                      isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                    }`}
+                  />
                   <button
                     type="button"
-                    onClick={() => handleRemoveWeek(week.weekNumber)}
-                    title="ลบสัปดาห์นี้"
-                    className="p-2 rounded-xl text-rose-500 hover:bg-rose-500/10 transition shrink-0"
+                    onClick={() => handleRemoveWeek(index)}
+                    disabled={weeks.length <= 1}
+                    className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg disabled:opacity-30 transition shrink-0"
+                    title="ลบสัปดาห์นี้ [-]"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Minus className="w-4 h-4" />
                   </button>
                 </div>
               ))}

@@ -32,6 +32,14 @@ import {
   Square,
   UserCheck,
   UserX,
+  Download,
+  ArrowUp,
+  ArrowDown,
+  Sliders,
+  Eye,
+  EyeOff,
+  Globe,
+  Mail,
 } from 'lucide-react';
 
 interface AdminUsersTabProps {
@@ -56,12 +64,83 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
   const [userRoleFilter, setUserRoleFilter] = useState<string>('ALL');
   const [userStatusFilter, setUserStatusFilter] = useState<string>('ALL');
   const [userDeptFilter, setUserDeptFilter] = useState<string>('ALL');
+  const [hideDemoUsers, setHideDemoUsers] = useState<boolean>(false);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [bulkActionProcessing, setBulkActionProcessing] = useState<boolean>(false);
 
   // Sorting
-  const [userTableSortField, setUserTableSortField] = useState<'name' | 'email' | 'role' | 'department' | 'status' | null>(null);
+  const [userTableSortField, setUserTableSortField] = useState<'name' | 'email' | 'authProvider' | 'role' | 'department' | 'status' | 'createdAt' | null>(null);
   const [userTableSortDir, setUserTableSortDir] = useState<'asc' | 'desc'>('asc');
+
+  // Column Visibility State
+  const [userVisibleCols, setUserVisibleCols] = useState<{ [key: string]: boolean }>({
+    select: true,
+    index: true,
+    name: true,
+    email: true,
+    authProvider: false,
+    role: true,
+    department: false,
+    createdAt: false,
+    status: true,
+    actions: true,
+  });
+  const [showUserColPicker, setShowUserColPicker] = useState<boolean>(false);
+
+  const USER_COLUMN_CONFIG: { key: string; label: string }[] = [
+    { key: 'select', label: 'กล่องเลือก (Select)' },
+    { key: 'index', label: 'ลำดับ (#)' },
+    { key: 'name', label: 'ชื่อ - นามสกุล / รหัส' },
+    { key: 'email', label: 'อีเมล' },
+    { key: 'authProvider', label: 'การเชื่อมบัญชี (Google Auth)' },
+    { key: 'role', label: 'สิทธิ์ (Role)' },
+    { key: 'department', label: 'สาขา / ภาควิชา' },
+    { key: 'createdAt', label: 'สร้างเมื่อ (Created At)' },
+    { key: 'status', label: 'สถานะบัญชี' },
+    { key: 'actions', label: 'จัดการ' },
+  ];
+
+  // Column Widths for Users Table
+  const [userColWidths, setUserColWidths] = useState<{ [key: string]: number }>({
+    select: 40,
+    index: 45,
+    name: 200,
+    email: 210,
+    authProvider: 155,
+    role: 130,
+    department: 160,
+    createdAt: 130,
+    status: 140,
+    actions: 120,
+  });
+
+  const handleMouseDownResizeUser = (colKey: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = userColWidths[colKey] || 100;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const newWidth = Math.max(35, startWidth + deltaX);
+      setUserColWidths((prev) => ({
+        ...prev,
+        [colKey]: newWidth,
+      }));
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
 
   // Modals state
   const [editingUserProfile, setEditingUserProfile] = useState<User | null>(null);
@@ -103,7 +182,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
     loadUsersData();
   }, []);
 
-  const handleUserTableSort = (field: 'name' | 'email' | 'role' | 'department' | 'status') => {
+  const handleUserTableSort = (field: 'name' | 'email' | 'authProvider' | 'role' | 'department' | 'status' | 'createdAt') => {
     if (userTableSortField === field) {
       if (userTableSortDir === 'asc') setUserTableSortDir('desc');
       else {
@@ -290,6 +369,9 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
   const filteredAndSortedUsers = useMemo(() => {
     return usersList
       .filter((u) => {
+        const isDemo = u.isDemo || ['usr_teacher_1', 'usr_teacher_2', 'usr_student_1', 'usr_student_2', 'usr_admin_1'].includes(u.id);
+        if (hideDemoUsers && isDemo) return false;
+
         if (userRoleFilter !== 'ALL' && u.role !== userRoleFilter) return false;
         if (userStatusFilter === 'ACTIVE' && u.isSuspended) return false;
         if (userStatusFilter === 'SUSPENDED' && !u.isSuspended) return false;
@@ -317,6 +399,9 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
         } else if (userTableSortField === 'email') {
           valA = a.email || '';
           valB = b.email || '';
+        } else if (userTableSortField === 'authProvider') {
+          valA = a.authProvider || (a.id && a.id.startsWith('usr_g_') ? 'google' : 'email');
+          valB = b.authProvider || (b.id && b.id.startsWith('usr_g_') ? 'google' : 'email');
         } else if (userTableSortField === 'role') {
           valA = a.role || '';
           valB = b.role || '';
@@ -326,15 +411,62 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
         } else if (userTableSortField === 'status') {
           valA = a.isSuspended ? 'SUSPENDED' : 'ACTIVE';
           valB = b.isSuspended ? 'SUSPENDED' : 'ACTIVE';
+        } else if (userTableSortField === 'createdAt') {
+          valA = a.createdAt || '';
+          valB = b.createdAt || '';
         }
 
         if (valA < valB) return userTableSortDir === 'asc' ? -1 : 1;
         if (valA > valB) return userTableSortDir === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [usersList, userRoleFilter, userStatusFilter, userDeptFilter, userSearchQuery, userTableSortField, userTableSortDir]);
+  }, [usersList, userRoleFilter, userStatusFilter, userDeptFilter, hideDemoUsers, userSearchQuery, userTableSortField, userTableSortDir]);
 
   const allVisibleSelected = filteredAndSortedUsers.length > 0 && filteredAndSortedUsers.every((u) => selectedUserIds.includes(u.id));
+
+  const handleExportUsersCSV = () => {
+    const usersToExport = selectedUserIds.length > 0
+      ? filteredAndSortedUsers.filter((u) => selectedUserIds.includes(u.id))
+      : filteredAndSortedUsers;
+
+    if (usersToExport.length === 0) {
+      showToast('ไม่มีข้อมูลผู้ใช้ที่จะส่งออก');
+      return;
+    }
+
+    const headers = ['ลำดับ', 'ID', 'รหัสประจำตัว/นักศึกษา', 'คำนำหน้า', 'ชื่อ (TH)', 'นามสกุล (TH)', 'อีเมล', 'การเชื่อมบัญชี', 'สิทธิ์ (Role)', 'สาขา/ภาควิชา', 'สร้างเมื่อ', 'บัญชี Demo', 'สถานะบัญชี'];
+    const rows = usersToExport.map((u, idx) => {
+      const isDemo = u.isDemo || ['usr_teacher_1', 'usr_teacher_2', 'usr_student_1', 'usr_student_2', 'usr_admin_1'].includes(u.id);
+      const isGoogle = u.authProvider === 'google' || (u.id && u.id.startsWith('usr_g_'));
+      const formattedCreated = u.createdAt ? new Date(u.createdAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '-';
+      return [
+        idx + 1,
+        u.id || '',
+        u.universityId || '',
+        u.title || '',
+        u.firstNameTh || '',
+        u.lastNameTh || '',
+        u.email || '',
+        isGoogle ? 'Google Account' : 'Email / Password',
+        u.role || '',
+        u.department || 'ไม่ระบุ',
+        formattedCreated,
+        isDemo ? 'ใช่ (DEMO)' : 'ทั่วไป',
+        u.isSuspended ? 'ถูกระงับ (Suspended)' : 'ปกติ (Active)'
+      ];
+    });
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `admin_users_export_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast(`ส่งออก CSV สำเร็จ (${usersToExport.length} บัญชี)`);
+  };
 
   return (
     <div className="space-y-4">
@@ -399,17 +531,143 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                 </option>
               ))}
             </select>
+
+            {/* Hide Demo Users Toggle */}
+            <button
+              type="button"
+              onClick={() => setHideDemoUsers(!hideDemoUsers)}
+              className={`w-full sm:w-auto px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center justify-center space-x-1.5 cursor-pointer whitespace-nowrap active:scale-95 ${
+                hideDemoUsers
+                  ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 shadow-xs'
+                  : isDarkMode
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300'
+              }`}
+              title="ซ่อนหรือแสดงบัญชีทดลองระบบ (Demo Accounts)"
+            >
+              {hideDemoUsers ? (
+                <>
+                  <EyeOff className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span>ซ่อนบัญชี Demo</span>
+                </>
+              ) : (
+                <>
+                  <Eye className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>แสดง Demo ทั้งหมด</span>
+                </>
+              )}
+            </button>
           </div>
 
-          <div className="flex items-center space-x-2 shrink-0 justify-end">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:items-center gap-2 w-full lg:w-auto shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100 dark:border-slate-800">
+            {/* Column Settings Button & Popover */}
+            <div className="relative w-full">
+              <button
+                type="button"
+                onClick={() => setShowUserColPicker(!showUserColPicker)}
+                className={`w-full px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center space-x-1.5 border whitespace-nowrap active:scale-95 ${
+                  showUserColPicker
+                    ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                    : isDarkMode
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300 shadow-xs'
+                }`}
+                title="เลือกคอลัมน์ที่จะแสดง"
+              >
+                <Sliders className="w-3.5 h-3.5 shrink-0" />
+                <span>ตั้งค่าคอลัมน์</span>
+              </button>
+
+              {showUserColPicker && (
+                <div
+                  className={`absolute left-0 sm:left-auto sm:right-0 mt-2 w-64 p-3 rounded-2xl shadow-xl border z-30 transition-all ${
+                    isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800 mb-2">
+                    <span className="text-xs font-black flex items-center space-x-1.5">
+                      <Sliders className="w-3.5 h-3.5 text-purple-500" />
+                      <span>แสดง/ซ่อน คอลัมน์</span>
+                    </span>
+                    <button
+                      onClick={() => setShowUserColPicker(false)}
+                      className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
+                    {USER_COLUMN_CONFIG.map((col) => (
+                      <label
+                        key={col.key}
+                        className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 cursor-pointer text-xs font-bold transition select-none"
+                      >
+                        <span className="text-slate-700 dark:text-slate-300">{col.label}</span>
+                        <input
+                          type="checkbox"
+                          checked={!!userVisibleCols[col.key]}
+                          onChange={(e) =>
+                            setUserVisibleCols((prev) => ({
+                              ...prev,
+                              [col.key]: e.target.checked,
+                            }))
+                          }
+                          className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                        />
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2.5 border-t border-slate-200 dark:border-slate-800 mt-2 text-[10px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setUserVisibleCols({
+                          select: true,
+                          index: true,
+                          name: true,
+                          email: true,
+                          authProvider: true,
+                          role: true,
+                          department: true,
+                          createdAt: true,
+                          status: true,
+                          actions: true,
+                        })
+                      }
+                      className="text-purple-600 dark:text-purple-400 hover:underline cursor-pointer"
+                    >
+                      แสดงทั้งหมด
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowUserColPicker(false)}
+                      className="px-2.5 py-1 rounded-lg bg-purple-600 text-white hover:bg-purple-500 transition cursor-pointer font-bold"
+                    >
+                      ตกลง
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={handleExportUsersCSV}
+              className="w-full px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs whitespace-nowrap active:scale-95"
+              title="ส่งออกข้อมูลผู้ใช้เป็น CSV"
+            >
+              <Download className="w-3.5 h-3.5 shrink-0" />
+              <span>ส่งออก CSV</span>
+            </button>
             <button
               onClick={() => loadUsersData()}
               disabled={loadingUsers}
-              className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
-                isDarkMode ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
+              className={`w-full col-span-2 sm:col-span-1 px-3 py-2 rounded-xl border text-xs font-bold flex items-center justify-center space-x-1.5 transition cursor-pointer whitespace-nowrap active:scale-95 ${
+                isDarkMode ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300' : 'bg-slate-50 hover:bg-slate-100 border-slate-300 text-slate-700'
               }`}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loadingUsers ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${loadingUsers ? 'animate-spin' : ''}`} />
               <span>โหลดใหม่</span>
             </button>
           </div>
@@ -424,6 +682,13 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                onClick={handleExportUsersCSV}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white transition cursor-pointer flex items-center space-x-1"
+              >
+                <Download className="w-3 h-3" />
+                <span>ส่งออกที่เลือก (CSV)</span>
+              </button>
               <button
                 onClick={() => handleExecuteBulkRole('STUDENT')}
                 disabled={bulkActionProcessing}
@@ -462,9 +727,10 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               <button
                 onClick={handleExecuteBulkDelete}
                 disabled={bulkActionProcessing}
-                className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-rose-500/20 hover:bg-rose-500/30 text-rose-700 dark:text-rose-300 border border-rose-500/30 transition cursor-pointer"
+                className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-rose-600 hover:bg-rose-500 text-white shadow-sm transition cursor-pointer flex items-center space-x-1"
               >
-                ลบผู้ใช้
+                <Trash2 className="w-3 h-3" />
+                <span>ลบผู้ใช้ที่เลือก ({selectedUserIds.length})</span>
               </button>
             </div>
           </div>
@@ -474,66 +740,203 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
       {/* Users Table */}
       <div className={`rounded-2xl border overflow-hidden ${isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[700px] text-left text-xs border-collapse">
+          <table className="w-full table-fixed min-w-[700px] text-left text-xs border-collapse">
+            <colgroup>
+              {userVisibleCols.select && <col style={{ width: `${userColWidths.select}px` }} />}
+              {userVisibleCols.index && <col style={{ width: `${userColWidths.index}px` }} />}
+              {userVisibleCols.name && <col style={{ width: `${userColWidths.name}px` }} />}
+              {userVisibleCols.email && <col style={{ width: `${userColWidths.email}px` }} />}
+              {userVisibleCols.authProvider && <col style={{ width: `${userColWidths.authProvider}px` }} />}
+              {userVisibleCols.role && <col style={{ width: `${userColWidths.role}px` }} />}
+              {userVisibleCols.department && <col style={{ width: `${userColWidths.department}px` }} />}
+              {userVisibleCols.createdAt && <col style={{ width: `${userColWidths.createdAt}px` }} />}
+              {userVisibleCols.status && <col style={{ width: `${userColWidths.status}px` }} />}
+              {userVisibleCols.actions && <col style={{ width: `${userColWidths.actions}px` }} />}
+            </colgroup>
             <thead>
               <tr className={`border-b ${isDarkMode ? 'bg-slate-800/80 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700 font-extrabold'}`}>
-                <th className="p-3.5 w-10 text-center">
-                  <button
-                    onClick={() => handleSelectAllVisibleUsers(filteredAndSortedUsers)}
-                    className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
-                  >
-                    {allVisibleSelected ? <CheckSquare className="w-4 h-4 text-purple-500" /> : <Square className="w-4 h-4 text-slate-400" />}
-                  </button>
-                </th>
-                <th onClick={() => handleUserTableSort('name')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
-                  <div className="flex items-center space-x-1">
-                    <span>ชื่อ - นามสกุล / รหัส</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
-                  </div>
-                </th>
-                <th onClick={() => handleUserTableSort('email')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
-                  <div className="flex items-center space-x-1">
-                    <span>อีเมล</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
-                  </div>
-                </th>
-                <th onClick={() => handleUserTableSort('role')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
-                  <div className="flex items-center space-x-1">
-                    <span>สิทธิ์ (Role)</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
-                  </div>
-                </th>
-                <th onClick={() => handleUserTableSort('department')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
-                  <div className="flex items-center space-x-1">
-                    <span>สาขา / ภาควิชา</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
-                  </div>
-                </th>
-                <th onClick={() => handleUserTableSort('status')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none">
-                  <div className="flex items-center space-x-1">
-                    <span>สถานะบัญชี</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
-                  </div>
-                </th>
-                <th className="p-3.5 font-extrabold text-right">จัดการ</th>
+                {userVisibleCols.select && (
+                  <th className="p-3.5 text-center relative group select-none">
+                    <button
+                      onClick={() => handleSelectAllVisibleUsers(filteredAndSortedUsers)}
+                      className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                    >
+                      {allVisibleSelected ? <CheckSquare className="w-4 h-4 text-purple-500" /> : <Square className="w-4 h-4 text-slate-400" />}
+                    </button>
+                    <div
+                      onMouseDown={(e) => handleMouseDownResizeUser('select', e)}
+                      className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                    >
+                      <div className="w-0.5 h-3 bg-slate-400/40 group-hover:bg-sky-400" />
+                    </div>
+                  </th>
+                )}
+                {userVisibleCols.index && (
+                  <th className="p-3.5 text-center font-extrabold uppercase tracking-wider text-slate-400 relative group select-none">
+                    #
+                    <div
+                      onMouseDown={(e) => handleMouseDownResizeUser('index', e)}
+                      className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                    >
+                      <div className="w-0.5 h-3 bg-slate-400/40 group-hover:bg-sky-400" />
+                    </div>
+                  </th>
+                )}
+                {userVisibleCols.name && (
+                  <th onClick={() => handleUserTableSort('name')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none relative group pr-4">
+                    <div className="flex items-center space-x-1 truncate">
+                      <span>ชื่อ - นามสกุล / รหัส</span>
+                      {userTableSortField === 'name' ? (
+                        userTableSortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-sky-500 shrink-0" /> : <ArrowDown className="w-3 h-3 text-sky-500 shrink-0" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
+                      )}
+                    </div>
+                    <div
+                      onMouseDown={(e) => handleMouseDownResizeUser('name', e)}
+                      className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                    >
+                      <div className="w-0.5 h-3 bg-slate-400/40 group-hover:bg-sky-400" />
+                    </div>
+                  </th>
+                )}
+                {userVisibleCols.email && (
+                  <th onClick={() => handleUserTableSort('email')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none relative group pr-4">
+                    <div className="flex items-center space-x-1 truncate">
+                      <span>อีเมล</span>
+                      {userTableSortField === 'email' ? (
+                        userTableSortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-sky-500 shrink-0" /> : <ArrowDown className="w-3 h-3 text-sky-500 shrink-0" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
+                      )}
+                    </div>
+                    <div
+                      onMouseDown={(e) => handleMouseDownResizeUser('email', e)}
+                      className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                    >
+                      <div className="w-0.5 h-3 bg-slate-400/40 group-hover:bg-sky-400" />
+                    </div>
+                  </th>
+                )}
+                {userVisibleCols.authProvider && (
+                  <th onClick={() => handleUserTableSort('authProvider')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none relative group pr-4">
+                    <div className="flex items-center space-x-1 truncate">
+                      <span>การเชื่อมบัญชี</span>
+                      {userTableSortField === 'authProvider' ? (
+                        userTableSortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-sky-500 shrink-0" /> : <ArrowDown className="w-3 h-3 text-sky-500 shrink-0" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
+                      )}
+                    </div>
+                    <div
+                      onMouseDown={(e) => handleMouseDownResizeUser('authProvider', e)}
+                      className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                    >
+                      <div className="w-0.5 h-3 bg-slate-400/40 group-hover:bg-sky-400" />
+                    </div>
+                  </th>
+                )}
+                {userVisibleCols.role && (
+                  <th onClick={() => handleUserTableSort('role')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none relative group pr-4">
+                    <div className="flex items-center space-x-1 truncate">
+                      <span>สิทธิ์ (Role)</span>
+                      {userTableSortField === 'role' ? (
+                        userTableSortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-sky-500 shrink-0" /> : <ArrowDown className="w-3 h-3 text-sky-500 shrink-0" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
+                      )}
+                    </div>
+                    <div
+                      onMouseDown={(e) => handleMouseDownResizeUser('role', e)}
+                      className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                    >
+                      <div className="w-0.5 h-3 bg-slate-400/40 group-hover:bg-sky-400" />
+                    </div>
+                  </th>
+                )}
+                {userVisibleCols.department && (
+                  <th onClick={() => handleUserTableSort('department')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none relative group pr-4">
+                    <div className="flex items-center space-x-1 truncate">
+                      <span>สาขา / ภาควิชา</span>
+                      {userTableSortField === 'department' ? (
+                        userTableSortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-sky-500 shrink-0" /> : <ArrowDown className="w-3 h-3 text-sky-500 shrink-0" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
+                      )}
+                    </div>
+                    <div
+                      onMouseDown={(e) => handleMouseDownResizeUser('department', e)}
+                      className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                    >
+                      <div className="w-0.5 h-3 bg-slate-400/40 group-hover:bg-sky-400" />
+                    </div>
+                  </th>
+                )}
+                {userVisibleCols.createdAt && (
+                  <th onClick={() => handleUserTableSort('createdAt')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none relative group pr-4">
+                    <div className="flex items-center space-x-1 truncate">
+                      <span>สร้างเมื่อ</span>
+                      {userTableSortField === 'createdAt' ? (
+                        userTableSortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-sky-500 shrink-0" /> : <ArrowDown className="w-3 h-3 text-sky-500 shrink-0" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
+                      )}
+                    </div>
+                    <div
+                      onMouseDown={(e) => handleMouseDownResizeUser('createdAt', e)}
+                      className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                    >
+                      <div className="w-0.5 h-3 bg-slate-400/40 group-hover:bg-sky-400" />
+                    </div>
+                  </th>
+                )}
+                {userVisibleCols.status && (
+                  <th onClick={() => handleUserTableSort('status')} className="p-3.5 font-extrabold uppercase tracking-wider cursor-pointer hover:opacity-80 transition select-none relative group pr-4">
+                    <div className="flex items-center space-x-1 truncate">
+                      <span>สถานะบัญชี</span>
+                      {userTableSortField === 'status' ? (
+                        userTableSortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-sky-500 shrink-0" /> : <ArrowDown className="w-3 h-3 text-sky-500 shrink-0" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-400 shrink-0" />
+                      )}
+                    </div>
+                    <div
+                      onMouseDown={(e) => handleMouseDownResizeUser('status', e)}
+                      className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                    >
+                      <div className="w-0.5 h-3 bg-slate-400/40 group-hover:bg-sky-400" />
+                    </div>
+                  </th>
+                )}
+                {userVisibleCols.actions && (
+                  <th className="p-3.5 font-extrabold text-right relative group select-none">
+                    จัดการ
+                    <div
+                      onMouseDown={(e) => handleMouseDownResizeUser('actions', e)}
+                      className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                    >
+                      <div className="w-0.5 h-3 bg-slate-400/40 group-hover:bg-sky-400" />
+                    </div>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className={`divide-y ${isDarkMode ? 'divide-slate-800/60' : 'divide-slate-100'}`}>
               {loadingUsers ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400 font-semibold">
+                  <td colSpan={Object.values(userVisibleCols).filter(Boolean).length || 1} className="p-8 text-center text-slate-400 font-semibold">
                     <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-purple-500" />
                     กำลังโหลดข้อมูลผู้ใช้...
                   </td>
                 </tr>
               ) : filteredAndSortedUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400 font-semibold">
+                  <td colSpan={Object.values(userVisibleCols).filter(Boolean).length || 1} className="p-8 text-center text-slate-400 font-semibold">
                     ไม่พบข้อมูลผู้ใช้ตรงตามเงื่อนไข
                   </td>
                 </tr>
               ) : (
-                filteredAndSortedUsers.map((user) => {
+                filteredAndSortedUsers.map((user, idx) => {
                   const isSelected = selectedUserIds.includes(user.id);
                   return (
                     <tr
@@ -544,61 +947,120 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                           : isDarkMode ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'
                       }`}
                     >
-                      <td className="p-3.5 text-center">
-                        <button
-                          onClick={() => handleToggleSelectUser(user.id)}
-                          className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
-                        >
-                          {isSelected ? <CheckSquare className="w-4 h-4 text-purple-500" /> : <Square className="w-4 h-4 text-slate-400" />}
-                        </button>
-                      </td>
-                      <td className="p-3.5">
-                        <div>
-                          <div className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                            {user.title || ''}{user.firstNameTh || ''} {user.lastNameTh || ''}
+                      {userVisibleCols.select && (
+                        <td className="p-3.5 text-center">
+                          <button
+                            onClick={() => handleToggleSelectUser(user.id)}
+                            className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                          >
+                            {isSelected ? <CheckSquare className="w-4 h-4 text-purple-500" /> : <Square className="w-4 h-4 text-slate-400" />}
+                          </button>
+                        </td>
+                      )}
+                      {userVisibleCols.index && (
+                        <td className="p-3.5 text-center font-mono font-bold text-slate-400 text-xs">
+                          {idx + 1}
+                        </td>
+                      )}
+                      {userVisibleCols.name && (
+                        <td className="p-3.5">
+                          <div>
+                            <div className={`font-bold flex items-center space-x-1.5 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                              <span>{user.title || ''}{user.firstNameTh || ''} {user.lastNameTh || ''}</span>
+                              {(user.isDemo || ['usr_teacher_1', 'usr_teacher_2', 'usr_student_1', 'usr_student_2', 'usr_admin_1'].includes(user.id)) && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">
+                                  🧪 DEMO
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] font-mono text-slate-400 flex items-center space-x-2">
+                              <span>ID: {user.universityId || user.id}</span>
+                              {user.deviceId && (
+                                <span className="text-emerald-500 font-extrabold flex items-center space-x-0.5">
+                                  <Smartphone className="w-3 h-3 inline" />
+                                  <span>มีอุปกรณ์ผูกแล้ว</span>
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-[10px] font-mono text-slate-400 flex items-center space-x-2">
-                            <span>ID: {user.universityId || user.id}</span>
-                            {user.deviceId && (
-                              <span className="text-emerald-500 font-extrabold flex items-center space-x-0.5">
-                                <Smartphone className="w-3 h-3 inline" />
-                                <span>มีอุปกรณ์ผูกแล้ว</span>
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-3.5 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                        {user.email}
-                      </td>
-                      <td className="p-3.5">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-extrabold border ${
-                          user.role === UserRole.ADMIN
-                            ? isDarkMode ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' : 'bg-purple-100 text-purple-900 border-purple-300'
-                            : user.role === UserRole.TEACHER
-                            ? isDarkMode ? 'bg-sky-500/20 text-sky-300 border-sky-500/40' : 'bg-sky-100 text-sky-900 border-sky-300'
-                            : isDarkMode ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                        }`}>
-                          {user.role === UserRole.ADMIN ? '🛠️ ADMIN' : user.role === UserRole.TEACHER ? '👨‍🏫 TEACHER' : '👨‍🎓 STUDENT'}
-                        </span>
-                      </td>
-                      <td className="p-3.5">
-                        {user.department ? (
-                          <span className="font-semibold text-slate-700 dark:text-slate-300">{user.department}</span>
-                        ) : (
-                          <span className="text-[10px] italic text-slate-400">- ไม่ระบุ -</span>
-                        )}
-                      </td>
-                      <td className="p-3.5">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold border ${
-                          user.isSuspended
-                            ? isDarkMode ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-rose-100 text-rose-950 border-rose-300'
-                            : isDarkMode ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-emerald-100 text-emerald-950 border-emerald-300'
-                        }`}>
-                          {user.isSuspended ? '🔴 ถูกระงับ' : '🟢 ปกติ'}
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-right whitespace-nowrap">
+                        </td>
+                      )}
+                      {userVisibleCols.email && (
+                        <td className="p-3.5 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                          {user.email}
+                        </td>
+                      )}
+                      {userVisibleCols.authProvider && (
+                        <td className="p-3.5">
+                          {user.authProvider === 'google' || (user.id && user.id.startsWith('usr_g_')) ? (
+                            <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-[11px] font-black bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30">
+                              <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                              </svg>
+                              <span>Google Account</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20">
+                              <Mail className="w-3 h-3 shrink-0" />
+                              <span>Email / Pass</span>
+                            </span>
+                          )}
+                        </td>
+                      )}
+                      {userVisibleCols.role && (
+                        <td className="p-3.5">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-extrabold border ${
+                            user.role === UserRole.ADMIN
+                              ? isDarkMode ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' : 'bg-purple-100 text-purple-900 border-purple-300'
+                              : user.role === UserRole.TEACHER
+                              ? isDarkMode ? 'bg-sky-500/20 text-sky-300 border-sky-500/40' : 'bg-sky-100 text-sky-900 border-sky-300'
+                              : isDarkMode ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                          }`}>
+                            {user.role === UserRole.ADMIN ? '🛠️ ADMIN' : user.role === UserRole.TEACHER ? '👨‍🏫 TEACHER' : '👨‍🎓 STUDENT'}
+                          </span>
+                        </td>
+                      )}
+                      {userVisibleCols.department && (
+                        <td className="p-3.5">
+                          {user.department ? (
+                            <span className="font-semibold text-slate-700 dark:text-slate-300">{user.department}</span>
+                          ) : (
+                            <span className="text-[10px] italic text-slate-400">- ไม่ระบุ -</span>
+                          )}
+                        </td>
+                      )}
+                      {userVisibleCols.createdAt && (
+                        <td className="p-3.5 font-mono text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                          {user.createdAt ? (
+                            new Date(user.createdAt).toLocaleString('th-TH', {
+                              timeZone: 'Asia/Bangkok',
+                              day: 'numeric',
+                              month: 'short',
+                              year: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+                      )}
+                      {userVisibleCols.status && (
+                        <td className="p-3.5">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold border ${
+                            user.isSuspended
+                              ? isDarkMode ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-rose-100 text-rose-950 border-rose-300'
+                              : isDarkMode ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-emerald-100 text-emerald-950 border-emerald-300'
+                          }`}>
+                            {user.isSuspended ? '🔴 ถูกระงับ' : '🟢 ปกติ'}
+                          </span>
+                        </td>
+                      )}
+                      {userVisibleCols.actions && (
+                        <td className="p-3.5 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end space-x-1.5">
                           <button
                             onClick={() => handleOpenEditUserModal(user)}
@@ -649,6 +1111,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                           </button>
                         </div>
                       </td>
+                    )}
                     </tr>
                   );
                 })

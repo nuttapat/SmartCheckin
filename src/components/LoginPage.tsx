@@ -93,9 +93,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
     const settingsToUse = currentSysSettings || sysSettings;
 
-    // Check if system settings allow other domains (@gmail.com, etc.)
+    // Check if system settings allow other domains (@gmail.com, etc.) or Google Auto-Register
     const allowOther = settingsToUse?.allowOtherDomainsSelfRegister ?? settingsToUse?.allowOtherDomains ?? false;
-    if (allowOther) {
+    const allowGoogleAuto = settingsToUse?.allowGoogleAutoRegister !== false;
+    if (allowOther || allowGoogleAuto) {
       return { allowed: true };
     }
 
@@ -199,14 +200,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           return;
         }
       } else {
-        // Fallback for mobile webview where Google popup is blocked or sessionStorage is partitioned
-        if (email && email.includes('@')) {
-          const cleanEmail = email.trim().toLowerCase();
-          setGoogleEmailInput(cleanEmail);
-          setIsGoogleModalOpen(true);
-        } else {
-          setErrorMsg('กรุณากรอกอีเมล Google ในช่องอีเมลด้านบนก่อนเปิดแบบฟอร์มลงทะเบียน');
-        }
+        // Fallback for popup blocked in preview iframe or mobile webview
+        const cleanEmail = email ? email.trim().toLowerCase() : '';
+        setGoogleEmailInput(cleanEmail);
+        setIsGoogleModalOpen(true);
       }
     } catch (err: any) {
       console.warn('Google auth error:', err);

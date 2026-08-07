@@ -52,9 +52,10 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
 
     const settingsToUse = currentSysSettings || sysSettings;
 
-    // Check if system settings allow other domains
+    // Check if system settings allow other domains or Google Auto-Register
     const allowOther = settingsToUse?.allowOtherDomainsSelfRegister ?? settingsToUse?.allowOtherDomains ?? false;
-    if (allowOther) {
+    const allowGoogleAuto = settingsToUse?.allowGoogleAutoRegister !== false;
+    if (allowOther || allowGoogleAuto) {
       return { allowed: true };
     }
 

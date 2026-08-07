@@ -166,12 +166,14 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     }
   };
 
+  const isPasswordNotRequired = currentUser.authProvider === 'google' || !currentUser.password || currentUser.password === '123456';
+
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
-    if (!currentPassword) {
+    if (!isPasswordNotRequired && !currentPassword) {
       setErrorMsg('กรุณากรอกรหัสผ่านปัจจุบัน');
       return;
     }
@@ -189,12 +191,13 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     try {
       setLoading(true);
       const res = await updateUserProfile(currentUser.id, {
-        currentPassword,
+        currentPassword: isPasswordNotRequired ? undefined : currentPassword,
         newPassword,
+        isGoogleOrFirstPasswordSet: isPasswordNotRequired,
       });
 
       onUpdateUser(res.user);
-      setSuccessMsg('เปลี่ยนรหัสผ่านสำเร็จ');
+      setSuccessMsg(isPasswordNotRequired ? 'กำหนดรหัสผ่านใหม่สำหรับเข้าใช้งานสำเร็จ' : 'เปลี่ยนรหัสผ่านสำเร็จ');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
@@ -669,31 +672,51 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
           {/* Tab 2: Change Password */}
           {activeTab === 'password' && (
             <form onSubmit={handleChangePassword} className="space-y-4">
-              <div>
-                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  รหัสผ่านปัจจุบัน (Current Password) <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type={showCurrentPassword ? 'text' : 'password'}
-                    placeholder="กรอกรหัสผ่านเดิม"
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                    required
-                    className={`w-full border rounded-xl px-3 py-2 pl-9 pr-9 text-xs focus:outline-none focus:border-emerald-500 ${
-                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
-                    }`}
-                  />
-                  <Lock className={`w-4 h-4 absolute left-3 top-2.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
-                  <button
-                    type="button"
-                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                    className={`absolute right-3 top-2.5 transition ${isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
-                  >
-                    {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+              {isPasswordNotRequired ? (
+                <div className={`p-3.5 border rounded-2xl flex items-start space-x-3 text-xs ${
+                  isDarkMode ? 'bg-sky-950/40 border-sky-800/50 text-sky-200' : 'bg-sky-50 border-sky-200 text-sky-900'
+                }`}>
+                  <ShieldCheck className="w-5 h-5 text-sky-500 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block mb-0.5">
+                      {currentUser.authProvider === 'google'
+                        ? 'บัญชีเชื่อมต่อผ่าน Google Account (Google SSO)'
+                        : 'บัญชียังไม่ได้กำหนดรหัสผ่านประจำตัว'}
+                    </span>
+                    <p className="opacity-90 leading-relaxed text-[11px]">
+                      {currentUser.authProvider === 'google'
+                        ? `คุณเข้าสู่ระบบผ่าน Google Account อย่างปลอดภัย สามารถกำหนดรหัสผ่านใหม่เพื่อใช้เข้าสู่ระบบด้วยอีเมล (${currentUser.email}) ได้โดยตรง โดยไม่ต้องระบุรหัสผ่านเดิม`
+                        : 'คุณสามารถกำหนดรหัสผ่านใหม่สำหรับเข้าใช้งานบัญชีนี้ได้โดยตรง'}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    รหัสผ่านปัจจุบัน (Current Password) <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showCurrentPassword ? 'text' : 'password'}
+                      placeholder="กรอกรหัสผ่านเดิม"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      required
+                      className={`w-full border rounded-xl px-3 py-2 pl-9 pr-9 text-xs focus:outline-none focus:border-emerald-500 ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                      }`}
+                    />
+                    <Lock className={`w-4 h-4 absolute left-3 top-2.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      className={`absolute right-3 top-2.5 transition ${isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>

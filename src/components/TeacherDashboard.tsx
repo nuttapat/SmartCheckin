@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { User, Course, Session, AttendanceRecord, TeacherAttendanceRecord, InviteLink, CourseMember, CourseMemberRole } from '../types';
-import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck, toggleQrMode, updateQrInterval } from '../services/api';
-import { QrCode, Users, Download, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown, EyeOff, Eye, Lock, Maximize2, Minimize2, ZoomIn, ZoomOut } from 'lucide-react';
+import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck, toggleQrMode, updateQrInterval, fetchSystemSettings } from '../services/api';
+import { QrCode, Users, Download, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown, EyeOff, Eye, Lock, Maximize2, Minimize2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
@@ -14,6 +14,7 @@ import { TeacherInviteModal } from './TeacherInviteModal';
 import { StudentInviteModal } from './StudentInviteModal';
 import { TeacherCheckinModal } from './TeacherCheckinModal';
 import { DynamicQRModal } from './DynamicQRModal';
+import { TeacherAttendanceGridModal } from './TeacherAttendanceGridModal';
 import { useTheme } from '../context/ThemeContext';
 
 interface TeacherDashboardProps {
@@ -46,6 +47,119 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [isLeaveManagementOpen, setIsLeaveManagementOpen] = useState<boolean>(false);
   const [pendingLeaveCount, setPendingLeaveCount] = useState<number>(0);
   const [isStatsModalMaximized, setIsStatsModalMaximized] = useState<boolean>(false);
+
+  // Current System Academic Year & Semester
+  const [currentSysYear, setCurrentSysYear] = useState<number>(2569);
+  const [currentSysSemester, setCurrentSysSemester] = useState<string>('1');
+
+  // Course Panel Search & Filter States
+  const [courseSearchQuery, setCourseSearchQuery] = useState<string>('');
+  const [selectedYearFilter, setSelectedYearFilter] = useState<string>('2569');
+  const [selectedSemesterFilter, setSelectedSemesterFilter] = useState<string>('ALL');
+  const [showAllCourses, setShowAllCourses] = useState<boolean>(false);
+
+  // Sorting state for Overview Student Table
+  const [overviewSortField, setOverviewSortField] = useState<'studentIdNum' | 'studentName' | 'attended' | 'percent' | 'avgTime' | 'lastScan' | 'eligible'>('studentIdNum');
+  const [overviewSortDir, setOverviewSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const handleOverviewSort = (field: 'studentIdNum' | 'studentName' | 'attended' | 'percent' | 'avgTime' | 'lastScan' | 'eligible') => {
+    if (overviewSortField === field) {
+      setOverviewSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setOverviewSortField(field);
+      setOverviewSortDir(field === 'percent' || field === 'attended' || field === 'lastScan' ? 'desc' : 'asc');
+    }
+  };
+
+  // Sorting state for Session Modal - Attended Table
+  const [attendedSortField, setAttendedSortField] = useState<'studentIdNum' | 'studentName' | 'checkinTime' | 'checkinMethod'>('studentIdNum');
+  const [attendedSortDir, setAttendedSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const handleAttendedSort = (field: 'studentIdNum' | 'studentName' | 'checkinTime' | 'checkinMethod') => {
+    if (attendedSortField === field) {
+      setAttendedSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setAttendedSortField(field);
+      setAttendedSortDir(field === 'checkinTime' ? 'desc' : 'asc');
+    }
+  };
+
+  // Sorting state for Session Modal - Absent Table
+  const [absentSortField, setAbsentSortField] = useState<'studentIdNum' | 'studentName' | 'email' | 'status'>('studentIdNum');
+  const [absentSortDir, setAbsentSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const handleAbsentSort = (field: 'studentIdNum' | 'studentName' | 'email' | 'status') => {
+    if (absentSortField === field) {
+      setAbsentSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setAbsentSortField(field);
+      setAbsentSortDir('asc');
+    }
+  };
+
+  // Fetch current system settings on mount to set defaults
+  useEffect(() => {
+    fetchSystemSettings()
+      .then((st) => {
+        if (st) {
+          if (st.academicYear) {
+            const yr = Number(st.academicYear);
+            setCurrentSysYear(yr);
+            setSelectedYearFilter(String(yr));
+            setCoordinatorSelectedYearFilter(String(yr));
+          }
+          if (st.academicSemester) {
+            const sem = String(st.academicSemester);
+            setCurrentSysSemester(sem);
+          }
+        }
+      })
+      .catch((err) => console.warn('Could not load system settings for teacher dashboard filters:', err));
+  }, []);
+
+  // Extract unique academic years from courses for the dropdown
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set<number>();
+    yearsSet.add(currentSysYear);
+    courses.forEach((c) => {
+      if (c.academicYear) {
+        yearsSet.add(Number(c.academicYear));
+      }
+    });
+    return Array.from(yearsSet).sort((a, b) => b - a);
+  }, [courses, currentSysYear]);
+
+  // Filter courses by search query, academic year, semester, or show all
+  const filteredCourses = useMemo(() => {
+    return courses.filter((c) => {
+      // 1. Search Query Filter (Independent of Year & Semester filters)
+      if (courseSearchQuery.trim()) {
+        const q = courseSearchQuery.trim().toLowerCase();
+        const codeMatch = c.courseCode.toLowerCase().includes(q);
+        const nameMatch = c.courseName.toLowerCase().includes(q);
+        const yearMatch = String(c.academicYear || '').includes(q);
+        const semesterMatch = String(c.semester || '').includes(q);
+        return codeMatch || nameMatch || yearMatch || semesterMatch;
+      }
+
+      // 2. Checkbox: Show All Courses
+      if (showAllCourses) {
+        return true;
+      }
+
+      // 3. Academic Year Filter
+      if (selectedYearFilter !== 'ALL') {
+        if (String(c.academicYear) !== String(selectedYearFilter)) return false;
+      }
+
+      // 4. Semester Filter
+      if (selectedSemesterFilter !== 'ALL') {
+        if (String(c.semester) !== String(selectedSemesterFilter)) return false;
+      }
+
+      return true;
+    });
+  }, [courses, courseSearchQuery, showAllCourses, selectedYearFilter, selectedSemesterFilter]);
 
   // Compute teacher role in the currently selected course
   const teacherRoleInfo = useMemo(() => {
@@ -155,7 +269,80 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [overviewSearchQuery, setOverviewSearchQuery] = useState<string>('');
   const [overviewDetailTab, setOverviewDetailTab] = useState<'STUDENTS' | 'SESSIONS'>('STUDENTS');
 
+  // Coordinator Overview Course Filters State
+  const [isAttendanceGridModalOpen, setIsAttendanceGridModalOpen] = useState<boolean>(false);
+  const [coordinatorCourseSearchQuery, setCoordinatorCourseSearchQuery] = useState<string>('');
+  const [coordinatorSelectedYearFilter, setCoordinatorSelectedYearFilter] = useState<string>('2569');
+  const [coordinatorSelectedSemesterFilter, setCoordinatorSelectedSemesterFilter] = useState<string>('ALL');
+  const [coordinatorShowAllCourses, setCoordinatorShowAllCourses] = useState<boolean>(false);
+
+  // Available academic years for coordinator overview courses
+  const overviewAvailableYears = useMemo(() => {
+    const yearsSet = new Set<number>();
+    yearsSet.add(currentSysYear);
+    if (overviewData?.overviewList) {
+      overviewData.overviewList.forEach((item: any) => {
+        if (item.course?.academicYear) {
+          yearsSet.add(Number(item.course.academicYear));
+        }
+      });
+    }
+    return Array.from(yearsSet).sort((a, b) => b - a);
+  }, [overviewData, currentSysYear]);
+
+  // Filtered overview list for Coordinator Dashboard
+  const filteredOverviewList = useMemo(() => {
+    if (!overviewData?.overviewList) return [];
+    return overviewData.overviewList.filter((item: any) => {
+      const c = item.course;
+      // 1. Search Query Filter (Independent of Year & Semester filters)
+      if (coordinatorCourseSearchQuery.trim()) {
+        const q = coordinatorCourseSearchQuery.trim().toLowerCase();
+        const codeMatch = c.courseCode.toLowerCase().includes(q);
+        const nameMatch = c.courseName.toLowerCase().includes(q);
+        const yearMatch = String(c.academicYear || '').includes(q);
+        const semesterMatch = String(c.semester || '').includes(q);
+        return codeMatch || nameMatch || yearMatch || semesterMatch;
+      }
+
+      // 2. Checkbox: Show All Courses
+      if (coordinatorShowAllCourses) {
+        return true;
+      }
+
+      // 3. Academic Year Filter
+      if (coordinatorSelectedYearFilter !== 'ALL') {
+        if (String(c.academicYear) !== String(coordinatorSelectedYearFilter)) return false;
+      }
+
+      // 4. Semester Filter
+      if (coordinatorSelectedSemesterFilter !== 'ALL') {
+        if (String(c.semester) !== String(coordinatorSelectedSemesterFilter)) return false;
+      }
+
+      return true;
+    });
+  }, [overviewData, coordinatorCourseSearchQuery, coordinatorShowAllCourses, coordinatorSelectedYearFilter, coordinatorSelectedSemesterFilter]);
+
+  // Auto-select first available course in filtered list if current selection is filtered out
+  useEffect(() => {
+    if (filteredOverviewList.length > 0) {
+      const exists = filteredOverviewList.some((item: any) => item.course.id === selectedOverviewCourseId);
+      if (!exists) {
+        setSelectedOverviewCourseId(filteredOverviewList[0].course.id);
+      }
+    }
+  }, [filteredOverviewList, selectedOverviewCourseId]);
+
   // Session Detail Modal State
+  const currentOverviewItem = useMemo(() => {
+    if (!overviewData?.overviewList || overviewData.overviewList.length === 0) return null;
+    return (
+      overviewData.overviewList.find((item: any) => item.course?.id === selectedOverviewCourseId) ||
+      overviewData.overviewList[0]
+    );
+  }, [overviewData, selectedOverviewCourseId]);
+
   const [selectedSessionModal, setSelectedSessionModal] = useState<any>(null);
   const [sessionModalFilter, setSessionModalFilter] = useState<'ATTENDED' | 'ABSENT'>('ATTENDED');
   const [sessionModalSearch, setSessionModalSearch] = useState<string>('');
@@ -405,6 +592,45 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       (r) => r.courseId === teacherLogCourseFilter || (selectedCourse && r.courseCode === selectedCourse.courseCode)
     );
   }, [teacherHistory, teacherLogCourseFilter, courses]);
+
+  // Sorting state for Teacher History Table
+  const [historySortField, setHistorySortField] = useState<'timestamp' | 'course' | 'building' | 'method'>('timestamp');
+  const [historySortDir, setHistorySortDir] = useState<'asc' | 'desc'>('desc');
+
+  const handleHistorySort = (field: 'timestamp' | 'course' | 'building' | 'method') => {
+    if (historySortField === field) {
+      setHistorySortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setHistorySortField(field);
+      setHistorySortDir(field === 'timestamp' ? 'desc' : 'asc');
+    }
+  };
+
+  const sortedTeacherHistory = useMemo(() => {
+    const list = [...filteredTeacherHistory];
+    list.sort((a, b) => {
+      if (historySortField === 'timestamp') {
+        const cmp = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+        return historySortDir === 'asc' ? cmp : -cmp;
+      }
+      if (historySortField === 'course') {
+        const aName = a.courseCode || a.courseName || '';
+        const bName = b.courseCode || b.courseName || '';
+        const cmp = aName.localeCompare(bName, 'th');
+        return historySortDir === 'asc' ? cmp : -cmp;
+      }
+      if (historySortField === 'building') {
+        const cmp = (a.buildingRoom || '').localeCompare(b.buildingRoom || '', 'th');
+        return historySortDir === 'asc' ? cmp : -cmp;
+      }
+      if (historySortField === 'method') {
+        const cmp = (a.checkinMethod || '').localeCompare(b.checkinMethod || '', 'th');
+        return historySortDir === 'asc' ? cmp : -cmp;
+      }
+      return 0;
+    });
+    return list;
+  }, [filteredTeacherHistory, historySortField, historySortDir]);
 
   const loadTeacherHistory = async () => {
     try {
@@ -932,35 +1158,144 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column: Course Selector & Settings */}
           <div className="space-y-4">
-            <div className={`rounded-2xl p-5 space-y-4 border ${
+            <div className={`rounded-2xl p-5 space-y-3.5 border ${
               isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
             }`}>
-              <h2 className={`text-xs font-bold uppercase tracking-wider flex items-center justify-between ${
-                isDarkMode ? 'text-slate-300' : 'text-slate-700'
-              }`}>
-                <span>รายวิชาที่รับผิดชอบ ({courses.length})</span>
+              <div className="flex items-center justify-between">
+                <h2 className={`text-xs font-extrabold uppercase tracking-wider flex items-center space-x-1.5 ${
+                  isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                }`}>
+                  <BookOpen className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                  <span>รายวิชาที่รับผิดชอบ</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-extrabold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
+                    {filteredCourses.length}/{courses.length}
+                  </span>
+                </h2>
                 <button
                   onClick={loadTeacherCourses}
-                  className={`p-1 rounded-lg ${isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}
-                  title="รีเฟรชข้อมูล"
+                  className={`p-1 rounded-lg transition ${isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}
+                  title="รีเฟรชข้อมูลวิชา"
                 >
-                  <RefreshCw className="w-4 h-4" />
+                  <RefreshCw className="w-3.5 h-3.5" />
                 </button>
-              </h2>
+              </div>
 
+              {/* Search & Term Filter controls when courses exist */}
+              {courses.length > 0 && (
+                <div className="space-y-2.5 pt-0.5">
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={courseSearchQuery}
+                      onChange={(e) => setCourseSearchQuery(e.target.value)}
+                      placeholder="ค้นหาตามรหัส หรือ ชื่อวิชา..."
+                      className={`w-full text-xs pl-8 pr-7 py-2 rounded-xl border transition focus:outline-none focus:ring-2 focus:ring-sky-500/30 ${
+                        isDarkMode ? 'bg-slate-800/80 border-slate-700 text-slate-200 placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-800 placeholder-slate-400'
+                      }`}
+                    />
+                    {courseSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setCourseSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-200 rounded-md"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Dropdown Filters for ปีการศึกษา and ภาคเรียน */}
+                  <div className={`grid grid-cols-2 gap-2 transition-opacity ${showAllCourses || courseSearchQuery.trim() ? 'opacity-50' : ''}`}>
+                    {/* Dropdown ปีการศึกษา */}
+                    <div>
+                      <label className="block text-[10px] font-extrabold text-slate-500 dark:text-slate-400 mb-1">
+                        ปีการศึกษา {courseSearchQuery.trim() && <span className="text-[9px] font-normal text-sky-500">(ค้นหาทุกปี)</span>}
+                      </label>
+                      <select
+                        value={selectedYearFilter}
+                        onChange={(e) => setSelectedYearFilter(e.target.value)}
+                        disabled={showAllCourses || Boolean(courseSearchQuery.trim())}
+                        className={`w-full text-xs px-2 py-1.5 rounded-xl border font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500/30 disabled:cursor-not-allowed ${
+                          isDarkMode ? 'bg-slate-800/80 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'
+                        }`}
+                      >
+                        <option value="ALL">ทุกปีการศึกษา</option>
+                        {availableYears.map((y) => (
+                          <option key={y} value={String(y)}>
+                            ปี {y} {String(y) === String(currentSysYear) ? '(ปัจจุบัน)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Dropdown ภาคเรียน */}
+                    <div>
+                      <label className="block text-[10px] font-extrabold text-slate-500 dark:text-slate-400 mb-1">
+                        ภาคเรียน {courseSearchQuery.trim() && <span className="text-[9px] font-normal text-sky-500">(ค้นหาทุกเทอม)</span>}
+                      </label>
+                      <select
+                        value={selectedSemesterFilter}
+                        onChange={(e) => setSelectedSemesterFilter(e.target.value)}
+                        disabled={showAllCourses || Boolean(courseSearchQuery.trim())}
+                        className={`w-full text-xs px-2 py-1.5 rounded-xl border font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500/30 disabled:cursor-not-allowed ${
+                          isDarkMode ? 'bg-slate-800/80 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'
+                        }`}
+                      >
+                        <option value="ALL">ทุกภาคเรียน</option>
+                        <option value="1">ภาคเรียนที่ 1 {currentSysSemester === '1' ? '(ปัจจุบัน)' : ''}</option>
+                        <option value="2">ภาคเรียนที่ 2 {currentSysSemester === '2' ? '(ปัจจุบัน)' : ''}</option>
+                        <option value="SUMMER">ฤดูการศึกษา (Summer)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Checkbox for Showing All Courses */}
+                  <div className="pt-0.5">
+                    <label className="inline-flex items-center space-x-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={showAllCourses}
+                        onChange={(e) => setShowAllCourses(e.target.checked)}
+                        className="w-3.5 h-3.5 rounded text-sky-600 focus:ring-sky-500/30 border-slate-300 dark:border-slate-700 dark:bg-slate-800"
+                      />
+                      <span>แสดงรายวิชาทั้งหมด (ทุกปี/ทุกเทอม)</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* Scrollable Course Cards List */}
               {loading ? (
                 <div className="p-4 text-center text-xs text-slate-400">กำลังโหลดวิชา...</div>
               ) : courses.length === 0 ? (
                 <div className="p-4 text-center text-xs text-slate-400">ยังไม่ได้สร้างวิชาเรียน</div>
+              ) : filteredCourses.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-400 space-y-1.5 border border-dashed rounded-xl border-slate-700/50">
+                  <p className="font-semibold text-slate-400">ไม่พบรายวิชาที่ตรงกับตัวกรอง</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCourseSearchQuery('');
+                      setShowAllCourses(false);
+                      setSelectedYearFilter(String(currentSysYear));
+                      setSelectedSemesterFilter('ALL');
+                    }}
+                    className="text-[11px] font-bold text-sky-500 hover:underline"
+                  >
+                    ล้างคำค้นหาและรีเซ็ตตัวกรอง
+                  </button>
+                </div>
               ) : (
-                <div className="space-y-2">
-                  {courses.map((c) => (
+                <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+                  {filteredCourses.map((c) => (
                     <button
                       key={c.id}
                       onClick={() => handleSelectCourse(c)}
                       className={`w-full text-left p-3.5 rounded-xl border transition ${
                         selectedCourse?.id === c.id
-                          ? (isDarkMode ? 'bg-sky-500/15 border-sky-500/50 text-white font-bold' : 'bg-sky-50 border-sky-300 text-sky-950 font-bold')
+                          ? (isDarkMode ? 'bg-sky-500/15 border-sky-500/50 text-white font-bold ring-1 ring-sky-500/30' : 'bg-sky-50 border-sky-300 text-sky-950 font-bold ring-1 ring-sky-400/40')
                           : (isDarkMode ? 'bg-slate-800/40 border-slate-700/60 text-slate-400 hover:bg-slate-800' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100')
                       }`}
                     >
@@ -1069,19 +1404,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       <span>แก้ไขวิชา / เพิ่มลดสัปดาห์</span>
                     </button>
 
-                    {/* Export Student Attendance CSV Button */}
-                    <a
-                      href={`/api/export-csv/${selectedCourse.id}`}
-                      download
-                      className={`w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition border ${
-                        isDarkMode 
-                          ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700' 
-                          : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200 shadow-sm'
-                      }`}
-                    >
-                      <Download className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>Export รายงานนักเรียน (CSV)</span>
-                    </a>
+
                   </div>
                 </div>
 
@@ -1173,11 +1496,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   download
                   className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-2 transition border ${
                     isDarkMode 
-                      ? 'bg-slate-800 hover:bg-slate-700 text-blue-400 border-slate-700' 
-                      : 'bg-blue-50 hover:bg-blue-100 text-blue-900 border-blue-200 shadow-sm'
+                      ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-800/80' 
+                      : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300/80 shadow-xs'
                   }`}
                 >
-                  <Download className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <Download className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                   <span>
                     Export CSV ({teacherLogCourseFilter === 'ALL' ? 'รวมทุกวิชา' : 'เฉพาะวิชานี้'})
                   </span>
@@ -1422,16 +1745,68 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-600'
                     }`}>
                       <tr>
-                        <th className="p-3">วัน-เวลา</th>
-                        <th className="p-3">วิชา / คาบเรียน</th>
-                        <th className="p-3">อาคาร / ห้องเรียน</th>
-                        <th className="p-3">วิธีเช็คชื่อ</th>
+                        <th
+                          onClick={() => handleHistorySort('timestamp')}
+                          className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                          title="กดเพื่อจัดเรียงตามวัน-เวลา"
+                        >
+                          <div className="flex items-center space-x-1">
+                            <span>วัน-เวลา</span>
+                            {historySortField === 'timestamp' ? (
+                              historySortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                            ) : (
+                              <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                            )}
+                          </div>
+                        </th>
+                        <th
+                          onClick={() => handleHistorySort('course')}
+                          className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                          title="กดเพื่อจัดเรียงตามวิชา"
+                        >
+                          <div className="flex items-center space-x-1">
+                            <span>วิชา / คาบเรียน</span>
+                            {historySortField === 'course' ? (
+                              historySortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                            ) : (
+                              <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                            )}
+                          </div>
+                        </th>
+                        <th
+                          onClick={() => handleHistorySort('building')}
+                          className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                          title="กดเพื่อจัดเรียงตามอาคาร/ห้องเรียน"
+                        >
+                          <div className="flex items-center space-x-1">
+                            <span>อาคาร / ห้องเรียน</span>
+                            {historySortField === 'building' ? (
+                              historySortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                            ) : (
+                              <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                            )}
+                          </div>
+                        </th>
+                        <th
+                          onClick={() => handleHistorySort('method')}
+                          className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                          title="กดเพื่อจัดเรียงตามวิธีเช็คชื่อ"
+                        >
+                          <div className="flex items-center space-x-1">
+                            <span>วิธีเช็คชื่อ</span>
+                            {historySortField === 'method' ? (
+                              historySortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                            ) : (
+                              <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                            )}
+                          </div>
+                        </th>
                         <th className="p-3">พิกัด GPS</th>
                         <th className="p-3">หมายเหตุ</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                      {filteredTeacherHistory.map((rec) => (
+                      {sortedTeacherHistory.map((rec) => (
                         <tr key={rec.id} className={isDarkMode ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'}>
                           <td className="p-3 font-mono font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap">
                             {new Date(rec.timestamp).toLocaleString('th-TH')}
@@ -1573,78 +1948,192 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Left Column: List of Courses Overview Cards */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between px-1">
-                  <h3 className={`text-xs font-extrabold uppercase tracking-wider ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                    วิชาในความดูแล ({overviewData.overviewList.length})
-                  </h3>
+              <div className={`p-5 rounded-2xl border space-y-4 self-start ${
+                isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <h2 className={`text-xs font-extrabold uppercase tracking-wider flex items-center space-x-1.5 ${
+                    isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                  }`}>
+                    <BookOpen className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                    <span>วิชาในความดูแล</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-extrabold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
+                      {filteredOverviewList.length}/{overviewData.overviewList.length}
+                    </span>
+                  </h2>
                   <button
                     onClick={loadOverviewData}
-                    className="text-[11px] text-sky-600 dark:text-sky-400 hover:underline flex items-center space-x-1 font-bold cursor-pointer"
+                    className={`p-1 rounded-lg transition ${isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}
+                    title="รีเฟรชข้อมูลวิชา"
                   >
-                    <RefreshCw className="w-3 h-3" />
-                    <span>อัปเดตข้อมูล</span>
+                    <RefreshCw className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
-                <div className="space-y-2.5">
-                  {overviewData.overviewList.map((item: any) => {
-                    const c = item.course;
-                    const isSelected = selectedOverviewCourseId === c.id;
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => setSelectedOverviewCourseId(c.id)}
-                        className={`w-full text-left p-4 rounded-2xl border transition-all cursor-pointer ${
-                          isSelected
-                            ? isDarkMode
-                              ? 'bg-sky-950/40 border-sky-500/60 shadow-lg shadow-sky-950/30'
-                              : 'bg-sky-50 border-sky-300 shadow-sm'
-                            : isDarkMode
-                            ? 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800'
-                            : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50'
+                {/* Search & Term Filter controls when overview courses exist */}
+                {overviewData.overviewList.length > 0 && (
+                  <div className="space-y-2.5 pt-0.5">
+                    {/* Search Bar */}
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={coordinatorCourseSearchQuery}
+                        onChange={(e) => setCoordinatorCourseSearchQuery(e.target.value)}
+                        placeholder="ค้นหาตามรหัส หรือ ชื่อวิชา..."
+                        className={`w-full text-xs pl-8 pr-7 py-2 rounded-xl border transition focus:outline-none focus:ring-2 focus:ring-sky-500/30 ${
+                          isDarkMode ? 'bg-slate-800/80 border-slate-700 text-slate-200 placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-800 placeholder-slate-400'
                         }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono text-xs font-extrabold text-sky-600 dark:text-sky-400">
-                            {c.courseCode}
-                          </span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                            item.courseAvgAttendanceRate >= 80
-                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-                              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
-                          }`}>
-                            {item.courseAvgAttendanceRate}% เข้าเรียน
-                          </span>
-                        </div>
+                      />
+                      {coordinatorCourseSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setCoordinatorCourseSearchQuery('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-200 rounded-md"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
 
-                        <div className={`text-xs font-bold mt-1 line-clamp-1 ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                          {c.courseName}
-                        </div>
+                    {/* Dropdown Filters for ปีการศึกษา and ภาคเรียน */}
+                    <div className={`grid grid-cols-2 gap-2 transition-opacity ${coordinatorShowAllCourses || coordinatorCourseSearchQuery.trim() ? 'opacity-50' : ''}`}>
+                      {/* Dropdown ปีการศึกษา */}
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-500 dark:text-slate-400 mb-1">
+                          ปีการศึกษา {coordinatorCourseSearchQuery.trim() && <span className="text-[9px] font-normal text-sky-500">(ค้นหาทุกปี)</span>}
+                        </label>
+                        <select
+                          value={coordinatorSelectedYearFilter}
+                          onChange={(e) => setCoordinatorSelectedYearFilter(e.target.value)}
+                          disabled={coordinatorShowAllCourses || Boolean(coordinatorCourseSearchQuery.trim())}
+                          className={`w-full text-xs px-2 py-1.5 rounded-xl border font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500/30 disabled:cursor-not-allowed ${
+                            isDarkMode ? 'bg-slate-800/80 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'
+                          }`}
+                        >
+                          <option value="ALL">ทุกปีการศึกษา</option>
+                          {overviewAvailableYears.map((y) => (
+                            <option key={y} value={String(y)}>
+                              ปี {y} {String(y) === String(currentSysYear) ? '(ปัจจุบัน)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                        <div className="mt-3 pt-2.5 border-t border-slate-800/40 flex items-center justify-between text-[11px] text-slate-400">
-                          <span className="flex items-center space-x-1">
-                            <Users className="w-3.5 h-3.5 text-sky-400" />
-                            <span>ลงทะเบียน: <strong className={isDarkMode ? 'text-white' : 'text-slate-900'}>{item.totalRegisteredCount} คน</strong></span>
-                          </span>
-                          <span className="flex items-center space-x-1">
-                            <Calendar className="w-3.5 h-3.5 text-sky-400" />
-                            <span>{item.totalSessions} คาบ</span>
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                      {/* Dropdown ภาคเรียน */}
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-500 dark:text-slate-400 mb-1">
+                          ภาคเรียน {coordinatorCourseSearchQuery.trim() && <span className="text-[9px] font-normal text-sky-500">(ค้นหาทุกเทอม)</span>}
+                        </label>
+                        <select
+                          value={coordinatorSelectedSemesterFilter}
+                          onChange={(e) => setCoordinatorSelectedSemesterFilter(e.target.value)}
+                          disabled={coordinatorShowAllCourses || Boolean(coordinatorCourseSearchQuery.trim())}
+                          className={`w-full text-xs px-2 py-1.5 rounded-xl border font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500/30 disabled:cursor-not-allowed ${
+                            isDarkMode ? 'bg-slate-800/80 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'
+                          }`}
+                        >
+                          <option value="ALL">ทุกภาคเรียน</option>
+                          <option value="1">ภาคเรียนที่ 1 {currentSysSemester === '1' ? '(ปัจจุบัน)' : ''}</option>
+                          <option value="2">ภาคเรียนที่ 2 {currentSysSemester === '2' ? '(ปัจจุบัน)' : ''}</option>
+                          <option value="SUMMER">ฤดูการศึกษา (Summer)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Checkbox for Showing All Courses */}
+                    <div className="pt-0.5">
+                      <label className="inline-flex items-center space-x-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={coordinatorShowAllCourses}
+                          onChange={(e) => setCoordinatorShowAllCourses(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded text-sky-600 focus:ring-sky-500/30 border-slate-300 dark:border-slate-700 dark:bg-slate-800"
+                        />
+                        <span>แสดงรายวิชาทั้งหมด (ทุกปี/ทุกเทอม)</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* Scrollable Course Cards List */}
+                {loadingOverview ? (
+                  <div className="p-4 text-center text-xs text-slate-400">กำลังโหลดวิชา...</div>
+                ) : overviewData.overviewList.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400">ยังไม่มีรายวิชาที่รับผิดชอบ</div>
+                ) : filteredOverviewList.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400 space-y-1.5 border border-dashed rounded-xl border-slate-700/50">
+                    <p className="font-semibold text-slate-400">ไม่พบรายวิชาที่ตรงกับตัวกรอง</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCoordinatorCourseSearchQuery('');
+                        setCoordinatorShowAllCourses(false);
+                        setCoordinatorSelectedYearFilter(String(currentSysYear));
+                        setCoordinatorSelectedSemesterFilter('ALL');
+                      }}
+                      className="text-[11px] font-bold text-sky-500 hover:underline"
+                    >
+                      ล้างคำค้นหาและรีเซ็ตตัวกรอง
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                    {filteredOverviewList.map((item: any) => {
+                      const c = item.course;
+                      const isSelected = selectedOverviewCourseId === c.id;
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => setSelectedOverviewCourseId(c.id)}
+                          className={`w-full text-left p-3.5 rounded-xl border transition cursor-pointer ${
+                            isSelected
+                              ? (isDarkMode ? 'bg-sky-500/15 border-sky-500/50 text-white font-bold ring-1 ring-sky-500/30' : 'bg-sky-50 border-sky-300 text-sky-950 font-bold ring-1 ring-sky-400/40')
+                              : (isDarkMode ? 'bg-slate-800/40 border-slate-700/60 text-slate-400 hover:bg-slate-800' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100')
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-xs text-blue-950 dark:text-blue-300 font-extrabold">{c.courseCode}</span>
+                            <div className="flex items-center space-x-1.5">
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                                isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-200 text-slate-700'
+                              }`}>
+                                ปี {c.academicYear} / เทอม {c.semester}
+                              </span>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                item.courseAvgAttendanceRate >= 80
+                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                              }`}>
+                                {item.courseAvgAttendanceRate}% เข้าเรียน
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className={`text-xs mt-1 font-semibold line-clamp-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                            {c.courseName}
+                          </div>
+
+                          <div className="mt-2.5 pt-2 border-t border-slate-700/30 dark:border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400">
+                            <span className="flex items-center space-x-1">
+                              <Users className="w-3.5 h-3.5 text-sky-400" />
+                              <span>ลงทะเบียน: <strong className={isDarkMode ? 'text-white' : 'text-slate-900'}>{item.totalRegisteredCount} คน</strong></span>
+                            </span>
+                            <span className="flex items-center space-x-1">
+                              <Calendar className="w-3.5 h-3.5 text-sky-400" />
+                              <span>{item.totalSessions} คาบ</span>
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Right Column: Detailed View for Selected Course */}
               {(() => {
-                const currentOverviewItem = overviewData.overviewList.find(
-                  (item: any) => item.course.id === selectedOverviewCourseId
-                ) || overviewData.overviewList[0];
-
                 if (!currentOverviewItem) return null;
 
                 const course = currentOverviewItem.course;
@@ -1658,6 +2147,43 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     st.studentIdNum.toLowerCase().includes(q) ||
                     st.email.toLowerCase().includes(q)
                   );
+                });
+
+                // Sort students for Overview Table
+                const sortedOverviewStudents = [...filteredStudents].sort((a: any, b: any) => {
+                  if (overviewSortField === 'studentIdNum') {
+                    const cmp = (a.studentIdNum || '').localeCompare(b.studentIdNum || '');
+                    return overviewSortDir === 'asc' ? cmp : -cmp;
+                  }
+                  if (overviewSortField === 'studentName') {
+                    const cmp = (a.studentName || '').localeCompare(b.studentName || '', 'th');
+                    return overviewSortDir === 'asc' ? cmp : -cmp;
+                  }
+                  if (overviewSortField === 'attended') {
+                    const cmp = (a.attendedCount || 0) - (b.attendedCount || 0);
+                    return overviewSortDir === 'asc' ? cmp : -cmp;
+                  }
+                  if (overviewSortField === 'percent') {
+                    const cmp = (a.attendancePercent || 0) - (b.attendancePercent || 0);
+                    return overviewSortDir === 'asc' ? cmp : -cmp;
+                  }
+                  if (overviewSortField === 'avgTime') {
+                    const cmp = (a.avgMinutes || 0) - (b.avgMinutes || 0);
+                    return overviewSortDir === 'asc' ? cmp : -cmp;
+                  }
+                  if (overviewSortField === 'lastScan') {
+                    const aTime = a.lastCheckinTime ? new Date(a.lastCheckinTime).getTime() : 0;
+                    const bTime = b.lastCheckinTime ? new Date(b.lastCheckinTime).getTime() : 0;
+                    const cmp = aTime - bTime;
+                    return overviewSortDir === 'asc' ? cmp : -cmp;
+                  }
+                  if (overviewSortField === 'eligible') {
+                    const aEligible = (a.attendancePercent || 0) >= 80 ? 1 : 0;
+                    const bEligible = (b.attendancePercent || 0) >= 80 ? 1 : 0;
+                    const cmp = aEligible - bEligible;
+                    return overviewSortDir === 'asc' ? cmp : -cmp;
+                  }
+                  return 0;
                 });
 
                 return (
@@ -1682,14 +2208,30 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           </p>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => exportCourseOverviewCSV(currentOverviewItem)}
-                          className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-md shadow-sky-600/20 active:scale-95 shrink-0 cursor-pointer"
-                        >
-                          <FileSpreadsheet className="w-4 h-4" />
-                          <span>ส่งออกรายงานภาพรวม (CSV)</span>
-                        </button>
+                        <div className="flex flex-col sm:flex-row items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsAttendanceGridModalOpen(true)}
+                            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-md shadow-sky-600/20 active:scale-95 shrink-0 cursor-pointer"
+                            title="เปิดตารางเช็คชื่อ และเปลี่ยนสถานะการเข้าเรียนของนักศึกษาแต่ละคน"
+                          >
+                            <FileSpreadsheet className="w-4 h-4" />
+                            <span>ตารางเช็คชื่อ / แก้ไขสถานะรายคน</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => exportCourseOverviewCSV(currentOverviewItem)}
+                            className={`w-full sm:w-auto px-4 py-2.5 rounded-xl border font-bold text-xs flex items-center justify-center space-x-2 transition shrink-0 cursor-pointer shadow-xs ${
+                              isDarkMode
+                                ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-800/80'
+                                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300/80'
+                            }`}
+                          >
+                            <Download className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                            <span>ส่งออก CSV</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* Course Key Performance Metrics Grid */}
@@ -1779,7 +2321,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                             <>
                               {/* MOBILE STACKED CARD VIEW (FOR SMALL SCREENS) */}
                               <div className="block sm:hidden space-y-2.5">
-                                {filteredStudents.map((st: any, idx: number) => {
+                                {sortedOverviewStudents.map((st: any, idx: number) => {
                                   const isEligible = st.attendancePercent >= 80;
                                   return (
                                     <div
@@ -1870,17 +2412,108 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                   }`}>
                                     <tr>
                                       <th className="p-3">#</th>
-                                      <th className="p-3">รหัสนักศึกษา</th>
-                                      <th className="p-3">ชื่อ-นามสกุล</th>
-                                      <th className="p-3 text-center">คาบที่เข้าเรียน</th>
-                                      <th className="p-3 text-center">อัตราเข้าเรียน (%)</th>
-                                      <th className="p-3">เวลาเข้าเรียนเฉลี่ย</th>
-                                      <th className="p-3">สแกนครั้งล่าสุด</th>
-                                      <th className="p-3">สิทธิ์สอบ</th>
+                                      <th
+                                        onClick={() => handleOverviewSort('studentIdNum')}
+                                        className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        title="กดเพื่อจัดเรียงตามรหัสนักศึกษา"
+                                      >
+                                        <div className="flex items-center space-x-1">
+                                          <span>รหัสนักศึกษา</span>
+                                          {overviewSortField === 'studentIdNum' ? (
+                                            overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                          ) : (
+                                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                          )}
+                                        </div>
+                                      </th>
+                                      <th
+                                        onClick={() => handleOverviewSort('studentName')}
+                                        className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        title="กดเพื่อจัดเรียงตามชื่อ-นามสกุล"
+                                      >
+                                        <div className="flex items-center space-x-1">
+                                          <span>ชื่อ-นามสกุล</span>
+                                          {overviewSortField === 'studentName' ? (
+                                            overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                          ) : (
+                                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                          )}
+                                        </div>
+                                      </th>
+                                      <th
+                                        onClick={() => handleOverviewSort('attended')}
+                                        className="p-3 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        title="กดเพื่อจัดเรียงตามจำนวนคาบเข้าเรียน"
+                                      >
+                                        <div className="flex items-center justify-center space-x-1">
+                                          <span>คาบที่เข้าเรียน</span>
+                                          {overviewSortField === 'attended' ? (
+                                            overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                          ) : (
+                                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                          )}
+                                        </div>
+                                      </th>
+                                      <th
+                                        onClick={() => handleOverviewSort('percent')}
+                                        className="p-3 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        title="กดเพื่อจัดเรียงตามอัตราเข้าเรียน"
+                                      >
+                                        <div className="flex items-center justify-center space-x-1">
+                                          <span>อัตราเข้าเรียน (%)</span>
+                                          {overviewSortField === 'percent' ? (
+                                            overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                          ) : (
+                                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                          )}
+                                        </div>
+                                      </th>
+                                      <th
+                                        onClick={() => handleOverviewSort('avgTime')}
+                                        className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        title="กดเพื่อจัดเรียงตามเวลาเข้าเรียนเฉลี่ย"
+                                      >
+                                        <div className="flex items-center space-x-1">
+                                          <span>เวลาเข้าเรียนเฉลี่ย</span>
+                                          {overviewSortField === 'avgTime' ? (
+                                            overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                          ) : (
+                                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                          )}
+                                        </div>
+                                      </th>
+                                      <th
+                                        onClick={() => handleOverviewSort('lastScan')}
+                                        className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        title="กดเพื่อจัดเรียงตามสแกนครั้งล่าสุด"
+                                      >
+                                        <div className="flex items-center space-x-1">
+                                          <span>สแกนครั้งล่าสุด</span>
+                                          {overviewSortField === 'lastScan' ? (
+                                            overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                          ) : (
+                                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                          )}
+                                        </div>
+                                      </th>
+                                      <th
+                                        onClick={() => handleOverviewSort('eligible')}
+                                        className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        title="กดเพื่อจัดเรียงตามสิทธิ์สอบ"
+                                      >
+                                        <div className="flex items-center space-x-1">
+                                          <span>สิทธิ์สอบ</span>
+                                          {overviewSortField === 'eligible' ? (
+                                            overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                          ) : (
+                                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                          )}
+                                        </div>
+                                      </th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                                    {filteredStudents.map((st: any, idx: number) => {
+                                    {sortedOverviewStudents.map((st: any, idx: number) => {
                                       const isEligible = st.attendancePercent >= 80;
                                       return (
                                         <tr key={st.userId} className={isDarkMode ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}>
@@ -2290,10 +2923,30 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               <div className="max-h-96 overflow-y-auto p-1">
                 {sessionModalFilter === 'ATTENDED' ? (
                   (() => {
-                    const list = (selectedSessionModal.attendedStudents || []).filter((st: any) => {
+                    const rawList = (selectedSessionModal.attendedStudents || []).filter((st: any) => {
                       if (!sessionModalSearch) return true;
                       const q = sessionModalSearch.toLowerCase();
                       return st.studentName.toLowerCase().includes(q) || st.studentIdNum.toLowerCase().includes(q);
+                    });
+
+                    const list = [...rawList].sort((a: any, b: any) => {
+                      if (attendedSortField === 'studentIdNum') {
+                        const cmp = (a.studentIdNum || '').localeCompare(b.studentIdNum || '');
+                        return attendedSortDir === 'asc' ? cmp : -cmp;
+                      }
+                      if (attendedSortField === 'studentName') {
+                        const cmp = (a.studentName || '').localeCompare(b.studentName || '', 'th');
+                        return attendedSortDir === 'asc' ? cmp : -cmp;
+                      }
+                      if (attendedSortField === 'checkinTime') {
+                        const cmp = (a.checkinTime || '').localeCompare(b.checkinTime || '');
+                        return attendedSortDir === 'asc' ? cmp : -cmp;
+                      }
+                      if (attendedSortField === 'checkinMethod') {
+                        const cmp = (a.checkinMethod || '').localeCompare(b.checkinMethod || '', 'th');
+                        return attendedSortDir === 'asc' ? cmp : -cmp;
+                      }
+                      return 0;
                     });
 
                     if (list.length === 0) {
@@ -2362,10 +3015,62 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                             }`}>
                               <tr>
                                 <th className="p-3">#</th>
-                                <th className="p-3">รหัสนักศึกษา</th>
-                                <th className="p-3">ชื่อ-นามสกุล</th>
-                                <th className="p-3">เวลาที่สแกน</th>
-                                <th className="p-3">ช่องทาง</th>
+                                <th
+                                  onClick={() => handleAttendedSort('studentIdNum')}
+                                  className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                  title="กดเพื่อจัดเรียงตามรหัสนักศึกษา"
+                                >
+                                  <div className="flex items-center space-x-1">
+                                    <span>รหัสนักศึกษา</span>
+                                    {attendedSortField === 'studentIdNum' ? (
+                                      attendedSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                    ) : (
+                                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                    )}
+                                  </div>
+                                </th>
+                                <th
+                                  onClick={() => handleAttendedSort('studentName')}
+                                  className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                  title="กดเพื่อจัดเรียงตามชื่อ-นามสกุล"
+                                >
+                                  <div className="flex items-center space-x-1">
+                                    <span>ชื่อ-นามสกุล</span>
+                                    {attendedSortField === 'studentName' ? (
+                                      attendedSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                    ) : (
+                                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                    )}
+                                  </div>
+                                </th>
+                                <th
+                                  onClick={() => handleAttendedSort('checkinTime')}
+                                  className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                  title="กดเพื่อจัดเรียงตามเวลาสแกน"
+                                >
+                                  <div className="flex items-center space-x-1">
+                                    <span>เวลาที่สแกน</span>
+                                    {attendedSortField === 'checkinTime' ? (
+                                      attendedSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                    ) : (
+                                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                    )}
+                                  </div>
+                                </th>
+                                <th
+                                  onClick={() => handleAttendedSort('checkinMethod')}
+                                  className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                  title="กดเพื่อจัดเรียงตามช่องทาง"
+                                >
+                                  <div className="flex items-center space-x-1">
+                                    <span>ช่องทาง</span>
+                                    {attendedSortField === 'checkinMethod' ? (
+                                      attendedSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                    ) : (
+                                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                    )}
+                                  </div>
+                                </th>
                                 <th className="p-3 text-center">สถานะ</th>
                               </tr>
                             </thead>
@@ -2406,10 +3111,32 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   })()
                 ) : (
                   (() => {
-                    const list = (selectedSessionModal.absentStudents || []).filter((st: any) => {
+                    const rawList = (selectedSessionModal.absentStudents || []).filter((st: any) => {
                       if (!sessionModalSearch) return true;
                       const q = sessionModalSearch.toLowerCase();
                       return st.studentName.toLowerCase().includes(q) || st.studentIdNum.toLowerCase().includes(q);
+                    });
+
+                    const list = [...rawList].sort((a: any, b: any) => {
+                      if (absentSortField === 'studentIdNum') {
+                        const cmp = (a.studentIdNum || '').localeCompare(b.studentIdNum || '');
+                        return absentSortDir === 'asc' ? cmp : -cmp;
+                      }
+                      if (absentSortField === 'studentName') {
+                        const cmp = (a.studentName || '').localeCompare(b.studentName || '', 'th');
+                        return absentSortDir === 'asc' ? cmp : -cmp;
+                      }
+                      if (absentSortField === 'email') {
+                        const cmp = (a.email || '').localeCompare(b.email || '');
+                        return absentSortDir === 'asc' ? cmp : -cmp;
+                      }
+                      if (absentSortField === 'status') {
+                        const aVal = a.isOnLeave ? 1 : 0;
+                        const bVal = b.isOnLeave ? 1 : 0;
+                        const cmp = aVal - bVal;
+                        return absentSortDir === 'asc' ? cmp : -cmp;
+                      }
+                      return 0;
                     });
 
                     if (list.length === 0) {
@@ -2472,10 +3199,62 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                             }`}>
                               <tr>
                                 <th className="p-3">#</th>
-                                <th className="p-3">รหัสนักศึกษา</th>
-                                <th className="p-3">ชื่อ-นามสกุล</th>
-                                <th className="p-3">อีเมล</th>
-                                <th className="p-3 text-center">สถานะ</th>
+                                <th
+                                  onClick={() => handleAbsentSort('studentIdNum')}
+                                  className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                  title="กดเพื่อจัดเรียงตามรหัสนักศึกษา"
+                                >
+                                  <div className="flex items-center space-x-1">
+                                    <span>รหัสนักศึกษา</span>
+                                    {absentSortField === 'studentIdNum' ? (
+                                      absentSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                    ) : (
+                                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                    )}
+                                  </div>
+                                </th>
+                                <th
+                                  onClick={() => handleAbsentSort('studentName')}
+                                  className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                  title="กดเพื่อจัดเรียงตามชื่อ-นามสกุล"
+                                >
+                                  <div className="flex items-center space-x-1">
+                                    <span>ชื่อ-นามสกุล</span>
+                                    {absentSortField === 'studentName' ? (
+                                      absentSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                    ) : (
+                                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                    )}
+                                  </div>
+                                </th>
+                                <th
+                                  onClick={() => handleAbsentSort('email')}
+                                  className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                  title="กดเพื่อจัดเรียงตามอีเมล"
+                                >
+                                  <div className="flex items-center space-x-1">
+                                    <span>อีเมล</span>
+                                    {absentSortField === 'email' ? (
+                                      absentSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                    ) : (
+                                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                    )}
+                                  </div>
+                                </th>
+                                <th
+                                  onClick={() => handleAbsentSort('status')}
+                                  className="p-3 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                  title="กดเพื่อจัดเรียงตามสถานะ"
+                                >
+                                  <div className="flex items-center justify-center space-x-1">
+                                    <span>สถานะ</span>
+                                    {absentSortField === 'status' ? (
+                                      absentSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                    ) : (
+                                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                    )}
+                                  </div>
+                                </th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -2563,6 +3342,41 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           isDarkMode={isDarkMode}
           onMembersUpdated={handleRefreshCourseMembers}
           onRefresh={handleRefreshCourseMembers}
+        />
+      )}
+
+      {/* Teacher Attendance Grid Modal */}
+      {(selectedCourse || currentOverviewItem?.course) && (
+        <TeacherAttendanceGridModal
+          isOpen={isAttendanceGridModalOpen}
+          onClose={() => setIsAttendanceGridModalOpen(false)}
+          course={selectedCourse || currentOverviewItem?.course}
+          studentList={
+            currentOverviewItem?.studentList ||
+            (currentCourseMembers || [])
+              .filter((m) => m.role === CourseMemberRole.STUDENT)
+              .map((m) => ({
+                userId: m.userId,
+                studentName: m.user ? `${m.user.title || ''}${m.user.firstNameTh} ${m.user.lastNameTh}`.trim() : 'นักศึกษา',
+                studentIdNum: m.user?.universityId || '-',
+                email: m.user?.email || '',
+                avatarUrl: m.user?.avatarUrl,
+                sessionStatuses: courseSessions.map((s) => ({
+                  sessionId: s.id,
+                  weekNumber: s.weekNumber,
+                  topic: s.topic,
+                  status: 'ABSENT',
+                })),
+              }))
+          }
+          sessions={courseSessions.length > 0 ? courseSessions : currentOverviewItem?.sessionDetailsList || []}
+          onRefresh={() => {
+            loadOverviewData();
+            if (selectedCourse) {
+              handleSelectCourse(selectedCourse);
+            }
+          }}
+          isDarkMode={isDarkMode}
         />
       )}
     </div>

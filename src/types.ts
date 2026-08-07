@@ -92,6 +92,7 @@ export interface User {
   deviceId?: string; // Legacy primary device fingerprint/UUID
   devices?: UserDevice[]; // List of bound devices
   department?: string; // Major/Department code or name
+  isDemo?: boolean; // Demo account flag for system test users
   isSuspended?: boolean; // Account suspended flag
   suspendedReason?: string;
   lastLoginAt?: string;

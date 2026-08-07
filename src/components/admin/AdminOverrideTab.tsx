@@ -30,17 +30,25 @@ import {
   Save,
   X,
   FileText,
+  Download,
+  FileSpreadsheet,
+  CheckSquare,
+  Square,
+  LayoutGrid,
+  Table,
 } from 'lucide-react';
 
 interface AdminOverrideTabProps {
   isDarkMode: boolean;
   showToast: (msg: string) => void;
+  setDeleteConfirmItem?: (item: any) => void;
   onRefreshOverview: () => void;
 }
 
 export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
   isDarkMode,
   showToast,
+  setDeleteConfirmItem,
   onRefreshOverview,
 }) => {
   const [allUsersList, setAllUsersList] = useState<User[]>([]);
@@ -69,11 +77,88 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
   const [activeLogTab, setActiveLogTab] = useState<'ALL' | 'STUDENT' | 'TEACHER' | 'FOCUS'>('ALL');
   const [logFilterCourse, setLogFilterCourse] = useState<string>('ALL');
   const [logFilterStatus, setLogFilterStatus] = useState<string>('ALL');
+  const [logFilterYear, setLogFilterYear] = useState<string>('ALL');
+  const [logFilterSemester, setLogFilterSemester] = useState<string>('ALL');
+  const [logFilterWeek, setLogFilterWeek] = useState<string>('ALL');
   const [logSearchQuery, setLogSearchQuery] = useState<string>('');
-  const [sortColumn, setSortColumn] = useState<'user' | 'course' | 'status' | 'method' | 'time'>('time');
+  const [sortColumn, setSortColumn] = useState<'studentId' | 'user' | 'course' | 'term' | 'week' | 'status' | 'method' | 'time'>('time');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(15);
+
+  // Column Visibility State
+  const [visibleCols, setVisibleCols] = useState<{ [key: string]: boolean }>({
+    select: true,
+    index: true,
+    studentId: true,
+    user: true,
+    course: true,
+    term: true,
+    week: true,
+    status: true,
+    method: true,
+    time: true,
+    actions: true,
+  });
+  const [showColPicker, setShowColPicker] = useState<boolean>(false);
+  const [viewDisplayMode, setViewDisplayMode] = useState<'COMPACT' | 'CARDS' | 'FULL'>('COMPACT');
+
+  const COLUMN_CONFIG: { key: string; label: string }[] = [
+    { key: 'select', label: 'กล่องเลือก (Select)' },
+    { key: 'index', label: 'ลำดับ (#)' },
+    { key: 'studentId', label: 'รหัสประจำตัว' },
+    { key: 'user', label: 'ผู้ใช้งาน' },
+    { key: 'course', label: 'วิชา' },
+    { key: 'term', label: 'ปีการศึกษา/ภาคเรียน' },
+    { key: 'week', label: 'สัปดาห์' },
+    { key: 'status', label: 'สถานะเข้าเรียน' },
+    { key: 'method', label: 'วิธีเช็กชื่อ/เหตุผล' },
+    { key: 'time', label: 'เวลาที่บันทึก' },
+    { key: 'actions', label: 'จัดการ' },
+  ];
+
+  // Table Column Widths & Drag Resize Handler
+  const [colWidths, setColWidths] = useState<{ [key: string]: number }>({
+    select: 40,
+    index: 45,
+    studentId: 120,
+    user: 160,
+    course: 160,
+    term: 140,
+    week: 85,
+    status: 125,
+    method: 155,
+    time: 140,
+    actions: 90,
+  });
+
+  const handleMouseDownResize = (colKey: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = colWidths[colKey] || 100;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const newWidth = Math.max(35, startWidth + deltaX);
+      setColWidths((prev) => ({
+        ...prev,
+        [colKey]: newWidth,
+      }));
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
 
   // Edit & Delete Log Modal State
   const [editingLog, setEditingLog] = useState<any | null>(null);
@@ -409,7 +494,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
   };
 
   // Toggle sort direction or column
-  const handleSort = (col: 'user' | 'course' | 'status' | 'method' | 'time') => {
+  const handleSort = (col: 'studentId' | 'user' | 'course' | 'term' | 'week' | 'status' | 'method' | 'time') => {
     if (sortColumn === col) {
       setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
@@ -417,6 +502,20 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
       setSortDir('desc');
     }
   };
+
+  // Derived available academic years from courses
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    allCourses.forEach((c) => {
+      if (c.academicYear) years.add(Number(c.academicYear));
+    });
+    if (years.size === 0) {
+      years.add(2569);
+      years.add(2568);
+      years.add(2567);
+    }
+    return Array.from(years).sort((a, b) => b - a);
+  }, [allCourses]);
 
   // Combined and filtered attendance logs
   const combinedAttendanceLogs = useMemo(() => {
@@ -435,13 +534,20 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
       };
     });
 
-    const tLogs = teacherAttendance.map((a) => ({
-      ...a,
-      logType: 'TEACHER',
-      displayName: a.teacherNameTh || 'อาจารย์ผู้สอน',
-      displayId: a.teacherId || a.userId,
-      targetUserId: a.teacherId || a.userId,
-    }));
+    const tLogs = teacherAttendance.map((a) => {
+      const sess = allSessions.find((s) => s.id === a.sessionId);
+      const courseId = a.courseId || sess?.courseId;
+      const weekNumber = a.weekNumber || sess?.weekNumber;
+      return {
+        ...a,
+        courseId,
+        weekNumber,
+        logType: 'TEACHER',
+        displayName: a.teacherNameTh || 'อาจารย์ผู้สอน',
+        displayId: a.teacherId || a.userId,
+        targetUserId: a.teacherId || a.userId,
+      };
+    });
 
     // Map approved leave requests into LEAVE attendance records
     const leaveLogs = allLeaveRequests
@@ -509,6 +615,29 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
           if (!isMatch) return false;
         }
 
+        // Academic Year Filter
+        if (logFilterYear !== 'ALL') {
+          const matchedCourse = allCourses.find((c) => c.id === log.courseId);
+          if (!matchedCourse || String(matchedCourse.academicYear) !== String(logFilterYear)) {
+            return false;
+          }
+        }
+
+        // Semester Filter
+        if (logFilterSemester !== 'ALL') {
+          const matchedCourse = allCourses.find((c) => c.id === log.courseId);
+          if (!matchedCourse || String(matchedCourse.semester) !== String(logFilterSemester)) {
+            return false;
+          }
+        }
+
+        // Week Number Filter
+        if (logFilterWeek !== 'ALL') {
+          if (String(log.weekNumber) !== String(logFilterWeek)) {
+            return false;
+          }
+        }
+
         // Course Filter
         if (logFilterCourse !== 'ALL' && log.courseId !== logFilterCourse) return false;
 
@@ -536,7 +665,10 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
         let valA = '';
         let valB = '';
 
-        if (sortColumn === 'user') {
+        if (sortColumn === 'studentId') {
+          valA = (a.displayId || '').toLowerCase();
+          valB = (b.displayId || '').toLowerCase();
+        } else if (sortColumn === 'user') {
           valA = (a.displayName || '').toLowerCase();
           valB = (b.displayName || '').toLowerCase();
         } else if (sortColumn === 'course') {
@@ -544,6 +676,15 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
           const courseB = allCourses.find((c) => c.id === b.courseId);
           valA = (courseA?.courseCode || courseA?.code || a.courseId || '').toLowerCase();
           valB = (courseB?.courseCode || courseB?.code || b.courseId || '').toLowerCase();
+        } else if (sortColumn === 'term') {
+          const courseA = allCourses.find((c) => c.id === a.courseId);
+          const courseB = allCourses.find((c) => c.id === b.courseId);
+          valA = courseA ? `${courseA.academicYear}/${courseA.semester}` : '';
+          valB = courseB ? `${courseB.academicYear}/${courseB.semester}` : '';
+        } else if (sortColumn === 'week') {
+          const wA = Number(a.weekNumber || 0);
+          const wB = Number(b.weekNumber || 0);
+          return sortDir === 'desc' ? wB - wA : wA - wB;
         } else if (sortColumn === 'status') {
           valA = (a.status || '').toLowerCase();
           valB = (b.status || '').toLowerCase();
@@ -570,6 +711,9 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
     overrideSelectedUser,
     logFilterCourse,
     logFilterStatus,
+    logFilterYear,
+    logFilterSemester,
+    logFilterWeek,
     logSearchQuery,
     sortColumn,
     sortDir,
@@ -579,7 +723,17 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeLogTab, logFilterCourse, logFilterStatus, logSearchQuery, sortColumn, sortDir]);
+  }, [
+    activeLogTab,
+    logFilterCourse,
+    logFilterStatus,
+    logFilterYear,
+    logFilterSemester,
+    logFilterWeek,
+    logSearchQuery,
+    sortColumn,
+    sortDir,
+  ]);
 
   // Pagination calculation
   const totalItems = combinedAttendanceLogs.length;
@@ -589,6 +743,118 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
     const start = (currentPage - 1) * pageSize;
     return combinedAttendanceLogs.slice(start, start + pageSize);
   }, [combinedAttendanceLogs, currentPage, pageSize]);
+
+  // Selection state for log table
+  const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
+
+  const allPaginatedLogsSelected = paginatedLogs.length > 0 && paginatedLogs.every((l) => selectedLogIds.includes(l.id));
+
+  const handleToggleSelectLog = (id: string) => {
+    setSelectedLogIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllPaginatedLogs = () => {
+    if (allPaginatedLogsSelected) {
+      setSelectedLogIds([]);
+    } else {
+      setSelectedLogIds(paginatedLogs.map((l) => l.id));
+    }
+  };
+
+  // Export attendance records to CSV
+  const handleExportCSV = () => {
+    const logsToExport = selectedLogIds.length > 0
+      ? combinedAttendanceLogs.filter((log) => selectedLogIds.includes(log.id))
+      : combinedAttendanceLogs;
+
+    if (logsToExport.length === 0) {
+      showToast('ไม่มีข้อมูลสถานะการเข้าชั้นเรียนสำหรับส่งออก');
+      return;
+    }
+
+    const headers = [
+      'ลำดับ',
+      'ประเภท',
+      'รหัสประจำตัวนักศึกษา',
+      'ชื่อ-นามสกุลผู้ใช้งาน',
+      'รหัสวิชา',
+      'ชื่อวิชา',
+      'ปีการศึกษา',
+      'ภาคเรียน',
+      'สัปดาห์ที่',
+      'สถานะการเข้าเรียน',
+      'วิธีเช็กชื่อ/ประเภทการลา',
+      'เหตุผล/บันทึก',
+      'เวลาที่บันทึก',
+    ];
+
+    const rows = logsToExport.map((log, index) => {
+      const matchedCourse = allCourses.find((c) => c.id === log.courseId);
+      const courseCode = matchedCourse ? (matchedCourse.courseCode || matchedCourse.code || '') : (log.courseId || '');
+      const courseName = matchedCourse ? (matchedCourse.courseName || matchedCourse.nameTh || '') : '';
+      const academicYear = matchedCourse ? (matchedCourse.academicYear || '') : '';
+      const semester = matchedCourse ? (matchedCourse.semester || '') : '';
+      const userType = log.logType === 'TEACHER' ? 'อาจารย์' : 'นักศึกษา';
+      const statusTh =
+        log.status === AttendanceStatus.PRESENT || log.status === 'PRESENT'
+          ? 'มาเรียน (PRESENT)'
+          : log.status === AttendanceStatus.LATE || log.status === 'LATE'
+          ? 'สาย (LATE)'
+          : log.status === AttendanceStatus.LEAVE || log.status === 'LEAVE'
+          ? 'ลา (LEAVE)'
+          : 'ขาด (ABSENT)';
+
+      const timeStr = log.timestamp
+        ? new Date(log.timestamp).toLocaleString('th-TH')
+        : log.createdAt
+        ? new Date(log.createdAt).toLocaleString('th-TH')
+        : '-';
+
+      return [
+        index + 1,
+        userType,
+        log.displayId || '',
+        log.displayName || '',
+        courseCode,
+        courseName,
+        academicYear,
+        semester,
+        log.weekNumber ? `สัปดาห์ที่ ${log.weekNumber}` : '-',
+        statusTh,
+        log.checkinMethod || log.method || 'ADMIN_OVERRIDE',
+        log.reason || log.note || '-',
+        timeStr,
+      ];
+    });
+
+    const csvContent =
+      '\uFEFF' +
+      [headers, ...rows]
+        .map((row) =>
+          row
+            .map((field) => {
+              const str = String(field ?? '').replace(/"/g, '""');
+              return `"${str}"`;
+            })
+            .join(',')
+        )
+        .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const filename = `attendance_statuses_export_${new Date().toISOString().split('T')[0]}.csv`;
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast(`ส่งออกข้อมูล CSV เรียบร้อยแล้ว (${logsToExport.length} รายการ)`);
+  };
 
   return (
     <div className="space-y-6">
@@ -1003,7 +1269,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
             isDarkMode ? 'bg-slate-900/90 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
           }`}
         >
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
+          <div className="flex flex-col gap-3.5 mb-4">
             <div>
               <div className="flex items-center space-x-2">
                 <span className="p-2 rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
@@ -1020,314 +1286,720 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
               </div>
             </div>
 
-            {/* Filter Tabs (including User Focus tab) */}
-            <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/60">
-              <button
-                onClick={() => setActiveLogTab('ALL')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center space-x-1.5 ${
-                  activeLogTab === 'ALL'
-                    ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <span>ทั้งหมด</span>
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 text-white font-mono">
-                  {studentAttendance.length + teacherAttendance.length}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setActiveLogTab('STUDENT')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center space-x-1.5 ${
-                  activeLogTab === 'STUDENT'
-                    ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <GraduationCap className="w-3.5 h-3.5" />
-                <span>นักศึกษา</span>
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 dark:bg-slate-700 font-mono">
-                  {studentAttendance.length}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setActiveLogTab('TEACHER')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center space-x-1.5 ${
-                  activeLogTab === 'TEACHER'
-                    ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <UserCheck className="w-3.5 h-3.5" />
-                <span>อาจารย์</span>
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 dark:bg-slate-700 font-mono">
-                  {teacherAttendance.length}
-                </span>
-              </button>
-
-              {/* Dynamic Focused User Tab */}
-              {overrideSelectedUser && (
+            {/* Filter Tabs & Export CSV Button */}
+            <div className="flex flex-wrap items-center justify-start gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/60">
                 <button
-                  onClick={() => setActiveLogTab('FOCUS')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center space-x-1.5 border ${
-                    activeLogTab === 'FOCUS'
-                      ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
-                      : 'bg-purple-500/10 text-purple-600 dark:text-purple-300 border-purple-500/30 hover:bg-purple-500/20'
+                  onClick={() => setActiveLogTab('ALL')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center space-x-1.5 ${
+                    activeLogTab === 'ALL'
+                      ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
-                  <Target className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-                  <span>
-                    {overrideSelectedUser.title || ''}
-                    {overrideSelectedUser.firstNameTh} {overrideSelectedUser.lastNameTh}
+                  <span>ทั้งหมด</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 text-white font-mono">
+                    {studentAttendance.length + teacherAttendance.length}
                   </span>
                 </button>
-              )}
+
+                <button
+                  onClick={() => setActiveLogTab('STUDENT')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center space-x-1.5 ${
+                    activeLogTab === 'STUDENT'
+                      ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <GraduationCap className="w-3.5 h-3.5" />
+                  <span>นักศึกษา</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 dark:bg-slate-700 font-mono">
+                    {studentAttendance.length}
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => setActiveLogTab('TEACHER')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center space-x-1.5 ${
+                    activeLogTab === 'TEACHER'
+                      ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>อาจารย์</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 dark:bg-slate-700 font-mono">
+                    {teacherAttendance.length}
+                  </span>
+                </button>
+
+                {/* Dynamic Focused User Tab */}
+                {overrideSelectedUser && (
+                  <button
+                    onClick={() => setActiveLogTab('FOCUS')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center space-x-1.5 border ${
+                      activeLogTab === 'FOCUS'
+                        ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
+                        : 'bg-purple-500/10 text-purple-600 dark:text-purple-300 border-purple-500/30 hover:bg-purple-500/20'
+                    }`}
+                  >
+                    <Target className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                    <span>
+                      {overrideSelectedUser.title || ''}
+                      {overrideSelectedUser.firstNameTh} {overrideSelectedUser.lastNameTh}
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                className="px-3.5 py-2 rounded-2xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 active:scale-95 transition cursor-pointer flex items-center space-x-1.5 border border-emerald-500/30 shrink-0"
+                title="ส่งออกข้อมูลตารางนี้เป็นไฟล์ CSV"
+              >
+                <Download className="w-4 h-4" />
+                <span>ส่งออก CSV</span>
+              </button>
             </div>
           </div>
 
           {/* Filters Bar: Search & Select Dropdowns */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
-            {/* Search Box */}
-            <div className="relative">
-              <Search className={`w-4 h-4 absolute left-3 top-2.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
-              <input
-                type="text"
-                placeholder="ค้นชื่อ, รหัสนักศึกษา, วิชา, เหตุผล..."
-                value={logSearchQuery}
-                onChange={(e) => setLogSearchQuery(e.target.value)}
-                className={`w-full pl-9 pr-3 py-2 rounded-xl text-xs font-medium border transition ${
-                  isDarkMode
-                    ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500'
-                    : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-400'
-                }`}
-              />
+          <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
+              {/* Search Box */}
+              <div className="relative">
+                <Search className={`w-4 h-4 absolute left-3 top-2.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
+                <input
+                  type="text"
+                  placeholder="ค้นชื่อ, รหัสนักศึกษา, วิชา..."
+                  value={logSearchQuery}
+                  onChange={(e) => setLogSearchQuery(e.target.value)}
+                  className={`w-full pl-9 pr-3 py-2 rounded-xl text-xs font-medium border transition ${
+                    isDarkMode
+                      ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500'
+                      : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-400'
+                  }`}
+                />
+              </div>
+
+              {/* Academic Year Filter */}
+              <div className="relative">
+                <select
+                  value={logFilterYear}
+                  onChange={(e) => setLogFilterYear(e.target.value)}
+                  className={`w-full px-3 py-2 rounded-xl text-xs font-bold border transition ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  <option value="ALL">ปีการศึกษาทั้งหมด</option>
+                  {availableYears.map((yr) => (
+                    <option key={yr} value={yr}>
+                      ปีการศึกษา {yr}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Semester Filter */}
+              <div className="relative">
+                <select
+                  value={logFilterSemester}
+                  onChange={(e) => setLogFilterSemester(e.target.value)}
+                  className={`w-full px-3 py-2 rounded-xl text-xs font-bold border transition ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  <option value="ALL">ภาคการศึกษาทั้งหมด</option>
+                  <option value="1">ภาคการศึกษาที่ 1</option>
+                  <option value="2">ภาคการศึกษาที่ 2</option>
+                  <option value="3">ภาคการศึกษาที่ 3 (ฤดูร้อน)</option>
+                </select>
+              </div>
+
+              {/* Week Number Filter */}
+              <div className="relative">
+                <select
+                  value={logFilterWeek}
+                  onChange={(e) => setLogFilterWeek(e.target.value)}
+                  className={`w-full px-3 py-2 rounded-xl text-xs font-bold border transition ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  <option value="ALL">สัปดาห์ทั้งหมด</option>
+                  {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
+                    <option key={w} value={w}>
+                      สัปดาห์ที่ {w}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Course Filter */}
+              <div className="relative">
+                <select
+                  value={logFilterCourse}
+                  onChange={(e) => setLogFilterCourse(e.target.value)}
+                  className={`w-full px-3 py-2 rounded-xl text-xs font-bold border transition ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  <option value="ALL">วิชาทั้งหมด ({allCourses.length})</option>
+                  {allCourses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.courseCode || c.code} - {c.courseName || c.nameTh}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status Filter */}
+              <div className="relative">
+                <select
+                  value={logFilterStatus}
+                  onChange={(e) => setLogFilterStatus(e.target.value)}
+                  className={`w-full px-3 py-2 rounded-xl text-xs font-bold border transition ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  <option value="ALL">สถานะทั้งหมด</option>
+                  <option value="PRESENT">🟢 มาเรียน (PRESENT)</option>
+                  <option value="LATE">🟡 สาย (LATE)</option>
+                  <option value="LEAVE">🔵 ลา (LEAVE)</option>
+                  <option value="ABSENT">🔴 ขาด (ABSENT)</option>
+                </select>
+              </div>
             </div>
 
-            {/* Course Filter */}
-            <div className="relative">
-              <select
-                value={logFilterCourse}
-                onChange={(e) => setLogFilterCourse(e.target.value)}
-                className={`w-full px-3 py-2 rounded-xl text-xs font-bold border transition ${
-                  isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                }`}
-              >
-                <option value="ALL">วิชาทั้งหมด ({allCourses.length})</option>
-                {allCourses.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.courseCode || c.code} - {c.courseName || c.nameTh}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Status Filter */}
-            <div className="relative">
-              <select
-                value={logFilterStatus}
-                onChange={(e) => setLogFilterStatus(e.target.value)}
-                className={`w-full px-3 py-2 rounded-xl text-xs font-bold border transition ${
-                  isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                }`}
-              >
-                <option value="ALL">สถานะทั้งหมด</option>
-                <option value="PRESENT">🟢 มาเรียน (PRESENT)</option>
-                <option value="LATE">🟡 สาย (LATE)</option>
-                <option value="LEAVE">🔵 ลา (LEAVE)</option>
-                <option value="ABSENT">🔴 ขาด (ABSENT)</option>
-              </select>
-            </div>
-
-            {/* Clear Filters / Result Count */}
-            <div className="flex items-center justify-between sm:justify-end space-x-2">
+            {/* Clear Filters / Result Count / Column Settings / Export CSV */}
+            <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 pt-1">
               <span className="text-xs font-bold text-slate-500">
                 พบ <span className="text-sky-600 dark:text-sky-400 font-extrabold">{totalItems}</span> รายการ
               </span>
-              {(logSearchQuery || logFilterCourse !== 'ALL' || logFilterStatus !== 'ALL') && (
+              {(logSearchQuery ||
+                logFilterCourse !== 'ALL' ||
+                logFilterStatus !== 'ALL' ||
+                logFilterYear !== 'ALL' ||
+                logFilterSemester !== 'ALL' ||
+                logFilterWeek !== 'ALL') && (
                 <button
                   onClick={() => {
                     setLogSearchQuery('');
                     setLogFilterCourse('ALL');
                     setLogFilterStatus('ALL');
+                    setLogFilterYear('ALL');
+                    setLogFilterSemester('ALL');
+                    setLogFilterWeek('ALL');
                   }}
                   className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 text-slate-700 dark:text-slate-300 transition cursor-pointer"
                 >
                   ล้างตัวกรอง
                 </button>
               )}
+
+              {/* View Display Mode Selector */}
+              <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-800/90 p-1 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                <button
+                  type="button"
+                  onClick={() => setViewDisplayMode('COMPACT')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition cursor-pointer flex items-center space-x-1 ${
+                    viewDisplayMode === 'COMPACT'
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="โหมดตารางกะทัดรัด (พอดีหน้าจอ ไม่ต้อง scrolling)"
+                >
+                  <Table className="w-3.5 h-3.5" />
+                  <span>ตารางกะทัดรัด</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewDisplayMode('CARDS')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition cursor-pointer flex items-center space-x-1 ${
+                    viewDisplayMode === 'CARDS'
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="โหมดการ์ด (Card View - เหมาะสำหรับมือถือ/แท็บเล็ต)"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>การ์ด</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewDisplayMode('FULL')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition cursor-pointer flex items-center space-x-1 ${
+                    viewDisplayMode === 'FULL'
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="โหมดตารางเต็มรูปแบบ (มี Scrollbar และปรับขนาดคอลัมน์ได้)"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>ตารางเต็ม</span>
+                </button>
+              </div>
+
+              {/* Column Settings Button & Popover */}
+              {viewDisplayMode === 'FULL' && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowColPicker(!showColPicker)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center space-x-1 border ${
+                      showColPicker
+                        ? 'bg-sky-600 text-white border-sky-600 shadow-md'
+                        : isDarkMode
+                        ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 shadow-sm'
+                    }`}
+                    title="เลือกคอลัมน์ที่จะแสดง"
+                  >
+                    <Sliders className="w-3 h-3" />
+                    <span>ตั้งค่าคอลัมน์</span>
+                  </button>
+
+                  {showColPicker && (
+                    <div
+                      className={`absolute right-0 mt-2 w-64 p-3 rounded-2xl shadow-xl border z-30 transition-all ${
+                        isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800 mb-2">
+                        <span className="text-xs font-black flex items-center space-x-1.5">
+                          <Sliders className="w-3.5 h-3.5 text-sky-500" />
+                          <span>แสดง/ซ่อน คอลัมน์</span>
+                        </span>
+                        <button
+                          onClick={() => setShowColPicker(false)}
+                          className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
+                        {COLUMN_CONFIG.map((col) => (
+                          <label
+                            key={col.key}
+                            className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 cursor-pointer text-xs font-bold transition select-none"
+                          >
+                            <span className="text-slate-700 dark:text-slate-300">{col.label}</span>
+                            <input
+                              type="checkbox"
+                              checked={!!visibleCols[col.key]}
+                              onChange={(e) =>
+                                setVisibleCols((prev) => ({
+                                  ...prev,
+                                  [col.key]: e.target.checked,
+                                }))
+                              }
+                              className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                            />
+                          </label>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2.5 border-t border-slate-200 dark:border-slate-800 mt-2 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setVisibleCols({
+                              select: true,
+                              index: true,
+                              studentId: true,
+                              user: true,
+                              course: true,
+                              term: true,
+                              week: true,
+                              status: true,
+                              method: true,
+                              time: true,
+                              actions: true,
+                            })
+                          }
+                          className="text-sky-600 dark:text-sky-400 hover:underline cursor-pointer"
+                        >
+                          แสดงทั้งหมด
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowColPicker(false)}
+                          className="px-2.5 py-1 rounded-lg bg-sky-600 text-white hover:bg-sky-500 transition cursor-pointer font-bold"
+                        >
+                          ตกลง
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition cursor-pointer flex items-center space-x-1"
+                title="ส่งออกข้อมูลเป็น CSV"
+              >
+                <Download className="w-3 h-3" />
+                <span>CSV</span>
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Table Display */}
+        {/* Bulk Action Toolbar */}
+        {selectedLogIds.length > 0 && (
+          <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center space-x-2 text-xs font-extrabold text-sky-600 dark:text-sky-400">
+              <CheckSquare className="w-4 h-4" />
+              <span>เลือกไว้แล้ว {selectedLogIds.length} รายการ</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={handleExportCSV}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition flex items-center space-x-1.5 cursor-pointer shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>ส่งออกรายการที่เลือก (CSV)</span>
+              </button>
+              {setDeleteConfirmItem && (
+                <button
+                  onClick={() => {
+                    setDeleteConfirmItem({
+                      type: 'bulk_attendance_logs',
+                      title: `ลบรายการเช็กชื่อ/ลาแบบกลุ่ม (${selectedLogIds.length} รายการ)`,
+                      subtitle: `คุณกำลังจะลบข้อมูลการเช็กชื่อและประวัติการลาจำนวน ${selectedLogIds.length} รายการออกจากระบบถาวร`,
+                      action: async () => {
+                        for (const id of selectedLogIds) {
+                          const matched = combinedAttendanceLogs.find((l) => l.id === id);
+                          if (matched) {
+                            if (matched.isLeaveRequestRecord) {
+                              const realId = matched.id.startsWith('leave_') ? matched.id.replace('leave_', '') : matched.id;
+                              await deleteAdminDocument('leaveRequests', realId);
+                            } else if (matched.logType === 'TEACHER') {
+                              await deleteAdminDocument('teacherAttendanceRecords', matched.id);
+                            } else {
+                              await deleteAdminDocument('attendanceRecords', matched.id);
+                            }
+                          }
+                        }
+                        showToast(`ลบประวัติการเข้าเรียน/ลาจำนวน ${selectedLogIds.length} รายการเรียบร้อยแล้ว`);
+                        setSelectedLogIds([]);
+                        await loadOverrideTabData(true);
+                        onRefreshOverview();
+                      },
+                    });
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white bg-rose-600 hover:bg-rose-500 transition flex items-center space-x-1.5 cursor-pointer shadow-sm"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>ลบรายการที่เลือก ({selectedLogIds.length})</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Table / Card Display */}
         <div
           className={`rounded-3xl border overflow-hidden shadow-xl ${
             isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
           }`}
         >
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[850px] text-left text-xs border-collapse">
-              <thead>
-                <tr
-                  className={`border-b select-none ${
-                    isDarkMode ? 'bg-slate-800/90 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-800 font-extrabold'
-                  }`}
-                >
-                  {/* Column 1: User */}
-                  <th
-                    onClick={() => handleSort('user')}
-                    className="p-3.5 font-extrabold uppercase cursor-pointer hover:bg-slate-700/20 transition"
+          {/* 1. COMPACT MODE (Default: Fits Screen, No Horizontal Scrolling) */}
+          {viewDisplayMode === 'COMPACT' && (
+            <div className="w-full overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr
+                    className={`border-b select-none ${
+                      isDarkMode ? 'bg-slate-800/90 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-800 font-extrabold'
+                    }`}
                   >
-                    <div className="flex items-center space-x-1.5">
-                      <span>ผู้ใช้งาน</span>
-                      {sortColumn === 'user' ? (
-                        sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500" />
-                      ) : (
-                        <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Column 2: Course / Session */}
-                  <th
-                    onClick={() => handleSort('course')}
-                    className="p-3.5 font-extrabold uppercase cursor-pointer hover:bg-slate-700/20 transition"
-                  >
-                    <div className="flex items-center space-x-1.5">
-                      <span>วิชา / สัปดาห์</span>
-                      {sortColumn === 'course' ? (
-                        sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500" />
-                      ) : (
-                        <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Column 3: Status */}
-                  <th
-                    onClick={() => handleSort('status')}
-                    className="p-3.5 font-extrabold uppercase cursor-pointer hover:bg-slate-700/20 transition"
-                  >
-                    <div className="flex items-center space-x-1.5">
-                      <span>สถานะเข้าเรียน</span>
-                      {sortColumn === 'status' ? (
-                        sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500" />
-                      ) : (
-                        <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Column 4: Checkin Method & Reason */}
-                  <th
-                    onClick={() => handleSort('method')}
-                    className="p-3.5 font-extrabold uppercase cursor-pointer hover:bg-slate-700/20 transition"
-                  >
-                    <div className="flex items-center space-x-1.5">
-                      <span>วิธีเช็กชื่อ / เหตุผล</span>
-                      {sortColumn === 'method' ? (
-                        sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500" />
-                      ) : (
-                        <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Column 5: Timestamp */}
-                  <th
-                    onClick={() => handleSort('time')}
-                    className="p-3.5 font-extrabold uppercase cursor-pointer hover:bg-slate-700/20 transition"
-                  >
-                    <div className="flex items-center space-x-1.5">
-                      <span>เวลาที่บันทึก</span>
-                      {sortColumn === 'time' ? (
-                        sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500" />
-                      ) : (
-                        <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Column 6: Actions */}
-                  <th className="p-3.5 font-extrabold uppercase text-center">
-                    จัดการ
-                  </th>
-                </tr>
-              </thead>
-              <tbody className={`divide-y ${isDarkMode ? 'divide-slate-800/60' : 'divide-slate-100'}`}>
-                {paginatedLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="p-12 text-center text-slate-400 font-semibold">
-                      <div className="flex flex-col items-center justify-center space-y-2">
-                        <UserIcon className="w-8 h-8 text-slate-500 opacity-40" />
-                        <p>ไม่พบข้อมูลสถานะการเข้าชั้นเรียนตามเงื่อนไขที่กำหนด</p>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedLogs.map((log) => {
-                    const matchedCourse = allCourses.find((c) => c.id === log.courseId);
-                    const isFocused =
-                      overrideSelectedUser &&
-                      (log.targetUserId === overrideSelectedUser.id || log.displayId === overrideSelectedUser.universityId);
-
-                    return (
-                      <tr
-                        key={log.id}
-                        className={`transition ${
-                          isFocused
-                            ? isDarkMode
-                              ? 'bg-purple-950/30 hover:bg-purple-950/40'
-                              : 'bg-purple-50/70 hover:bg-purple-100/80'
-                            : isDarkMode
-                            ? 'hover:bg-slate-800/40'
-                            : 'hover:bg-slate-50'
-                        }`}
+                    <th className="p-3 text-center w-10">
+                      <button
+                        onClick={handleSelectAllPaginatedLogs}
+                        className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
                       >
-                        {/* User info */}
-                        <td className="p-3.5">
-                          <div className="flex items-center space-x-2.5">
-                            <div
-                              className={`w-8 h-8 rounded-xl flex items-center justify-center text-white font-bold text-xs shrink-0 ${
-                                log.logType === 'TEACHER' ? 'bg-amber-500' : 'bg-sky-600'
+                        {allPaginatedLogsSelected ? (
+                          <CheckSquare className="w-4 h-4 text-sky-500" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-400" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="p-3 text-center text-slate-400 w-10">#</th>
+                    <th className="p-3 font-extrabold uppercase">
+                      <div onClick={() => handleSort('user')} className="flex items-center space-x-1 cursor-pointer">
+                        <span>ผู้ใช้งาน / รหัสประจำตัว</span>
+                        {sortColumn === 'user' || sortColumn === 'studentId' ? (
+                          sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                        )}
+                      </div>
+                    </th>
+                    <th className="p-3 font-extrabold uppercase">
+                      <div onClick={() => handleSort('course')} className="flex items-center space-x-1 cursor-pointer">
+                        <span>วิชา / สัปดาห์ / ภาคเรียน</span>
+                        {sortColumn === 'course' ? (
+                          sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                        )}
+                      </div>
+                    </th>
+                    <th className="p-3 font-extrabold uppercase text-center">
+                      <div onClick={() => handleSort('status')} className="flex items-center justify-center space-x-1 cursor-pointer">
+                        <span>สถานะ</span>
+                        {sortColumn === 'status' ? (
+                          sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                        )}
+                      </div>
+                    </th>
+                    <th className="p-3 font-extrabold uppercase">
+                      <div onClick={() => handleSort('time')} className="flex items-center space-x-1 cursor-pointer">
+                        <span>วิธีเช็กชื่อ / เวลาที่บันทึก</span>
+                        {sortColumn === 'time' ? (
+                          sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                        )}
+                      </div>
+                    </th>
+                    <th className="p-3 font-extrabold uppercase text-center w-24">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${isDarkMode ? 'divide-slate-800/60' : 'divide-slate-100'}`}>
+                  {paginatedLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-12 text-center text-slate-400 font-semibold">
+                        <div className="flex flex-col items-center justify-center space-y-2">
+                          <UserIcon className="w-8 h-8 text-slate-500 opacity-40" />
+                          <p>ไม่พบข้อมูลสถานะการเข้าชั้นเรียนตามเงื่อนไขที่กำหนด</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedLogs.map((log, idx) => {
+                      const matchedCourse = allCourses.find((c) => c.id === log.courseId);
+                      const isFocused =
+                        overrideSelectedUser &&
+                        (log.targetUserId === overrideSelectedUser.id || log.displayId === overrideSelectedUser.universityId);
+                      const isSelected = selectedLogIds.includes(log.id);
+
+                      return (
+                        <tr
+                          key={log.id}
+                          className={`transition ${
+                            isSelected
+                              ? isDarkMode ? 'bg-sky-950/30 hover:bg-sky-950/40' : 'bg-sky-50 hover:bg-sky-100/80'
+                              : isFocused
+                              ? isDarkMode
+                                ? 'bg-purple-950/30 hover:bg-purple-950/40'
+                                : 'bg-purple-50/70 hover:bg-purple-100/80'
+                              : isDarkMode
+                              ? 'hover:bg-slate-800/40'
+                              : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          {/* Checkbox */}
+                          <td className="p-3 text-center">
+                            <button
+                              onClick={() => handleToggleSelectLog(log.id)}
+                              className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                            >
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-sky-500" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-400" />
+                              )}
+                            </button>
+                          </td>
+
+                          {/* Index */}
+                          <td className="p-3 text-center font-mono font-bold text-slate-400 text-xs">
+                            {(currentPage - 1) * (pageSize === -1 ? 0 : pageSize) + idx + 1}
+                          </td>
+
+                          {/* Merged User Name & University ID */}
+                          <td className="p-3">
+                            <div className="flex items-center space-x-1.5 flex-wrap gap-y-0.5">
+                              <span className={`font-extrabold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{log.displayName}</span>
+                              <span
+                                className={`px-1.5 py-0.2 rounded text-[9px] font-black ${
+                                  log.logType === 'TEACHER'
+                                    ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                                    : 'bg-sky-500/20 text-sky-600 dark:text-sky-400'
+                                }`}
+                              >
+                                {log.logType === 'TEACHER' ? 'อาจารย์' : 'นักศึกษา'}
+                              </span>
+                            </div>
+                            <div className="font-mono text-[11px] font-bold text-sky-600 dark:text-sky-400">
+                              {log.displayId || '-'}
+                            </div>
+                          </td>
+
+                          {/* Merged Course, Week & Term */}
+                          <td className="p-3">
+                            <div className="font-extrabold text-purple-600 dark:text-purple-400 truncate max-w-[220px]" title={matchedCourse ? `${matchedCourse.courseCode || matchedCourse.code} - ${matchedCourse.courseName || matchedCourse.nameTh}` : log.courseId}>
+                              {matchedCourse ? `${matchedCourse.courseCode || matchedCourse.code} - ${matchedCourse.courseName || matchedCourse.nameTh}` : log.courseId}
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                              {log.weekNumber ? `สัปดาห์ที่ ${log.weekNumber}` : 'สัปดาห์ -'} {matchedCourse ? `(ปี ${matchedCourse.academicYear} / ภาค ${matchedCourse.semester})` : ''}
+                            </div>
+                          </td>
+
+                          {/* Compact Status Badge */}
+                          <td className="p-3 text-center">
+                            <span
+                              className={`inline-flex items-center px-2.5 py-1 rounded-xl text-[11px] font-black border whitespace-nowrap ${
+                                log.status === AttendanceStatus.PRESENT || log.status === 'PRESENT'
+                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                  : log.status === AttendanceStatus.LATE || log.status === 'LATE'
+                                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                  : log.status === AttendanceStatus.LEAVE || log.status === 'LEAVE'
+                                  ? 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30'
+                                  : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30'
                               }`}
                             >
-                              {log.logType === 'TEACHER' ? <UserCheck className="w-4 h-4" /> : <GraduationCap className="w-4 h-4" />}
+                              {log.status === AttendanceStatus.PRESENT || log.status === 'PRESENT'
+                                ? '🟢 มาเรียน'
+                                : log.status === AttendanceStatus.LATE || log.status === 'LATE'
+                                ? '🟡 สาย'
+                                : log.status === AttendanceStatus.LEAVE || log.status === 'LEAVE'
+                                ? '🔵 ลา'
+                                : '🔴 ขาด'}
+                            </span>
+                          </td>
+
+                          {/* Merged Method & Timestamp */}
+                          <td className="p-3">
+                            <div className="font-mono text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate max-w-[180px]" title={log.checkinMethod || log.method}>
+                              {log.checkinMethod || log.method || 'ADMIN_OVERRIDE'}
                             </div>
-                            <div>
-                              <div className="font-extrabold flex items-center space-x-1.5">
-                                <span className={isDarkMode ? 'text-white' : 'text-slate-900'}>{log.displayName}</span>
-                                <span
-                                  className={`px-1.5 py-0.2 rounded text-[9px] font-black ${
-                                    log.logType === 'TEACHER'
-                                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
-                                      : 'bg-sky-500/20 text-sky-600 dark:text-sky-400'
-                                  }`}
-                                >
-                                  {log.logType === 'TEACHER' ? 'อาจารย์' : 'นักศึกษา'}
-                                </span>
+                            <div className="font-mono text-[10px] text-slate-400">
+                              {log.timestamp ? new Date(log.timestamp).toLocaleString('th-TH') : log.createdAt ? new Date(log.createdAt).toLocaleString('th-TH') : '-'}
+                            </div>
+                            {(log.reason || log.note) && (
+                              <div className="text-[10px] text-slate-400 truncate max-w-[180px]" title={log.reason || log.note}>
+                                {log.reason || log.note}
                               </div>
-                              <div className="text-[11px] font-mono text-slate-400">{log.displayId}</div>
+                            )}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center space-x-1">
+                              <button
+                                onClick={() => handleOpenEdit(log)}
+                                title="แก้ไข"
+                                className="p-1.5 rounded-lg font-bold text-xs bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/20 transition flex items-center space-x-1 cursor-pointer active:scale-95"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => setDeletingLog(log)}
+                                title="ลบ"
+                                className="p-1.5 rounded-lg font-bold text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 transition flex items-center space-x-1 cursor-pointer active:scale-95"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* 2. CARDS MODE (Card View for Mobile/Tablet or Visual Preference) */}
+          {viewDisplayMode === 'CARDS' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 p-4">
+              {paginatedLogs.length === 0 ? (
+                <div className="col-span-full p-12 text-center text-slate-400 font-semibold">
+                  <UserIcon className="w-8 h-8 text-slate-500 opacity-40 mx-auto mb-2" />
+                  <p>ไม่พบข้อมูลสถานะการเข้าชั้นเรียนตามเงื่อนไขที่กำหนด</p>
+                </div>
+              ) : (
+                paginatedLogs.map((log) => {
+                  const matchedCourse = allCourses.find((c) => c.id === log.courseId);
+                  const isSelected = selectedLogIds.includes(log.id);
+
+                  return (
+                    <div
+                      key={log.id}
+                      className={`p-4 rounded-2xl border transition-all flex flex-col justify-between space-y-3 ${
+                        isSelected
+                          ? isDarkMode
+                            ? 'bg-sky-950/40 border-sky-500/50 shadow-md'
+                            : 'bg-sky-50/80 border-sky-400 shadow-sm'
+                          : isDarkMode
+                          ? 'bg-slate-800/60 border-slate-700/80 hover:border-slate-600'
+                          : 'bg-slate-50/80 border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      {/* Card Header */}
+                      <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-700/60">
+                        <div className="flex items-start space-x-2">
+                          <button
+                            onClick={() => handleToggleSelectLog(log.id)}
+                            className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer mt-0.5"
+                          >
+                            {isSelected ? (
+                              <CheckSquare className="w-4 h-4 text-sky-500" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-400" />
+                            )}
+                          </button>
+                          <div>
+                            <div className="flex items-center space-x-1.5 flex-wrap gap-y-0.5">
+                              <span className="font-extrabold text-sm text-slate-900 dark:text-white">{log.displayName}</span>
+                              <span
+                                className={`px-1.5 py-0.2 rounded text-[9px] font-black ${
+                                  log.logType === 'TEACHER'
+                                    ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                                    : 'bg-sky-500/20 text-sky-600 dark:text-sky-400'
+                                }`}
+                              >
+                                {log.logType === 'TEACHER' ? 'อาจารย์' : 'นักศึกษา'}
+                              </span>
+                            </div>
+                            <div className="font-mono text-xs font-bold text-sky-600 dark:text-sky-400">
+                              {log.displayId || '-'}
                             </div>
                           </div>
-                        </td>
+                        </div>
+                        <div className="flex items-center space-x-1 shrink-0">
+                          <button
+                            onClick={() => handleOpenEdit(log)}
+                            title="แก้ไข"
+                            className="p-1.5 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/20 transition cursor-pointer"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setDeletingLog(log)}
+                            title="ลบ"
+                            className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 transition cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
 
-                        {/* Course & Session */}
-                        <td className="p-3.5">
-                          <div className="font-bold text-purple-600 dark:text-purple-400">
-                            {matchedCourse ? matchedCourse.courseCode || matchedCourse.code : log.courseId}
-                          </div>
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                            {matchedCourse ? matchedCourse.courseName || matchedCourse.nameTh : ''}
-                            {log.weekNumber ? ` (สัปดาห์ที่ ${log.weekNumber})` : ''}
-                          </div>
-                        </td>
-
-                        {/* Status badge */}
-                        <td className="p-3.5">
+                      {/* Card Details */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
                           <span
-                            className={`inline-flex items-center px-2.5 py-1 rounded-xl text-[11px] font-black border ${
+                            className={`inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-black border ${
                               log.status === AttendanceStatus.PRESENT || log.status === 'PRESENT'
                                 ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
                                 : log.status === AttendanceStatus.LATE || log.status === 'LATE'
@@ -1338,60 +2010,498 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
                             }`}
                           >
                             {log.status === AttendanceStatus.PRESENT || log.status === 'PRESENT'
-                              ? '🟢 มาเรียน (PRESENT)'
+                              ? '🟢 มาเรียน'
                               : log.status === AttendanceStatus.LATE || log.status === 'LATE'
-                              ? '🟡 สาย (LATE)'
+                              ? '🟡 สาย'
                               : log.status === AttendanceStatus.LEAVE || log.status === 'LEAVE'
-                              ? '🔵 ลา (LEAVE)'
-                              : '🔴 ขาด (ABSENT)'}
+                              ? '🔵 ลา'
+                              : '🔴 ขาด'}
                           </span>
-                        </td>
+                          <span className="text-xs font-extrabold text-slate-700 dark:text-slate-300">
+                            {log.weekNumber ? `สัปดาห์ที่ ${log.weekNumber}` : '-'}
+                          </span>
+                        </div>
 
-                        {/* Method & Reason */}
-                        <td className="p-3.5 text-slate-600 dark:text-slate-300">
-                          <div className="font-mono text-[11px] font-bold">
-                            {log.checkinMethod || log.method || 'ADMIN_OVERRIDE'}
+                        <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 text-xs space-y-0.5 border border-slate-200/60 dark:border-slate-700/50">
+                          <div className="font-extrabold text-purple-600 dark:text-purple-400">
+                            {matchedCourse ? `${matchedCourse.courseCode || matchedCourse.code} - ${matchedCourse.courseName || matchedCourse.nameTh}` : log.courseId}
                           </div>
-                          {(log.reason || log.note) && (
-                            <div className="text-[10px] text-slate-400 truncate max-w-xs" title={log.reason || log.note}>
-                              {log.reason || log.note}
-                            </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            ปีการศึกษา {matchedCourse?.academicYear || '-'} / ภาคเรียนที่ {matchedCourse?.semester || '-'}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 pt-1">
+                          <span className="font-mono font-bold truncate max-w-[150px]">{log.checkinMethod || log.method || 'ADMIN'}</span>
+                          <span className="font-mono">
+                            {log.timestamp ? new Date(log.timestamp).toLocaleString('th-TH') : '-'}
+                          </span>
+                        </div>
+
+                        {(log.reason || log.note) && (
+                          <div className="text-[11px] text-slate-600 dark:text-slate-300 italic bg-slate-200/50 dark:bg-slate-800/50 p-2 rounded-lg">
+                            "{log.reason || log.note}"
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* 3. FULL MODE (Original 11-column resizable table with horizontal scroll) */}
+          {viewDisplayMode === 'FULL' && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse table-fixed">
+                <colgroup>
+                  {visibleCols.select && <col style={{ width: `${colWidths.select}px` }} />}
+                  {visibleCols.index && <col style={{ width: `${colWidths.index}px` }} />}
+                  {visibleCols.studentId && <col style={{ width: `${colWidths.studentId}px` }} />}
+                  {visibleCols.user && <col style={{ width: `${colWidths.user}px` }} />}
+                  {visibleCols.course && <col style={{ width: `${colWidths.course}px` }} />}
+                  {visibleCols.term && <col style={{ width: `${colWidths.term}px` }} />}
+                  {visibleCols.week && <col style={{ width: `${colWidths.week}px` }} />}
+                  {visibleCols.status && <col style={{ width: `${colWidths.status}px` }} />}
+                  {visibleCols.method && <col style={{ width: `${colWidths.method}px` }} />}
+                  {visibleCols.time && <col style={{ width: `${colWidths.time}px` }} />}
+                  {visibleCols.actions && <col style={{ width: `${colWidths.actions}px` }} />}
+                </colgroup>
+                <thead>
+                  <tr
+                    className={`border-b select-none ${
+                      isDarkMode ? 'bg-slate-800/90 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-800 font-extrabold'
+                    }`}
+                  >
+                    {/* Bulk Select Checkbox Header */}
+                    {visibleCols.select && (
+                      <th className="p-3 text-center relative group">
+                        <button
+                          onClick={handleSelectAllPaginatedLogs}
+                          className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                        >
+                          {allPaginatedLogsSelected ? (
+                            <CheckSquare className="w-4 h-4 text-sky-500" />
+                          ) : (
+                            <Square className="w-4 h-4 text-slate-400" />
                           )}
-                        </td>
+                        </button>
+                        <div
+                          onMouseDown={(e) => handleMouseDownResize('select', e)}
+                          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                          title="ลากเพื่อปรับขนาดคอลัมน์"
+                        >
+                          <div className="w-0.5 h-3.5 bg-slate-400/40 group-hover:bg-sky-400" />
+                        </div>
+                      </th>
+                    )}
 
-                        {/* Time */}
-                        <td className="p-3.5 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                          {log.timestamp ? new Date(log.timestamp).toLocaleString('th-TH') : log.createdAt ? new Date(log.createdAt).toLocaleString('th-TH') : '-'}
-                        </td>
+                    {/* Row Number Header */}
+                    {visibleCols.index && (
+                      <th className="p-3 text-center font-extrabold uppercase text-slate-400 relative group">
+                        #
+                        <div
+                          onMouseDown={(e) => handleMouseDownResize('index', e)}
+                          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                          title="ลากเพื่อปรับขนาดคอลัมน์"
+                        >
+                          <div className="w-0.5 h-3.5 bg-slate-400/40 group-hover:bg-sky-400" />
+                        </div>
+                      </th>
+                    )}
 
-                        {/* Actions */}
-                        <td className="p-3.5 text-center">
-                          <div className="flex items-center justify-center space-x-1.5">
-                            <button
-                              onClick={() => handleOpenEdit(log)}
-                              title="แก้ไข"
-                              className="p-1.5 rounded-lg font-bold text-xs bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/20 transition flex items-center space-x-1 cursor-pointer active:scale-95"
-                            >
-                              <Edit className="w-3.5 h-3.5" />
-                              <span className="hidden sm:inline">แก้ไข</span>
-                            </button>
-                            <button
-                              onClick={() => setDeletingLog(log)}
-                              title="ลบ"
-                              className="p-1.5 rounded-lg font-bold text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 transition flex items-center space-x-1 cursor-pointer active:scale-95"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span className="hidden sm:inline">ลบ</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                    {/* Column 1: Student ID */}
+                    {visibleCols.studentId && (
+                      <th className="p-2.5 font-extrabold uppercase relative group">
+                        <div
+                          onClick={() => handleSort('studentId')}
+                          className="flex items-center space-x-1 cursor-pointer hover:bg-slate-700/20 transition p-1 rounded overflow-hidden"
+                        >
+                          <span className="truncate">รหัสประจำตัว</span>
+                          {sortColumn === 'studentId' ? (
+                            sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                          )}
+                        </div>
+                        <div
+                          onMouseDown={(e) => handleMouseDownResize('studentId', e)}
+                          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                          title="ลากเพื่อปรับขนาดคอลัมน์"
+                        >
+                          <div className="w-0.5 h-3.5 bg-slate-400/40 group-hover:bg-sky-400" />
+                        </div>
+                      </th>
+                    )}
+
+                    {/* Column 2: User Name */}
+                    {visibleCols.user && (
+                      <th className="p-2.5 font-extrabold uppercase relative group">
+                        <div
+                          onClick={() => handleSort('user')}
+                          className="flex items-center space-x-1 cursor-pointer hover:bg-slate-700/20 transition p-1 rounded overflow-hidden"
+                        >
+                          <span className="truncate">ผู้ใช้งาน</span>
+                          {sortColumn === 'user' ? (
+                            sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                          )}
+                        </div>
+                        <div
+                          onMouseDown={(e) => handleMouseDownResize('user', e)}
+                          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                          title="ลากเพื่อปรับขนาดคอลัมน์"
+                        >
+                          <div className="w-0.5 h-3.5 bg-slate-400/40 group-hover:bg-sky-400" />
+                        </div>
+                      </th>
+                    )}
+
+                    {/* Column 3: Course */}
+                    {visibleCols.course && (
+                      <th className="p-2.5 font-extrabold uppercase relative group">
+                        <div
+                          onClick={() => handleSort('course')}
+                          className="flex items-center space-x-1 cursor-pointer hover:bg-slate-700/20 transition p-1 rounded overflow-hidden"
+                        >
+                          <span className="truncate">วิชา</span>
+                          {sortColumn === 'course' ? (
+                            sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                          )}
+                        </div>
+                        <div
+                          onMouseDown={(e) => handleMouseDownResize('course', e)}
+                          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                          title="ลากเพื่อปรับขนาดคอลัมน์"
+                        >
+                          <div className="w-0.5 h-3.5 bg-slate-400/40 group-hover:bg-sky-400" />
+                        </div>
+                      </th>
+                    )}
+
+                    {/* Column 4: Academic Year / Semester */}
+                    {visibleCols.term && (
+                      <th className="p-2.5 font-extrabold uppercase relative group">
+                        <div
+                          onClick={() => handleSort('term')}
+                          className="flex items-center space-x-1 cursor-pointer hover:bg-slate-700/20 transition p-1 rounded overflow-hidden"
+                        >
+                          <span className="truncate">ปีการศึกษา/ภาคเรียน</span>
+                          {sortColumn === 'term' ? (
+                            sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                          )}
+                        </div>
+                        <div
+                          onMouseDown={(e) => handleMouseDownResize('term', e)}
+                          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                          title="ลากเพื่อปรับขนาดคอลัมน์"
+                        >
+                          <div className="w-0.5 h-3.5 bg-slate-400/40 group-hover:bg-sky-400" />
+                        </div>
+                      </th>
+                    )}
+
+                    {/* Column 5: Week */}
+                    {visibleCols.week && (
+                      <th className="p-2.5 font-extrabold uppercase relative group text-center">
+                        <div
+                          onClick={() => handleSort('week')}
+                          className="flex items-center justify-center space-x-1 cursor-pointer hover:bg-slate-700/20 transition p-1 rounded overflow-hidden"
+                        >
+                          <span className="truncate">สัปดาห์</span>
+                          {sortColumn === 'week' ? (
+                            sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                          )}
+                        </div>
+                        <div
+                          onMouseDown={(e) => handleMouseDownResize('week', e)}
+                          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                          title="ลากเพื่อปรับขนาดคอลัมน์"
+                        >
+                          <div className="w-0.5 h-3.5 bg-slate-400/40 group-hover:bg-sky-400" />
+                        </div>
+                      </th>
+                    )}
+
+                    {/* Column 6: Status */}
+                    {visibleCols.status && (
+                      <th className="p-2.5 font-extrabold uppercase relative group">
+                        <div
+                          onClick={() => handleSort('status')}
+                          className="flex items-center space-x-1 cursor-pointer hover:bg-slate-700/20 transition p-1 rounded overflow-hidden"
+                        >
+                          <span className="truncate">สถานะเข้าเรียน</span>
+                          {sortColumn === 'status' ? (
+                            sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                          )}
+                        </div>
+                        <div
+                          onMouseDown={(e) => handleMouseDownResize('status', e)}
+                          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                          title="ลากเพื่อปรับขนาดคอลัมน์"
+                        >
+                          <div className="w-0.5 h-3.5 bg-slate-400/40 group-hover:bg-sky-400" />
+                        </div>
+                      </th>
+                    )}
+
+                    {/* Column 7: Checkin Method & Reason */}
+                    {visibleCols.method && (
+                      <th className="p-2.5 font-extrabold uppercase relative group">
+                        <div
+                          onClick={() => handleSort('method')}
+                          className="flex items-center space-x-1 cursor-pointer hover:bg-slate-700/20 transition p-1 rounded overflow-hidden"
+                        >
+                          <span className="truncate">วิธีเช็กชื่อ/เหตุผล</span>
+                          {sortColumn === 'method' ? (
+                            sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                          )}
+                        </div>
+                        <div
+                          onMouseDown={(e) => handleMouseDownResize('method', e)}
+                          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                          title="ลากเพื่อปรับขนาดคอลัมน์"
+                        >
+                          <div className="w-0.5 h-3.5 bg-slate-400/40 group-hover:bg-sky-400" />
+                        </div>
+                      </th>
+                    )}
+
+                    {/* Column 8: Timestamp */}
+                    {visibleCols.time && (
+                      <th className="p-2.5 font-extrabold uppercase relative group">
+                        <div
+                          onClick={() => handleSort('time')}
+                          className="flex items-center space-x-1 cursor-pointer hover:bg-slate-700/20 transition p-1 rounded overflow-hidden"
+                        >
+                          <span className="truncate">เวลาที่บันทึก</span>
+                          {sortColumn === 'time' ? (
+                            sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                          )}
+                        </div>
+                        <div
+                          onMouseDown={(e) => handleMouseDownResize('time', e)}
+                          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                          title="ลากเพื่อปรับขนาดคอลัมน์"
+                        >
+                          <div className="w-0.5 h-3.5 bg-slate-400/40 group-hover:bg-sky-400" />
+                        </div>
+                      </th>
+                    )}
+
+                    {/* Column 9: Actions */}
+                    {visibleCols.actions && (
+                      <th className="p-2.5 font-extrabold uppercase text-center relative group">
+                        <span className="truncate">จัดการ</span>
+                        <div
+                          onMouseDown={(e) => handleMouseDownResize('actions', e)}
+                          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10 flex items-center justify-center"
+                          title="ลากเพื่อปรับขนาดคอลัมน์"
+                        >
+                          <div className="w-0.5 h-3.5 bg-slate-400/40 group-hover:bg-sky-400" />
+                        </div>
+                      </th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${isDarkMode ? 'divide-slate-800/60' : 'divide-slate-100'}`}>
+                  {paginatedLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={Object.values(visibleCols).filter(Boolean).length || 1} className="p-12 text-center text-slate-400 font-semibold">
+                        <div className="flex flex-col items-center justify-center space-y-2">
+                          <UserIcon className="w-8 h-8 text-slate-500 opacity-40" />
+                          <p>ไม่พบข้อมูลสถานะการเข้าชั้นเรียนตามเงื่อนไขที่กำหนด</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedLogs.map((log, idx) => {
+                      const matchedCourse = allCourses.find((c) => c.id === log.courseId);
+                      const isFocused =
+                        overrideSelectedUser &&
+                        (log.targetUserId === overrideSelectedUser.id || log.displayId === overrideSelectedUser.universityId);
+                      const isSelected = selectedLogIds.includes(log.id);
+
+                      return (
+                        <tr
+                          key={log.id}
+                          className={`transition ${
+                            isSelected
+                              ? isDarkMode ? 'bg-sky-950/30 hover:bg-sky-950/40' : 'bg-sky-50 hover:bg-sky-100/80'
+                              : isFocused
+                              ? isDarkMode
+                                ? 'bg-purple-950/30 hover:bg-purple-950/40'
+                                : 'bg-purple-50/70 hover:bg-purple-100/80'
+                              : isDarkMode
+                              ? 'hover:bg-slate-800/40'
+                              : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          {/* Checkbox */}
+                          {visibleCols.select && (
+                            <td className="p-3.5 text-center">
+                              <button
+                                onClick={() => handleToggleSelectLog(log.id)}
+                                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                              >
+                                {isSelected ? (
+                                  <CheckSquare className="w-4 h-4 text-sky-500" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-slate-400" />
+                                )}
+                              </button>
+                            </td>
+                          )}
+
+                          {/* Row Number */}
+                          {visibleCols.index && (
+                            <td className="p-3.5 text-center font-mono font-bold text-slate-400 text-xs">
+                              {(currentPage - 1) * (pageSize === -1 ? 0 : pageSize) + idx + 1}
+                            </td>
+                          )}
+
+                          {/* Student ID */}
+                          {visibleCols.studentId && (
+                            <td className="p-3.5 font-mono font-bold text-sky-600 dark:text-sky-400 text-xs whitespace-nowrap">
+                              {log.displayId || '-'}
+                            </td>
+                          )}
+
+                          {/* User info */}
+                          {visibleCols.user && (
+                            <td className="p-3.5">
+                              <div className="flex items-center space-x-1.5">
+                                <span className={`font-extrabold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{log.displayName}</span>
+                                <span
+                                  className={`px-1.5 py-0.2 rounded text-[9px] font-black ${
+                                    log.logType === 'TEACHER'
+                                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                                      : 'bg-sky-500/20 text-sky-600 dark:text-sky-400'
+                                  }`}
+                                >
+                                  {log.logType === 'TEACHER' ? 'อาจารย์' : 'นักศึกษา'}
+                                </span>
+                              </div>
+                            </td>
+                          )}
+
+                          {/* Course */}
+                          {visibleCols.course && (
+                            <td className="p-3.5">
+                              <div className="font-bold text-purple-600 dark:text-purple-400">
+                                {matchedCourse ? matchedCourse.courseCode || matchedCourse.code : log.courseId}
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[180px]">
+                                {matchedCourse ? matchedCourse.courseName || matchedCourse.nameTh : ''}
+                              </div>
+                            </td>
+                          )}
+
+                          {/* Academic Year / Semester */}
+                          {visibleCols.term && (
+                            <td className="p-3.5 font-mono text-xs font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                              {matchedCourse ? `${matchedCourse.academicYear} / ภาค ${matchedCourse.semester}` : '-'}
+                            </td>
+                          )}
+
+                          {/* Week */}
+                          {visibleCols.week && (
+                            <td className="p-3.5 text-center font-extrabold text-xs text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                              {log.weekNumber ? `สัปดาห์ที่ ${log.weekNumber}` : '-'}
+                            </td>
+                          )}
+
+                          {/* Status badge */}
+                          {visibleCols.status && (
+                            <td className="p-3.5">
+                              <span
+                                className={`inline-flex items-center px-2.5 py-1 rounded-xl text-[11px] font-black border ${
+                                  log.status === AttendanceStatus.PRESENT || log.status === 'PRESENT'
+                                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                    : log.status === AttendanceStatus.LATE || log.status === 'LATE'
+                                    ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                    : log.status === AttendanceStatus.LEAVE || log.status === 'LEAVE'
+                                    ? 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30'
+                                    : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                                }`}
+                              >
+                                {log.status === AttendanceStatus.PRESENT || log.status === 'PRESENT'
+                                  ? '🟢 มาเรียน (PRESENT)'
+                                  : log.status === AttendanceStatus.LATE || log.status === 'LATE'
+                                  ? '🟡 สาย (LATE)'
+                                  : log.status === AttendanceStatus.LEAVE || log.status === 'LEAVE'
+                                  ? '🔵 ลา (LEAVE)'
+                                  : '🔴 ขาด (ABSENT)'}
+                              </span>
+                            </td>
+                          )}
+
+                          {/* Method & Reason */}
+                          {visibleCols.method && (
+                            <td className="p-3.5 text-slate-600 dark:text-slate-300">
+                              <div className="font-mono text-[11px] font-bold">
+                                {log.checkinMethod || log.method || 'ADMIN_OVERRIDE'}
+                              </div>
+                              {(log.reason || log.note) && (
+                                <div className="text-[10px] text-slate-400 truncate max-w-xs" title={log.reason || log.note}>
+                                  {log.reason || log.note}
+                                </div>
+                              )}
+                            </td>
+                          )}
+
+                          {/* Time */}
+                          {visibleCols.time && (
+                            <td className="p-3.5 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                              {log.timestamp ? new Date(log.timestamp).toLocaleString('th-TH') : log.createdAt ? new Date(log.createdAt).toLocaleString('th-TH') : '-'}
+                            </td>
+                          )}
+
+                          {/* Actions */}
+                          {visibleCols.actions && (
+                            <td className="p-3.5 text-center">
+                              <div className="flex items-center justify-center space-x-1.5">
+                                <button
+                                  onClick={() => handleOpenEdit(log)}
+                                  title="แก้ไข"
+                                  className="p-1.5 rounded-lg font-bold text-xs bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/20 transition flex items-center space-x-1 cursor-pointer active:scale-95"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                  <span className="hidden sm:inline">แก้ไข</span>
+                                </button>
+                                <button
+                                  onClick={() => setDeletingLog(log)}
+                                  title="ลบ"
+                                  className="p-1.5 rounded-lg font-bold text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 transition flex items-center space-x-1 cursor-pointer active:scale-95"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span className="hidden sm:inline">ลบ</span>
+                                </button>
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {/* Table Pagination Footer */}
           <div

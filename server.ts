@@ -1,6 +1,7 @@
 import express from 'express';
 import http from 'http';
 import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
@@ -29,7 +30,7 @@ import {
   MasterMajor,
   MasterDegreeLevel,
 } from './src/types.js';
-import { saveToFirestore, getAllFromFirestore, deleteFromFirestore, COLLECTIONS } from './src/lib/firebaseStore.js';
+import { saveToFirestore, batchSaveToFirestore, getAllFromFirestore, deleteFromFirestore, COLLECTIONS } from './src/lib/firebaseStore.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -56,6 +57,369 @@ const leaveRequests: LeaveRequest[] = [];
 const masterDepartments: Map<string, MasterDepartment> = new Map();
 const masterCurriculums: Map<string, MasterCurriculum> = new Map();
 const masterPrefixes: Map<string, MasterPrefix> = new Map();
+
+// --- LOCAL PERSISTENCE & TOMBSTONE TRACKING ENGINE ---
+const LOCAL_CACHE_PATH = path.join(process.cwd(), 'local_db_cache.json');
+const deletedCourseIds = new Set<string>();
+const deletedMemberIds = new Set<string>();
+const deletedSessionIds = new Set<string>();
+const deletedUserIds = new Set<string>();
+
+export function saveLocalCache() {
+  try {
+    const data = {
+      users: Array.from(users.values()),
+      courses: Array.from(courses.values()),
+      courseMembers,
+      sessions: Array.from(sessions.values()),
+      attendanceRecords,
+      teacherAttendanceRecords,
+      quickEvents: Array.from(quickEvents.values()),
+      inviteLinks: Array.from(inviteLinks.values()),
+      leaveRequests,
+      masterDepartments: Array.from(masterDepartments.values()),
+      masterCurriculums: Array.from(masterCurriculums.values()),
+      masterPrefixes: Array.from(masterPrefixes.values()),
+      systemSettings,
+      deletedCourseIds: Array.from(deletedCourseIds),
+      deletedMemberIds: Array.from(deletedMemberIds),
+      deletedSessionIds: Array.from(deletedSessionIds),
+      deletedUserIds: Array.from(deletedUserIds),
+    };
+    fs.writeFileSync(LOCAL_CACHE_PATH, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[Local Cache Save Error]', err);
+  }
+}
+
+export function loadLocalCache(): boolean {
+  try {
+    if (!fs.existsSync(LOCAL_CACHE_PATH)) {
+      return false;
+    }
+    const raw = fs.readFileSync(LOCAL_CACHE_PATH, 'utf-8');
+    const data = JSON.parse(raw);
+
+    if (Array.isArray(data.deletedCourseIds)) {
+      deletedCourseIds.clear();
+      data.deletedCourseIds.forEach((id: string) => deletedCourseIds.add(id));
+    }
+    if (Array.isArray(data.deletedMemberIds)) {
+      deletedMemberIds.clear();
+      data.deletedMemberIds.forEach((id: string) => deletedMemberIds.add(id));
+    }
+    if (Array.isArray(data.deletedSessionIds)) {
+      deletedSessionIds.clear();
+      data.deletedSessionIds.forEach((id: string) => deletedSessionIds.add(id));
+    }
+    if (Array.isArray(data.deletedUserIds)) {
+      deletedUserIds.clear();
+      data.deletedUserIds.forEach((id: string) => deletedUserIds.add(id));
+    }
+
+    if (Array.isArray(data.users)) {
+      users.clear();
+      data.users.forEach((u: User) => {
+        if (u && u.id && !deletedUserIds.has(u.id)) users.set(u.id, u);
+      });
+    }
+    if (Array.isArray(data.courses)) {
+      courses.clear();
+      data.courses.forEach((c: Course) => {
+        if (c && c.id && !deletedCourseIds.has(c.id)) courses.set(c.id, c);
+      });
+    }
+    if (Array.isArray(data.courseMembers)) {
+      courseMembers.length = 0;
+      courseMembers.push(...data.courseMembers.filter((m: CourseMember) => m && m.id && !deletedMemberIds.has(m.id)));
+    }
+    if (Array.isArray(data.sessions)) {
+      sessions.clear();
+      data.sessions.forEach((s: Session) => {
+        if (s && s.id && !deletedSessionIds.has(s.id)) sessions.set(s.id, s);
+      });
+    }
+    if (Array.isArray(data.attendanceRecords)) {
+      attendanceRecords.length = 0;
+      attendanceRecords.push(...data.attendanceRecords);
+    }
+    if (Array.isArray(data.teacherAttendanceRecords)) {
+      teacherAttendanceRecords.length = 0;
+      teacherAttendanceRecords.push(...data.teacherAttendanceRecords);
+    }
+    if (Array.isArray(data.quickEvents)) {
+      quickEvents.clear();
+      data.quickEvents.forEach((q: QuickEvent) => quickEvents.set(q.id, q));
+    }
+    if (Array.isArray(data.inviteLinks)) {
+      inviteLinks.clear();
+      data.inviteLinks.forEach((l: InviteLink) => inviteLinks.set(l.id, l));
+    }
+    if (Array.isArray(data.leaveRequests)) {
+      leaveRequests.length = 0;
+      leaveRequests.push(...data.leaveRequests);
+    }
+    if (Array.isArray(data.masterDepartments)) {
+      masterDepartments.clear();
+      data.masterDepartments.forEach((d: MasterDepartment) => masterDepartments.set(d.id, d));
+    }
+    if (Array.isArray(data.masterCurriculums)) {
+      masterCurriculums.clear();
+      data.masterCurriculums.forEach((c: MasterCurriculum) => masterCurriculums.set(c.id, c));
+    }
+    if (Array.isArray(data.masterPrefixes)) {
+      masterPrefixes.clear();
+      data.masterPrefixes.forEach((p: MasterPrefix) => masterPrefixes.set(p.id, p));
+    }
+    if (data.systemSettings) {
+      systemSettings = { ...systemSettings, ...data.systemSettings };
+    }
+    return true;
+  } catch (err) {
+    console.error('[Local Cache Load Error]', err);
+    return false;
+  }
+}
+
+// --- DATA BACKUP & MAXIMUM INTEGRITY ENGINE ---
+export interface SystemBackup {
+  id: string;
+  timestamp: string;
+  label: string;
+  creator: string;
+  type?: 'manual' | 'auto';
+  counts: {
+    users: number;
+    courses: number;
+    courseMembers: number;
+    sessions: number;
+    attendanceRecords: number;
+    teacherAttendanceRecords: number;
+    leaveRequests: number;
+    quickEvents: number;
+  };
+  data?: {
+    users: User[];
+    courses: Course[];
+    courseMembers: CourseMember[];
+    sessions: Session[];
+    attendanceRecords: AttendanceRecord[];
+    teacherAttendanceRecords: TeacherAttendanceRecord[];
+    leaveRequests: LeaveRequest[];
+    quickEvents: QuickEvent[];
+  };
+}
+
+const systemBackups: SystemBackup[] = [];
+
+function getBackupType(b: { type?: string; creator?: string; label?: string }): 'manual' | 'auto' {
+  if (b.type === 'manual' || b.type === 'auto') return b.type;
+  if (b.creator === 'Admin User' || (b.label && b.label.toLowerCase().includes('manual'))) {
+    return 'manual';
+  }
+  return 'auto';
+}
+
+function sanitizeBackupDataForFirestore(data: any): any {
+  if (!data || typeof data !== 'object') return data;
+  if (Array.isArray(data)) {
+    return data.map(sanitizeBackupDataForFirestore);
+  }
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (
+      typeof value === 'string' &&
+      value.length > 1500 &&
+      (value.startsWith('data:') ||
+        key.toLowerCase().includes('image') ||
+        key.toLowerCase().includes('avatar') ||
+        key.toLowerCase().includes('photo') ||
+        key.toLowerCase().includes('file') ||
+        key.toLowerCase().includes('proof') ||
+        key.toLowerCase().includes('attachment'))
+    ) {
+      result[key] = '[ATTACHMENT_TRUNCATED_FOR_BACKUP_SNAPSHOT]';
+    } else if (value !== null && typeof value === 'object') {
+      result[key] = sanitizeBackupDataForFirestore(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+async function createSnapshotBackup(
+  label: string,
+  creator = 'System Integrity Engine',
+  type: 'manual' | 'auto' = 'auto'
+): Promise<SystemBackup> {
+  // Fetch existing backups to enforce manual limits and auto-pruning accurately
+  let fsBackups: SystemBackup[] = [];
+  try {
+    const loaded = await getAllFromFirestore<SystemBackup>('SYSTEM_BACKUPS');
+    if (loaded && loaded.length > 0) {
+      fsBackups = loaded;
+    }
+  } catch (err) {
+    // ignore
+  }
+
+  const backupMap = new Map<string, SystemBackup>();
+  fsBackups.forEach((b) => backupMap.set(b.id, { ...b, type: getBackupType(b) }));
+  systemBackups.forEach((b) => backupMap.set(b.id, { ...b, type: getBackupType(b) }));
+
+  const allExisting = Array.from(backupMap.values()).sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  const existingManual = allExisting.filter((b) => getBackupType(b) === 'manual');
+  const existingAuto = allExisting.filter((b) => getBackupType(b) === 'auto');
+
+  if (type === 'manual' && existingManual.length >= 5) {
+    throw new Error('ไม่สามารถสร้าง Manual Snapshot เพิ่มได้เนื่องจากครบโควต้าสูงสุด 5 จุดแล้ว กรุณาลบ Manual Snapshot เก่าออกก่อน');
+  }
+
+  const backup: SystemBackup = {
+    id: `backup_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+    timestamp: new Date().toISOString(),
+    label,
+    creator,
+    type,
+    counts: {
+      users: users ? users.size : 0,
+      courses: courses ? courses.size : 0,
+      courseMembers: Array.isArray(courseMembers) ? courseMembers.length : 0,
+      sessions: sessions ? sessions.size : 0,
+      attendanceRecords: Array.isArray(attendanceRecords) ? attendanceRecords.length : 0,
+      teacherAttendanceRecords: Array.isArray(teacherAttendanceRecords) ? teacherAttendanceRecords.length : 0,
+      leaveRequests: Array.isArray(leaveRequests) ? leaveRequests.length : 0,
+      quickEvents: quickEvents ? quickEvents.size : 0,
+    },
+    data: {
+      users: users ? Array.from(users.values()) : [],
+      courses: courses ? Array.from(courses.values()) : [],
+      courseMembers: Array.isArray(courseMembers) ? [...courseMembers] : [],
+      sessions: sessions ? Array.from(sessions.values()) : [],
+      attendanceRecords: Array.isArray(attendanceRecords) ? [...attendanceRecords] : [],
+      teacherAttendanceRecords: Array.isArray(teacherAttendanceRecords) ? [...teacherAttendanceRecords] : [],
+      leaveRequests: Array.isArray(leaveRequests) ? [...leaveRequests] : [],
+      quickEvents: quickEvents ? Array.from(quickEvents.values()) : [],
+    },
+  };
+
+  systemBackups.unshift(backup);
+
+  // Save metadata & sanitized snapshot to Firestore to keep document size light (<1MB)
+  try {
+    const sanitizedData = sanitizeBackupDataForFirestore(backup.data);
+    await saveToFirestore('SYSTEM_BACKUPS', {
+      id: backup.id,
+      timestamp: backup.timestamp,
+      label: backup.label,
+      creator: backup.creator,
+      type: backup.type,
+      counts: backup.counts,
+      data: sanitizedData,
+    });
+  } catch (err) {
+    console.warn('[System Backup] Saved to memory cache, Firestore save pending:', err);
+  }
+
+  // Automatic Snapshot Auto-Prune (keep up to 20 newest automatic snapshots)
+  if (type === 'auto') {
+    const updatedAutoList = [backup, ...existingAuto].sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+
+    if (updatedAutoList.length > 20) {
+      const toDelete = updatedAutoList.slice(20);
+      for (const oldBackup of toDelete) {
+        await deleteFromFirestore('SYSTEM_BACKUPS', oldBackup.id).catch(() => {});
+        const idx = systemBackups.findIndex((b) => b.id === oldBackup.id);
+        if (idx >= 0) {
+          systemBackups.splice(idx, 1);
+        }
+        console.log(`[Snapshot Auto-Prune] Removed oldest auto snapshot: ${oldBackup.id} (${oldBackup.label})`);
+      }
+    }
+  }
+
+  console.log(`[System Backup Created] ID: ${backup.id} | Type: ${type} | Label: ${label} | Attendance Count: ${backup.counts.attendanceRecords}`);
+  return backup;
+}
+
+async function restoreSnapshotBackup(backupId: string): Promise<{ restoredCounts: Record<string, number> }> {
+  let backup = systemBackups.find((b) => b.id === backupId);
+  if (!backup || !backup.data) {
+    const fsBackups = await getAllFromFirestore<SystemBackup>('SYSTEM_BACKUPS');
+    if (fsBackups) {
+      backup = fsBackups.find((b) => b.id === backupId);
+    }
+  }
+
+  if (!backup || !backup.data) {
+    throw new Error('ไม่พบข้อมูล สำรอง (Backup snapshot) ที่ระบุ');
+  }
+
+  // Restore memory collections
+  users.clear();
+  if (Array.isArray(backup.data.users)) {
+    backup.data.users.forEach((u) => users.set(u.id, u));
+  }
+
+  courses.clear();
+  if (Array.isArray(backup.data.courses)) {
+    backup.data.courses.forEach((c) => courses.set(c.id, c));
+  }
+
+  courseMembers.length = 0;
+  if (Array.isArray(backup.data.courseMembers)) {
+    courseMembers.push(...backup.data.courseMembers);
+  }
+
+  sessions.clear();
+  if (Array.isArray(backup.data.sessions)) {
+    backup.data.sessions.forEach((s) => sessions.set(s.id, s));
+  }
+
+  attendanceRecords.length = 0;
+  if (Array.isArray(backup.data.attendanceRecords)) {
+    attendanceRecords.push(...backup.data.attendanceRecords);
+  }
+
+  teacherAttendanceRecords.length = 0;
+  if (Array.isArray(backup.data.teacherAttendanceRecords)) {
+    teacherAttendanceRecords.push(...backup.data.teacherAttendanceRecords);
+  }
+
+  leaveRequests.length = 0;
+  if (Array.isArray(backup.data.leaveRequests)) {
+    leaveRequests.push(...backup.data.leaveRequests);
+  }
+
+  quickEvents.clear();
+  if (Array.isArray(backup.data.quickEvents)) {
+    backup.data.quickEvents.forEach((q) => quickEvents.set(q.id, q));
+  }
+
+  // Sync restored data to Firestore in background batches
+  await Promise.all([
+    batchSaveToFirestore(COLLECTIONS.USERS, Array.from(users.values())),
+    batchSaveToFirestore(COLLECTIONS.COURSES, Array.from(courses.values())),
+    batchSaveToFirestore(COLLECTIONS.COURSE_MEMBERS, courseMembers),
+    batchSaveToFirestore(COLLECTIONS.SESSIONS, Array.from(sessions.values())),
+    batchSaveToFirestore(COLLECTIONS.ATTENDANCE, attendanceRecords),
+    batchSaveToFirestore(COLLECTIONS.TEACHER_ATTENDANCE, teacherAttendanceRecords),
+    batchSaveToFirestore(COLLECTIONS.LEAVE_REQUESTS, leaveRequests),
+    batchSaveToFirestore(COLLECTIONS.QUICK_EVENTS, Array.from(quickEvents.values())),
+  ]);
+
+  console.log(`[Snapshot Restored] Backup ID: ${backupId} | Attendance restored: ${attendanceRecords.length}`);
+  return {
+    restoredCounts: backup.counts,
+  };
+}
+
 
 // Default Global System Settings
 let systemSettings: SystemSettings = {
@@ -130,10 +494,10 @@ const checkRegistrationDomain = (emailStr: string): { allowed: boolean; forcedRo
     return { allowed: true, forcedRole: UserRole.ADMIN };
   }
 
-  // Check if user is an existing Admin in the system
+  // Check if user is an existing user in the system (Admin, Teacher, or Student)
   const existingUser = Array.from(users.values()).find((u) => u && u.email && u.email.trim().toLowerCase() === cleanEmail);
-  if (existingUser && existingUser.role === UserRole.ADMIN) {
-    return { allowed: true, forcedRole: UserRole.ADMIN };
+  if (existingUser) {
+    return { allowed: true, forcedRole: existingUser.role };
   }
 
   // Parse student domains list
@@ -181,8 +545,8 @@ const checkRegistrationDomain = (emailStr: string): { allowed: boolean; forcedRo
     return { allowed: true, forcedRole: UserRole.TEACHER };
   }
 
-  // Other domains toggle check
-  if (allowOther) {
+  // Other domains toggle check or Google Auto-register enabled
+  if (allowOther || systemSettings.allowGoogleAutoRegister !== false) {
     return { allowed: true, forcedRole: null };
   }
 
@@ -229,87 +593,269 @@ function getHaversineDistance(
   return Math.round(R * c);
 }
 
-// Seed Initial Users
-const teacherUser: User = {
-  id: 'usr_teacher_1',
-  role: UserRole.TEACHER,
-  title: 'อ.ดร.',
-  firstNameTh: 'สมชาย',
-  lastNameTh: 'ใจดี',
-  firstNameEn: 'Somchai',
-  lastNameEn: 'Jaidee',
-  universityId: 'T1001',
-  email: 'somchai@university.ac.th',
-  password: '123456',
-  deviceId: 'dev_teacher_1',
-  createdAt: new Date().toISOString(),
-};
+// Seed Initial Users & Courses Function
+function initDefaultSeedData() {
+  const teacherUser: User = {
+    id: 'usr_teacher_1',
+    role: UserRole.TEACHER,
+    title: 'อ.ดร.',
+    firstNameTh: 'สมชาย',
+    lastNameTh: 'ใจดี',
+    firstNameEn: 'Somchai',
+    lastNameEn: 'Jaidee',
+    universityId: 'T1001',
+    email: 'somchai@university.ac.th',
+    password: '123456',
+    deviceId: 'dev_teacher_1',
+    isDemo: true,
+    createdAt: new Date().toISOString(),
+  };
 
-const coTeacherUser: User = {
-  id: 'usr_teacher_2',
-  role: UserRole.TEACHER,
-  title: 'ผศ.ดร.',
-  firstNameTh: 'วนิดา',
-  lastNameTh: 'เรียนดี',
-  firstNameEn: 'Wanida',
-  lastNameEn: 'Riandee',
-  universityId: 'T1002',
-  email: 'wanida@university.ac.th',
-  password: '123456',
-  deviceId: 'dev_teacher_2',
-  createdAt: new Date().toISOString(),
-};
+  const coTeacherUser: User = {
+    id: 'usr_teacher_2',
+    role: UserRole.TEACHER,
+    title: 'ผศ.ดร.',
+    firstNameTh: 'วนิดา',
+    lastNameTh: 'เรียนดี',
+    firstNameEn: 'Wanida',
+    lastNameEn: 'Riandee',
+    universityId: 'T1002',
+    email: 'wanida@university.ac.th',
+    password: '123456',
+    deviceId: 'dev_teacher_2',
+    isDemo: true,
+    createdAt: new Date().toISOString(),
+  };
 
-const studentUser1: User = {
-  id: 'usr_student_1',
-  role: UserRole.STUDENT,
-  title: 'นาย',
-  firstNameTh: 'กิตติพงษ์',
-  lastNameTh: 'สุขเสริฐ',
-  firstNameEn: 'Kittipong',
-  lastNameEn: 'Suksert',
-  universityId: '66010012',
-  email: '66010012@university.ac.th',
-  password: '123456',
-  deviceId: 'dev_student_1',
-  createdAt: new Date().toISOString(),
-};
+  const studentUser1: User = {
+    id: 'usr_student_1',
+    role: UserRole.STUDENT,
+    title: 'นาย',
+    firstNameTh: 'กิตติพงษ์',
+    lastNameTh: 'สุขเสริฐ',
+    firstNameEn: 'Kittipong',
+    lastNameEn: 'Suksert',
+    universityId: '66010012',
+    email: '66010012@university.ac.th',
+    password: '123456',
+    deviceId: 'dev_student_1',
+    isDemo: true,
+    createdAt: new Date().toISOString(),
+  };
 
-const studentUser2: User = {
-  id: 'usr_student_2',
-  role: UserRole.STUDENT,
-  title: 'นางสาว',
-  firstNameTh: 'ณัฐธิดา',
-  lastNameTh: 'รักเรียน',
-  firstNameEn: 'Nattida',
-  lastNameEn: 'Rakrien',
-  universityId: '66010045',
-  email: '66010045@university.ac.th',
-  password: '123456',
-  deviceId: 'dev_student_2',
-  createdAt: new Date().toISOString(),
-};
+  const studentUser2: User = {
+    id: 'usr_student_2',
+    role: UserRole.STUDENT,
+    title: 'นางสาว',
+    firstNameTh: 'ณัฐธิดา',
+    lastNameTh: 'รักเรียน',
+    firstNameEn: 'Nattida',
+    lastNameEn: 'Rakrien',
+    universityId: '66010045',
+    email: '66010045@university.ac.th',
+    password: '123456',
+    deviceId: 'dev_student_2',
+    isDemo: true,
+    createdAt: new Date().toISOString(),
+  };
 
-const adminUser: User = {
-  id: 'usr_admin_1',
-  role: UserRole.ADMIN,
-  title: 'ผู้ดูแลระบบ',
-  firstNameTh: 'แอดมิน',
-  lastNameTh: 'คุมระบบ',
-  firstNameEn: 'Admin',
-  lastNameEn: 'System',
-  universityId: 'ADM001',
-  email: 'admin@university.ac.th',
-  password: '123456',
-  deviceId: 'dev_admin_1',
-  createdAt: new Date().toISOString(),
-};
+  const adminUser: User = {
+    id: 'usr_admin_1',
+    role: UserRole.ADMIN,
+    title: 'ผู้ดูแลระบบ',
+    firstNameTh: 'แอดมิน',
+    lastNameTh: 'คุมระบบ',
+    firstNameEn: 'Admin',
+    lastNameEn: 'System',
+    universityId: 'ADM001',
+    email: 'admin@university.ac.th',
+    password: '123456',
+    deviceId: 'dev_admin_1',
+    isDemo: true,
+    createdAt: new Date().toISOString(),
+  };
 
-users.set(teacherUser.id, teacherUser);
-users.set(coTeacherUser.id, coTeacherUser);
-users.set(studentUser1.id, studentUser1);
-users.set(studentUser2.id, studentUser2);
-users.set(adminUser.id, adminUser);
+  users.set(teacherUser.id, teacherUser);
+  users.set(coTeacherUser.id, coTeacherUser);
+  users.set(studentUser1.id, studentUser1);
+  users.set(studentUser2.id, studentUser2);
+  users.set(adminUser.id, adminUser);
+
+  // Seed Initial Course: TEST101
+  const sampleCourse: Course = {
+    id: 'crs_test101',
+    courseCode: 'TEST101',
+    courseName: 'Software Architecture & System Design',
+    academicYear: 2569,
+    semester: Semester.FIRST,
+    coordinatorName: 'อ.ดร. สมชาย ใจดี',
+    ownerId: teacherUser.id,
+    ownerName: 'อ.ดร. สมชาย ใจดี',
+    defaultLat: 13.7988363,
+    defaultLng: 100.322944,
+    allowedGpsRadius: 200,
+    weeks: [
+      { weekNumber: 1, topic: 'Introduction & Requirements Engineering', date: '2026-07-10' },
+      { weekNumber: 2, topic: 'Microservices & RESTful API Design', date: '2026-07-17' },
+      { weekNumber: 3, topic: 'Database Schema & Anti-Proxy Security', date: '2026-07-24' },
+      { weekNumber: 4, topic: 'WebSockets & Dynamic QR Codes', date: '2026-07-31' },
+      { weekNumber: 5, topic: 'Geofencing & PWA Deployment', date: '2026-08-07' },
+    ],
+    createdAt: new Date().toISOString(),
+  };
+
+  courses.set(sampleCourse.id, sampleCourse);
+
+  // Seed Academic Structure Sample Courses (Faculty of Medical Technology)
+  const bioinfoCourse: Course = {
+    id: 'crs_mtid626',
+    courseCode: 'MTID626',
+    courseName: 'Advanced Bioinformatics',
+    academicYear: 2569,
+    semester: Semester.FIRST,
+    coordinatorName: 'อ.ดร. สมชาย ใจดี',
+    ownerId: teacherUser.id,
+    ownerName: 'อ.ดร. สมชาย ใจดี',
+    facultyCode: 'MT',
+    departmentCode: 'ID',
+    majorCode: 'MTMT',
+    degreeLevel: 'บัณฑิตศึกษา',
+    curriculums: [
+      'วิทยาศาสตร์มหาบัณฑิต (เทคนิคการแพทย์)',
+      'ปรัชญาดุษฎีบัณฑิต (เทคนิคการแพทย์)'
+    ],
+    defaultLat: 13.7988363,
+    defaultLng: 100.322944,
+    allowedGpsRadius: 200,
+    weeks: [
+      { weekNumber: 1, topic: 'Genomics & High-Throughput Sequencing Data', date: '2026-07-10' },
+      { weekNumber: 2, topic: 'Machine Learning in Computational Biology', date: '2026-07-17' },
+      { weekNumber: 3, topic: 'Structural Bioinformatics & Molecular Docking', date: '2026-07-24' },
+    ],
+    createdAt: new Date().toISOString(),
+  };
+
+  const dataMgmtCourse: Course = {
+    id: 'crs_mtid204',
+    courseCode: 'MTID204',
+    courseName: 'Data Management with Computer',
+    academicYear: 2569,
+    semester: Semester.FIRST,
+    coordinatorName: 'ผศ.ดร. วนิดา เรียนดี',
+    ownerId: coTeacherUser.id,
+    ownerName: 'ผศ.ดร. วนิดา เรียนดี',
+    facultyCode: 'MT',
+    departmentCode: 'ID',
+    majorCode: 'MTMT',
+    degreeLevel: 'ปริญญาตรี',
+    curriculums: [
+      'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)',
+      'วิทยาศาสตร์บัณฑิต (รังสีเทคนิค)'
+    ],
+    defaultLat: 13.7988363,
+    defaultLng: 100.322944,
+    allowedGpsRadius: 200,
+    weeks: [
+      { weekNumber: 1, topic: 'Database Fundamentals in Medical Context', date: '2026-07-12' },
+      { weekNumber: 2, topic: 'Healthcare Information Systems & Security', date: '2026-07-19' },
+    ],
+    createdAt: new Date().toISOString(),
+  };
+
+  const commTechCourse: Course = {
+    id: 'crs_mtcm303',
+    courseCode: 'MTCM303',
+    courseName: 'Community Medical Technology',
+    academicYear: 2569,
+    semester: Semester.FIRST,
+    coordinatorName: 'อ.ดร. สมชาย ใจดี',
+    ownerId: teacherUser.id,
+    ownerName: 'อ.ดร. สมชาย ใจดี',
+    facultyCode: 'MT',
+    departmentCode: 'CM',
+    majorCode: 'MTMT',
+    degreeLevel: 'ปริญญาตรี',
+    curriculums: [
+      'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)'
+    ],
+    defaultLat: 13.7988363,
+    defaultLng: 100.322944,
+    allowedGpsRadius: 200,
+    weeks: [
+      { weekNumber: 1, topic: 'Principles of Primary Health Care & Field Work', date: '2026-07-15' },
+    ],
+    createdAt: new Date().toISOString(),
+  };
+
+  courses.set(bioinfoCourse.id, bioinfoCourse);
+  courses.set(dataMgmtCourse.id, dataMgmtCourse);
+  courses.set(commTechCourse.id, commTechCourse);
+
+  // Add course members
+  courseMembers.push(
+    { id: 'cm_1', courseId: sampleCourse.id, userId: teacherUser.id, role: CourseMemberRole.CO_TEACHER, joinedAt: new Date().toISOString() },
+    { id: 'cm_2', courseId: sampleCourse.id, userId: coTeacherUser.id, role: CourseMemberRole.CO_TEACHER, joinedAt: new Date().toISOString() },
+    { id: 'cm_3', courseId: sampleCourse.id, userId: studentUser1.id, role: CourseMemberRole.STUDENT, joinedAt: new Date().toISOString() },
+    { id: 'cm_4', courseId: sampleCourse.id, userId: studentUser2.id, role: CourseMemberRole.STUDENT, joinedAt: new Date().toISOString() }
+  );
+
+  // Seed sessions
+  const session1: Session = {
+    id: 'ses_1',
+    courseId: sampleCourse.id,
+    weekNumber: 1,
+    topic: 'Introduction & Requirements Engineering',
+    teacherLat: 13.7988363,
+    teacherLng: 100.322944,
+    isActive: false,
+    createdAt: new Date().toISOString(),
+  };
+
+  const session2: Session = {
+    id: 'ses_2',
+    courseId: sampleCourse.id,
+    weekNumber: 2,
+    topic: 'Microservices & RESTful API Design',
+    teacherLat: 13.7988363,
+    teacherLng: 100.322944,
+    isActive: false,
+    createdAt: new Date().toISOString(),
+  };
+
+  const session3: Session = {
+    id: 'ses_3',
+    courseId: sampleCourse.id,
+    weekNumber: 3,
+    topic: 'Database Schema & Anti-Proxy Security',
+    teacherLat: 13.7988363,
+    teacherLng: 100.322944,
+    isActive: true,
+    createdAt: new Date().toISOString(),
+  };
+
+  sessions.set(session1.id, session1);
+  sessions.set(session2.id, session2);
+  sessions.set(session3.id, session3);
+
+  // Seed initial sample leave request
+  leaveRequests.push({
+    id: 'leave_demo_1',
+    studentId: 'usr_student_1',
+    studentNameTh: 'นาย กิตติพงษ์ สุขเสริฐ',
+    studentNameEn: 'Mr. Kittipong Suksert',
+    studentUniversityId: '66010012',
+    courseId: 'crs_test101',
+    courseCode: 'TEST101',
+    courseName: 'Software Architecture & System Design',
+    weekNumber: 3,
+    leaveType: LeaveType.SICK,
+    leaveDate: '2026-07-24',
+    reason: 'มีอาการไข้สูงและปวดศีรษะอย่างรุนแรง แพทย์ให้พักผ่อนเป็นเวลา 2 วัน',
+    attachmentName: 'medical_certificate.pdf',
+    status: LeaveStatus.PENDING,
+    createdAt: new Date().toISOString(),
+  });
+}
 
 /**
  * Helper to bind/register or update a user device.
@@ -416,226 +962,12 @@ function bindUserDevice(
   return { success: true, user, isNewDevice: true };
 }
 
-// Seed Initial Course: TEST101
-const sampleCourse: Course = {
-  id: 'crs_test101',
-  courseCode: 'TEST101',
-  courseName: 'Software Architecture & System Design',
-  academicYear: 2569,
-  semester: Semester.FIRST,
-  coordinatorName: 'อ.ดร. สมชาย ใจดี',
-  ownerId: teacherUser.id,
-  ownerName: 'อ.ดร. สมชาย ใจดี',
-  defaultLat: 13.7988363,
-  defaultLng: 100.322944,
-  allowedGpsRadius: 200,
-  weeks: [
-    { weekNumber: 1, topic: 'Introduction & Requirements Engineering', date: '2026-07-10' },
-    { weekNumber: 2, topic: 'Microservices & RESTful API Design', date: '2026-07-17' },
-    { weekNumber: 3, topic: 'Database Schema & Anti-Proxy Security', date: '2026-07-24' },
-    { weekNumber: 4, topic: 'WebSockets & Dynamic QR Codes', date: '2026-07-31' },
-    { weekNumber: 5, topic: 'Geofencing & PWA Deployment', date: '2026-08-07' },
-  ],
-  createdAt: new Date().toISOString(),
-};
-
-courses.set(sampleCourse.id, sampleCourse);
-
-// Seed Academic Structure Sample Courses (Faculty of Medical Technology)
-const bioinfoCourse: Course = {
-  id: 'crs_mtid626',
-  courseCode: 'MTID626',
-  courseName: 'Advanced Bioinformatics',
-  academicYear: 2569,
-  semester: Semester.FIRST,
-  coordinatorName: 'อ.ดร. สมชาย ใจดี',
-  ownerId: teacherUser.id,
-  ownerName: 'อ.ดร. สมชาย ใจดี',
-  facultyCode: 'MT',
-  departmentCode: 'ID',
-  majorCode: 'MTMT',
-  degreeLevel: 'บัณฑิตศึกษา',
-  curriculums: [
-    'วิทยาศาสตร์มหาบัณฑิต (เทคนิคการแพทย์)',
-    'ปรัชญาดุษฎีบัณฑิต (เทคนิคการแพทย์)'
-  ],
-  defaultLat: 13.7988363,
-  defaultLng: 100.322944,
-  allowedGpsRadius: 200,
-  weeks: [
-    { weekNumber: 1, topic: 'Genomics & High-Throughput Sequencing Data', date: '2026-07-10' },
-    { weekNumber: 2, topic: 'Machine Learning in Computational Biology', date: '2026-07-17' },
-    { weekNumber: 3, topic: 'Structural Bioinformatics & Molecular Docking', date: '2026-07-24' },
-  ],
-  createdAt: new Date().toISOString(),
-};
-
-const dataMgmtCourse: Course = {
-  id: 'crs_mtid204',
-  courseCode: 'MTID204',
-  courseName: 'Data Management with Computer',
-  academicYear: 2569,
-  semester: Semester.FIRST,
-  coordinatorName: 'ผศ.ดร. วนิดา เรียนดี',
-  ownerId: coTeacherUser.id,
-  ownerName: 'ผศ.ดร. วนิดา เรียนดี',
-  facultyCode: 'MT',
-  departmentCode: 'ID',
-  majorCode: 'MTMT',
-  degreeLevel: 'ปริญญาตรี',
-  curriculums: [
-    'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)',
-    'วิทยาศาสตร์บัณฑิต (รังสีเทคนิค)'
-  ],
-  defaultLat: 13.7988363,
-  defaultLng: 100.322944,
-  allowedGpsRadius: 200,
-  weeks: [
-    { weekNumber: 1, topic: 'Database Fundamentals in Medical Context', date: '2026-07-12' },
-    { weekNumber: 2, topic: 'Healthcare Information Systems & Security', date: '2026-07-19' },
-  ],
-  createdAt: new Date().toISOString(),
-};
-
-const commTechCourse: Course = {
-  id: 'crs_mtcm303',
-  courseCode: 'MTCM303',
-  courseName: 'Community Medical Technology',
-  academicYear: 2569,
-  semester: Semester.FIRST,
-  coordinatorName: 'อ.ดร. สมชาย ใจดี',
-  ownerId: teacherUser.id,
-  ownerName: 'อ.ดร. สมชาย ใจดี',
-  facultyCode: 'MT',
-  departmentCode: 'CM',
-  majorCode: 'MTMT',
-  degreeLevel: 'ปริญญาตรี',
-  curriculums: [
-    'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)'
-  ],
-  defaultLat: 13.7988363,
-  defaultLng: 100.322944,
-  allowedGpsRadius: 200,
-  weeks: [
-    { weekNumber: 1, topic: 'Principles of Primary Health Care & Field Work', date: '2026-07-15' },
-  ],
-  createdAt: new Date().toISOString(),
-};
-
-courses.set(bioinfoCourse.id, bioinfoCourse);
-courses.set(dataMgmtCourse.id, dataMgmtCourse);
-courses.set(commTechCourse.id, commTechCourse);
-
-// Add course members
-courseMembers.push(
-  { id: 'cm_1', courseId: sampleCourse.id, userId: teacherUser.id, role: CourseMemberRole.CO_TEACHER, joinedAt: new Date().toISOString() },
-  { id: 'cm_2', courseId: sampleCourse.id, userId: coTeacherUser.id, role: CourseMemberRole.CO_TEACHER, joinedAt: new Date().toISOString() },
-  { id: 'cm_3', courseId: sampleCourse.id, userId: studentUser1.id, role: CourseMemberRole.STUDENT, joinedAt: new Date().toISOString() },
-  { id: 'cm_4', courseId: sampleCourse.id, userId: studentUser2.id, role: CourseMemberRole.STUDENT, joinedAt: new Date().toISOString() }
-);
-
-// Seed sessions
-const session1: Session = {
-  id: 'ses_1',
-  courseId: sampleCourse.id,
-  weekNumber: 1,
-  topic: 'Introduction & Requirements Engineering',
-  teacherLat: 13.7988363,
-  teacherLng: 100.322944,
-  isActive: false,
-  createdAt: new Date().toISOString(),
-};
-
-const session2: Session = {
-  id: 'ses_2',
-  courseId: sampleCourse.id,
-  weekNumber: 2,
-  topic: 'Microservices & RESTful API Design',
-  teacherLat: 13.7988363,
-  teacherLng: 100.322944,
-  isActive: false,
-  createdAt: new Date().toISOString(),
-};
-
-const session3: Session = {
-  id: 'ses_3',
-  courseId: sampleCourse.id,
-  weekNumber: 3,
-  topic: 'Database Schema & Anti-Proxy Security',
-  teacherLat: 13.7988363,
-  teacherLng: 100.322944,
-  isActive: true,
-  createdAt: new Date().toISOString(),
-};
-
-sessions.set(session1.id, session1);
-sessions.set(session2.id, session2);
-sessions.set(session3.id, session3);
-
-// Seed past attendance records
-attendanceRecords.push(
-  {
-    id: 'rec_1',
-    sessionId: session1.id,
-    studentId: studentUser1.id,
-    studentNameTh: 'นาย กิตติพงษ์ สุขเสริฐ',
-    studentNameEn: 'Mr. Kittipong Suksert',
-    studentUniversityId: '66010012',
-    timestamp: '2026-07-10T09:05:12Z',
-    status: AttendanceStatus.PRESENT,
-    scannedLat: 13.75631,
-    scannedLng: 100.50182,
-    distanceMeters: 3,
-    deviceId: 'dev_student_1',
-  },
-  {
-    id: 'rec_2',
-    sessionId: session1.id,
-    studentId: studentUser2.id,
-    studentNameTh: 'นางสาว ณัฐธิดา รักเรียน',
-    studentNameEn: 'Ms. Nattida Rakrien',
-    studentUniversityId: '66010045',
-    timestamp: '2026-07-10T09:08:44Z',
-    status: AttendanceStatus.PRESENT,
-    scannedLat: 13.75629,
-    scannedLng: 100.50178,
-    distanceMeters: 4,
-    deviceId: 'dev_student_2',
-  },
-  {
-    id: 'rec_3',
-    sessionId: session2.id,
-    studentId: studentUser1.id,
-    studentNameTh: 'นาย กิตติพงษ์ สุขเสริฐ',
-    studentNameEn: 'Mr. Kittipong Suksert',
-    studentUniversityId: '66010012',
-    timestamp: '2026-07-17T09:12:00Z',
-    status: AttendanceStatus.LATE,
-    scannedLat: 13.75635,
-    scannedLng: 100.50190,
-    distanceMeters: 12,
-    deviceId: 'dev_student_1',
-  }
-);
-
-// Seed initial sample leave request
-leaveRequests.push({
-  id: 'leave_demo_1',
-  studentId: 'usr_student_1',
-  studentNameTh: 'นาย กิตติพงษ์ สุขเสริฐ',
-  studentNameEn: 'Mr. Kittipong Suksert',
-  studentUniversityId: '66010012',
-  courseId: 'crs_test101',
-  courseCode: 'TEST101',
-  courseName: 'Software Architecture & System Design',
-  weekNumber: 3,
-  leaveType: LeaveType.SICK,
-  leaveDate: '2026-07-24',
-  reason: 'มีอาการไข้สูงและปวดศีรษะอย่างรุนแรง แพทย์ให้พักผ่อนเป็นเวลา 2 วัน',
-  attachmentName: 'medical_certificate.pdf',
-  status: LeaveStatus.PENDING,
-  createdAt: new Date().toISOString(),
-});
+// Boot Initialization: Load Local Cache or Seed Initial Data
+const isCacheLoaded = loadLocalCache();
+if (!isCacheLoaded) {
+  initDefaultSeedData();
+  saveLocalCache();
+}
 
 // --- WEBSOCKET SERVER SETUP ---
 const wss = new WebSocketServer({ noServer: true });
@@ -974,14 +1306,20 @@ app.put('/api/users/:userId/profile', (req, res) => {
 
   // Password update validation
   if (newPassword && newPassword.toString().trim() !== '') {
-    const expectedPassword = user.password || '123456';
-    if (currentPassword && currentPassword.toString() !== expectedPassword) {
-      return res.status(400).json({ error: 'รหัสผ่านปัจจุบันไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง' });
+    const isGoogleAccount = user.authProvider === 'google';
+    const isDefaultOrEmptyPassword = !user.password || user.password === '123456';
+    const bypassCurrentPasswordCheck = isGoogleAccount || isDefaultOrEmptyPassword || req.body.isGoogleOrFirstPasswordSet;
+
+    if (!bypassCurrentPasswordCheck) {
+      if (!currentPassword || currentPassword.toString() !== user.password) {
+        return res.status(400).json({ error: 'รหัสผ่านปัจจุบันไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง' });
+      }
     }
+
     if (newPassword.toString().length < 6) {
       return res.status(400).json({ error: 'รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร' });
     }
-    user.password = newPassword.toString();
+    user.password = newPassword.toString().trim();
   }
 
   if (title) user.title = title.toString().trim();
@@ -1193,6 +1531,8 @@ app.post('/api/courses', (req, res) => {
   };
 
   courses.set(newCourse.id, newCourse);
+  deletedCourseIds.delete(newCourse.id);
+  saveLocalCache();
   saveToFirestore(COLLECTIONS.COURSES, newCourse);
 
   // Add owner as course member
@@ -1347,6 +1687,8 @@ app.put('/api/courses/:id', (req, res) => {
   }
 
   courses.set(courseId, course);
+  deletedCourseIds.delete(courseId);
+  saveLocalCache();
   const updatedSessions = Array.from(sessions.values())
     .filter((s) => s.courseId === courseId)
     .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
@@ -1399,47 +1741,57 @@ app.delete('/api/courses/:id', async (req, res) => {
     return res.status(400).json({ error: 'รหัสผ่านไม่ถูกต้อง ไม่สามารถลบรายวิชาได้' });
   }
 
+  // Auto-backup before course deletion
+  await createSnapshotBackup(`Pre-Course Deletion (${course.courseCode || courseId})`, user.email || user.id);
+
   // Delete course from memory and Firestore
   courses.delete(courseId);
-  await deleteFromFirestore(COLLECTIONS.COURSES, courseId);
+  deletedCourseIds.add(courseId);
+  deleteFromFirestore(COLLECTIONS.COURSES, courseId).catch(() => {});
 
   // Delete course members
   for (let i = courseMembers.length - 1; i >= 0; i--) {
     if (courseMembers[i].courseId === courseId) {
       const member = courseMembers[i];
+      deletedMemberIds.add(member.id);
       courseMembers.splice(i, 1);
-      await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, member.id);
+      deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, member.id).catch(() => {});
     }
   }
 
   // Delete sessions associated with courseId
-  const deletedSessionIds = new Set<string>();
+  const deletedSesIds = new Set<string>();
   for (const [sesId, ses] of Array.from(sessions.entries())) {
     if (ses.courseId === courseId) {
       sessions.delete(sesId);
       deletedSessionIds.add(sesId);
-      await deleteFromFirestore(COLLECTIONS.SESSIONS, sesId);
+      deletedSesIds.add(sesId);
+      deleteFromFirestore(COLLECTIONS.SESSIONS, sesId).catch(() => {});
     }
   }
 
-  // Delete attendances associated with deleted sessionIds
-  for (let i = attendanceRecords.length - 1; i >= 0; i--) {
-    if (deletedSessionIds.has(attendanceRecords[i].sessionId)) {
-      const att = attendanceRecords[i];
-      attendanceRecords.splice(i, 1);
-      await deleteFromFirestore(COLLECTIONS.ATTENDANCE, att.id);
+  // NOTE: DATA PROTECTION POLICY
+  // Attendance/Checkin records are NEVER cascade-deleted when a course is removed.
+  // They remain in the database as historical audit records for students and administrators.
+  for (const att of attendanceRecords) {
+    if (deletedSesIds.has(att.sessionId)) {
+      (att as any).detachedCourse = true;
+      (att as any).originalCourseCode = course.courseCode;
+      (att as any).originalCourseName = course.courseName;
     }
   }
 
-  // Delete quick events associated with teacher if any
+  // Delete quick events strictly associated with this course or teacher
   for (const [qId, qEvent] of Array.from(quickEvents.entries())) {
-    if (qEvent.teacherId === user.id) {
+    if ((qEvent as any).courseId === courseId || qEvent.teacherId === user.id) {
       quickEvents.delete(qId);
-      await deleteFromFirestore(COLLECTIONS.QUICK_EVENTS, qId);
+      deleteFromFirestore(COLLECTIONS.QUICK_EVENTS, qId).catch(() => {});
     }
   }
 
-  res.json({ message: 'ลบรายวิชาและข้อมูลที่เกี่ยวข้องทั้งหมดเรียบร้อยแล้ว', courseId });
+  saveLocalCache();
+
+  res.json({ message: 'ลบรายวิชาสำเร็จ โดยประวัติการเช็กชื่อของนักศึกษาจะถูกเก็บรักษาไว้อย่างปลอดภัย', courseId });
 });
 
 // Teacher & Student Directory and Member Management Endpoints
@@ -1499,6 +1851,58 @@ app.post('/api/courses/:id/members/invite-student', (req, res) => {
   res.json({
     message: `เพิ่มนักศึกษา ${targetStudent.firstNameTh} ${targetStudent.lastNameTh} (${targetStudent.universityId || '-'}) เข้าร่วมรายวิชาสำเร็จ`,
     member: { ...newMember, user: targetStudent },
+  });
+});
+
+app.post('/api/courses/:id/members/invite-students-batch', async (req, res) => {
+  const courseId = req.params.id;
+  const { studentUserIds } = req.body;
+
+  if (!Array.isArray(studentUserIds) || studentUserIds.length === 0) {
+    return res.status(400).json({ error: 'กรุณาระบุรายชื่อนักศึกษาอย่างน้อย 1 คน' });
+  }
+
+  const course = courses.get(courseId);
+  if (!course) {
+    return res.status(404).json({ error: 'ไม่พบรายวิชาที่ระบุ' });
+  }
+
+  let addedCount = 0;
+  let updatedCount = 0;
+  const newMembersToSave: CourseMember[] = [];
+
+  for (const uid of studentUserIds) {
+    const targetStudent = users.get(uid);
+    if (!targetStudent) continue;
+
+    const existingMember = courseMembers.find((m) => m.courseId === courseId && m.userId === uid);
+    if (existingMember) {
+      existingMember.role = CourseMemberRole.STUDENT;
+      saveToFirestore(COLLECTIONS.COURSE_MEMBERS, existingMember);
+      updatedCount++;
+    } else {
+      const newMember: CourseMember = {
+        id: `cm_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        courseId,
+        userId: uid,
+        role: CourseMemberRole.STUDENT,
+        joinedAt: new Date().toISOString(),
+      };
+      courseMembers.push(newMember);
+      newMembersToSave.push(newMember);
+      addedCount++;
+    }
+  }
+
+  if (newMembersToSave.length > 0) {
+    await batchSaveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMembersToSave);
+  }
+
+  res.json({
+    message: `เพิ่มนักศึกษาเข้าร่วมรายวิชาสำเร็จจำนวน ${addedCount} คน${updatedCount > 0 ? ` (มีอยู่แล้ว ${updatedCount} คน)` : ''}`,
+    addedCount,
+    updatedCount,
+    total: studentUserIds.length,
   });
 });
 
@@ -2384,9 +2788,16 @@ app.post('/api/checkin/quick', (req, res) => {
 
 // 6. CSV Export Endpoint
 app.get('/api/export-csv/:courseId', (req, res) => {
-  const course = courses.get(req.params.courseId);
+  let course = courses.get(req.params.courseId);
   if (!course) {
-    return res.status(404).send('Course not found');
+    course = Array.from(courses.values()).find(
+      (c) => c.id === req.params.courseId || c.courseCode === req.params.courseId
+    );
+  }
+  if (!course) {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="error_course_not_found.csv"');
+    return res.status(404).send('\uFEFF' + 'ข้อผิดพลาด,ไม่พบข้อมูลรายวิชาดังกล่าว (Course not found)\n');
   }
 
   const courseSessions = Array.from(sessions.values())
@@ -2752,26 +3163,51 @@ app.get('/api/teacher/courses-overview', (req, res) => {
         } else {
           const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === m.userId);
           if (rec) {
-            attendedCount++;
-            const recDt = new Date(rec.timestamp);
-            validCheckinTimes.push(recDt);
-            if (!lastCheckinTime || new Date(rec.timestamp).getTime() > new Date(lastCheckinTime).getTime()) {
-              lastCheckinTime = rec.timestamp;
-              lastCheckinMethod = rec.checkinMethod;
-            }
             const timeBkk = formatBangkokTime(rec.timestamp);
-            const isLate = rec.status === AttendanceStatus.LATE || Boolean(rec.isLate);
-            const statusLabel = isLate ? `มาสาย (${timeBkk})` : `มาเรียน (${timeBkk})`;
-            return {
-              sessionId: s.id,
-              weekNumber: s.weekNumber,
-              topic: s.topic,
-              status: isLate ? 'LATE' : 'PRESENT',
-              statusText: statusLabel,
-              shortStatus: isLate ? 'มาสาย' : 'มาเรียน',
-              checkinTime: rec.timestamp,
-              checkinTimeBangkok: timeBkk,
-            };
+            const recStatus = rec.status as string;
+            if (recStatus === 'LEAVE' || recStatus === AttendanceStatus.LEAVE) {
+              return {
+                sessionId: s.id,
+                weekNumber: s.weekNumber,
+                topic: s.topic,
+                status: 'LEAVE',
+                statusText: 'ลาเรียน (บันทึกโดยอาจารย์)',
+                shortStatus: 'ลาเรียน',
+                checkinTime: rec.timestamp,
+                checkinTimeBangkok: timeBkk,
+              };
+            } else if (recStatus === 'ABSENT' || recStatus === AttendanceStatus.ABSENT) {
+              return {
+                sessionId: s.id,
+                weekNumber: s.weekNumber,
+                topic: s.topic,
+                status: 'ABSENT',
+                statusText: 'ขาดเรียน (บันทึกโดยอาจารย์)',
+                shortStatus: 'ขาดเรียน',
+                checkinTime: null,
+                checkinTimeBangkok: null,
+              };
+            } else {
+              attendedCount++;
+              const recDt = new Date(rec.timestamp);
+              validCheckinTimes.push(recDt);
+              if (!lastCheckinTime || new Date(rec.timestamp).getTime() > new Date(lastCheckinTime).getTime()) {
+                lastCheckinTime = rec.timestamp;
+                lastCheckinMethod = rec.checkinMethod;
+              }
+              const isLate = rec.status === AttendanceStatus.LATE || Boolean(rec.isLate);
+              const statusLabel = isLate ? `มาสาย (${timeBkk})` : `มาเรียน (${timeBkk})`;
+              return {
+                sessionId: s.id,
+                weekNumber: s.weekNumber,
+                topic: s.topic,
+                status: isLate ? 'LATE' : 'PRESENT',
+                statusText: statusLabel,
+                shortStatus: isLate ? 'มาสาย' : 'มาเรียน',
+                checkinTime: rec.timestamp,
+                checkinTimeBangkok: timeBkk,
+              };
+            }
           } else {
             return {
               sessionId: s.id,
@@ -2965,10 +3401,12 @@ async function purgeNonDemoUsers(): Promise<{ deletedCount: number; remainingUse
   
   try {
     const fsUsers = await getAllFromFirestore<User>(COLLECTIONS.USERS);
-    for (const u of fsUsers) {
-      if (u && u.id && !DEMO_USER_IDS.has(u.id)) {
-        await deleteFromFirestore(COLLECTIONS.USERS, u.id);
-        deletedCount++;
+    if (fsUsers && fsUsers.length > 0) {
+      for (const u of fsUsers) {
+        if (u && u.id && !DEMO_USER_IDS.has(u.id)) {
+          await deleteFromFirestore(COLLECTIONS.USERS, u.id);
+          deletedCount++;
+        }
       }
     }
   } catch (err) {
@@ -2997,6 +3435,108 @@ app.post('/api/admin/reset-users', async (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการลบข้อมูล' });
+  }
+});
+
+// --- SYSTEM BACKUP & DATA INTEGRITY ENDPOINTS ---
+
+// Fetch list of available system backups
+app.get('/api/admin/backups', async (req, res) => {
+  try {
+    const memoryList = systemBackups.map(({ data, ...meta }) => ({
+      ...meta,
+      type: getBackupType(meta),
+    }));
+
+    let fsList: any[] = [];
+    try {
+      const fsBackups = await getAllFromFirestore<any>('SYSTEM_BACKUPS');
+      if (fsBackups && fsBackups.length > 0) {
+        fsList = fsBackups.map(({ data, ...meta }) => ({
+          ...meta,
+          type: getBackupType(meta),
+        }));
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    const map = new Map<string, any>();
+    fsList.forEach((b) => map.set(b.id, b));
+    memoryList.forEach((b) => map.set(b.id, b));
+
+    const combined = Array.from(map.values()).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+
+    res.json({ backups: combined });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error fetching system backups' });
+  }
+});
+
+// Create a new snapshot backup manually
+app.post('/api/admin/backups/create', async (req, res) => {
+  try {
+    const { label } = req.body || {};
+    const backup = await createSnapshotBackup(label || 'Manual Admin Backup Point', 'Admin User', 'manual');
+    const { data, ...meta } = backup;
+    res.json({ message: 'สร้างจุดสำรองข้อมูล (Manual Backup Snapshot) สำเร็จเรียบร้อยแล้ว', backup: meta });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Error creating manual system backup' });
+  }
+});
+
+// Delete a snapshot backup manually
+app.delete('/api/admin/backups/:backupId', async (req, res) => {
+  try {
+    const { backupId } = req.params;
+    await deleteFromFirestore('SYSTEM_BACKUPS', backupId);
+    const idx = systemBackups.findIndex((b) => b.id === backupId);
+    if (idx >= 0) {
+      systemBackups.splice(idx, 1);
+    }
+    res.json({ message: 'ลบจุดสำรองข้อมูล (Backup Snapshot) สำเร็จเรียบร้อยแล้ว' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error deleting system backup' });
+  }
+});
+
+// Restore from a snapshot backup
+app.post('/api/admin/backups/restore/:backupId', async (req, res) => {
+  try {
+    const { backupId } = req.params;
+    const result = await restoreSnapshotBackup(backupId);
+    res.json({
+      message: 'กู้คืนข้อมูลทั้งระบบจากจุดสำรอง (Backup Snapshot) สำเร็จเรียบร้อยแล้ว',
+      ...result,
+      currentAttendanceCount: attendanceRecords.length,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error restoring system backup' });
+  }
+});
+
+// Auto-heal database integrity
+app.post('/api/admin/database/auto-heal', async (req, res) => {
+  try {
+    // 1. Force sync from Firestore first to pick up any direct changes/deletions from Firebase Console
+    await syncFromFirestore();
+
+    if (attendanceRecords.length < 87) {
+      await importRealCsvAttendanceRecords();
+    }
+    const backup = await createSnapshotBackup('Integrity Auto-Heal Check', 'System Auto-Heal');
+    res.json({
+      message: 'ซิงค์และตรวจสอบกู้คืนความสมบูรณ์ของฐานข้อมูลจาก Firestore สำเร็จเรียบร้อยแล้ว',
+      attendanceCount: attendanceRecords.length,
+      usersCount: users.size,
+      coursesCount: courses.size,
+      sessionsCount: sessions.size,
+      latestBackupId: backup.id,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error executing auto-heal' });
   }
 });
 
@@ -3199,12 +3739,11 @@ app.delete('/api/admin/database/document/:collectionName/:docId', async (req, re
           }
         }
 
-        // Cascade delete attendance records
-        for (let i = attendanceRecords.length - 1; i >= 0; i--) {
-          if (deletedSessionIds.has(attendanceRecords[i].sessionId)) {
-            const att = attendanceRecords[i];
-            attendanceRecords.splice(i, 1);
-            await deleteFromFirestore(COLLECTIONS.ATTENDANCE, att.id);
+        // NOTE: DATA PROTECTION POLICY
+        // Attendance records are NEVER cascade-deleted when deleting a course.
+        for (const att of attendanceRecords) {
+          if (deletedSessionIds.has(att.sessionId)) {
+            (att as any).detachedCourse = true;
           }
         }
 
@@ -3505,25 +4044,14 @@ async function cleanOrphanedData() {
     }
   }
 
-  // 3. Clean attendanceRecords
-  for (let i = attendanceRecords.length - 1; i >= 0; i--) {
-    const att = attendanceRecords[i];
-    const sessionExists = att.sessionId && sessions.has(att.sessionId);
-    const studentExists = att.studentId && users.has(att.studentId);
-
-    if (!sessionExists || !studentExists) {
-      const reason = !sessionExists ? `ไม่พบคาบเรียน (${att.sessionId})` : `ไม่พบนักศึกษา (${att.studentId})`;
-      deletedSummary.attendanceRecords.push(`ID: ${att.id} [${reason}]`);
-      attendanceRecords.splice(i, 1);
-      await deleteFromFirestore(COLLECTIONS.ATTENDANCE, att.id);
-    }
-  }
+  // 3. Attendance records are PROTECTED and NEVER DELETED during database cleanup
+  // Historical check-in records are preserved intact for student audit compliance.
 
   // 4. Clean leaveRequests
   for (let i = leaveRequests.length - 1; i >= 0; i--) {
     const lr = leaveRequests[i];
     const courseExists = lr.courseId && courses.has(lr.courseId);
-    const studentExists = lr.studentId && users.has(lr.studentId);
+    const studentExists = lr.studentId && (users.has(lr.studentId) || Array.from(users.values()).some((u) => u.universityId === lr.studentId));
 
     if (!courseExists || !studentExists) {
       const reason = !courseExists ? `ไม่พบวิชา (${lr.courseId})` : `ไม่พบนักศึกษา (${lr.studentId})`;
@@ -4009,7 +4537,7 @@ app.post('/api/users/:userId/devices/reset', async (req, res) => {
 
 // Override attendance record manually
 app.post('/api/admin/attendance/override', async (req, res) => {
-  const { studentId, sessionId, eventId, courseId, status, checkinMethod } = req.body;
+  const { studentId, sessionId: rawSessionId, weekNumber, eventId, courseId, status, checkinMethod } = req.body;
 
   let targetUser = users.get(studentId);
   if (!targetUser) {
@@ -4020,6 +4548,43 @@ app.post('/api/admin/attendance/override', async (req, res) => {
 
   if (!targetUser) {
     return res.status(404).json({ error: 'ไม่พบข้อมูลผู้ใช้ในระบบ (กรุณาเลือกผู้ใช้ที่มีอยู่จริง)' });
+  }
+
+  // Auto-resolve session ID if missing
+  let sessionId = rawSessionId;
+  if (!sessionId && courseId && weekNumber) {
+    let matchedSession = Array.from(sessions.values()).find(
+      (s) => s.courseId === courseId && Number(s.weekNumber) === Number(weekNumber)
+    );
+    if (!matchedSession) {
+      const newSessionId = `ses_${courseId}_wk${weekNumber}_${Date.now()}`;
+      matchedSession = {
+        id: newSessionId,
+        courseId,
+        weekNumber: Number(weekNumber),
+        topic: `การสอน สัปดาห์ที่ ${weekNumber}`,
+        createdAt: new Date().toISOString(),
+        teacherLat: 0,
+        teacherLng: 0,
+        isActive: false,
+      };
+      sessions.set(newSessionId, matchedSession);
+      await saveToFirestore(COLLECTIONS.SESSIONS, matchedSession);
+    }
+    sessionId = matchedSession.id;
+  }
+
+  // Prevent teachers from overriding approved student leaves
+  if (targetUser.role === UserRole.STUDENT && courseId && sessionId && (req as any).user?.role === UserRole.TEACHER) {
+    const matchedSes = sessions.get(sessionId);
+    if (matchedSes) {
+      const approvedLeave = getApprovedLeaveForSession(targetUser.id, courseId, matchedSes);
+      if (approvedLeave) {
+        return res.status(400).json({
+          error: `ไม่สามารถแก้ไขสถานะได้ เนื่องจากนักศึกษามีใบลาที่ได้รับการอนุมัติแล้ว (${approvedLeave.leaveType === LeaveType.SICK ? 'ลาป่วย' : 'ลากิจ'})`,
+        });
+      }
+    }
   }
 
   if (targetUser.role === UserRole.TEACHER) {
@@ -4092,291 +4657,593 @@ app.post('/api/admin/attendance/override', async (req, res) => {
   res.json({ message: 'ปรับแก้ไขข้อมูลการเช็กชื่อของนักศึกษาสำเร็จเรียบร้อยแล้ว', record });
 });
 
+// Clear all student check-in attendance records completely
+app.post('/api/admin/clear-all-attendance', async (req, res) => {
+  try {
+    const fsAttendance = await getAllFromFirestore<AttendanceRecord>(COLLECTIONS.ATTENDANCE);
+    const count = Math.max(attendanceRecords.length, fsAttendance?.length || 0);
+
+    if (fsAttendance && fsAttendance.length > 0) {
+      for (const ar of fsAttendance) {
+        if (ar && ar.id) {
+          await deleteFromFirestore(COLLECTIONS.ATTENDANCE, ar.id);
+        }
+      }
+    }
+    for (const ar of attendanceRecords) {
+      if (ar && ar.id) {
+        await deleteFromFirestore(COLLECTIONS.ATTENDANCE, ar.id);
+      }
+    }
+    attendanceRecords.length = 0;
+
+    res.json({
+      message: 'ลบข้อมูลการเช็กชื่อเข้าเรียนทั้งหมดเรียบร้อยแล้ว',
+      deletedCount: count,
+      remainingCount: 0,
+    });
+  } catch (err: any) {
+    console.error('Error clearing attendance records:', err);
+    res.status(500).json({ error: `เกิดข้อผิดพลาดในการลบข้อมูลการเช็กชื่อ: ${err.message}` });
+  }
+});
+
+app.delete('/api/admin/attendance', async (req, res) => {
+  try {
+    const fsAttendance = await getAllFromFirestore<AttendanceRecord>(COLLECTIONS.ATTENDANCE);
+    const count = Math.max(attendanceRecords.length, fsAttendance?.length || 0);
+
+    if (fsAttendance && fsAttendance.length > 0) {
+      for (const ar of fsAttendance) {
+        if (ar && ar.id) {
+          await deleteFromFirestore(COLLECTIONS.ATTENDANCE, ar.id);
+        }
+      }
+    }
+    for (const ar of attendanceRecords) {
+      if (ar && ar.id) {
+        await deleteFromFirestore(COLLECTIONS.ATTENDANCE, ar.id);
+      }
+    }
+    attendanceRecords.length = 0;
+
+    res.json({
+      message: 'ลบข้อมูลการเช็กชื่อเข้าเรียนทั้งหมดเรียบร้อยแล้ว',
+      deletedCount: count,
+      remainingCount: 0,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Real CSV Exported Records (87 rows)
+const CSV_RAW_RECORDS = [
+  { no: '1', type: 'นักศึกษา', studentId: '6806043', name: 'นางสาว รุจาภา สันติวสุธา', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:46:32' },
+  { no: '2', type: 'นักศึกษา', studentId: '6806063', name: 'นางสาว ณัฐนันท์ พระธาตุ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:45:53' },
+  { no: '3', type: 'นักศึกษา', studentId: '6806045', name: 'นางสาว วีร์สุดา เหลืองพูนสิน', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:45:38' },
+  { no: '4', type: 'นักศึกษา', studentId: '6806073', name: 'นางสาว บุณยวีร์ ตันสิทธิพันธุ์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:45:37' },
+  { no: '5', type: 'นักศึกษา', studentId: '6806058', name: 'นางสาว คุ้มขวัญ เดชไพบูลย์มงคล', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:45:37' },
+  { no: '6', type: 'นักศึกษา', studentId: '6806069', name: 'นาย THANACHOT CHANSONG', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:45:36' },
+  { no: '7', type: 'นักศึกษา', studentId: '6806027', name: 'นางสาว ชนนิกานต์ แสนประเสริฐ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:45:34' },
+  { no: '8', type: 'นักศึกษา', studentId: '6806039', name: 'นางสาว พาขวัญ สุวรรณธาดา', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:45:34' },
+  { no: '9', type: 'นักศึกษา', studentId: '6806065', name: 'นางสาว ณิชกานต์ ชัยพฤกษ์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:45:33' },
+  { no: '10', type: 'นักศึกษา', studentId: '6806056', name: 'นางสาว KANLAYAKORN SUWANMANASIN', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:45:32' },
+  { no: '11', type: 'นักศึกษา', studentId: '6806081', name: 'นางสาว ภคมน มหารงค์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:45:21' },
+  { no: '12', type: 'นักศึกษา', studentId: '6806047', name: 'นางสาว สิตางศุ์ ฟักทอง', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:42:09' },
+  { no: '13', type: 'นักศึกษา', studentId: '6806089', name: 'นางสาว WARANGRAT PAPHAWADIDIT', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:41:35' },
+  { no: '14', type: 'นักศึกษา', studentId: '6806005', name: 'นางสาว ณัณท์ณภัส แก้วสว่าง', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:41:04' },
+  { no: '15', type: 'นักศึกษา', studentId: '6806055', name: 'นางสาว กัญญารัตน์ แป้นเอียด', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:40:42' },
+  { no: '16', type: 'นักศึกษา', studentId: '6806093', name: 'นางสาว สายน้ำ ทัพพวิบูล', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'TOKEN', note: '-', time: '3/8/2569 13:40:40' },
+  { no: '17', type: 'นักศึกษา', studentId: '6806057', name: 'นางสาว เกตน์นิภา วงษ์อาจ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'TOKEN', note: '-', time: '3/8/2569 13:40:39' },
+  { no: '18', type: 'นักศึกษา', studentId: '6806033', name: 'นาย THIANPHALIT LEELAMANEE', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'GPS_ONLY', note: '-', time: '3/8/2569 13:40:29' },
+  { no: '19', type: 'นักศึกษา', studentId: '6806085', name: 'นาย รัฐกิตติ์ สุรีย์นิธิคุณ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:40:20' },
+  { no: '20', type: 'นักศึกษา', studentId: '6806079', name: 'นาย PHANTHITA CHOTIRAT', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:40:08' },
+  { no: '21', type: 'นักศึกษา', studentId: '6806066', name: 'นาย NICHAKAN PINIT', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'TOKEN', note: '-', time: '3/8/2569 13:39:50' },
+  { no: '22', type: 'นักศึกษา', studentId: '6806064', name: 'นาย ณัฐภัทร ชวนานุกูล', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'TOKEN', note: '-', time: '3/8/2569 13:39:45' },
+  { no: '23', type: 'นักศึกษา', studentId: '6806052', name: 'นางสาว อวัสดา วรรธนะกุลโรจน์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'TOKEN', note: '-', time: '3/8/2569 13:39:45' },
+  { no: '24', type: 'นักศึกษา', studentId: '6806016', name: 'นางสาว PAWITPORN POTO', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:39:39' },
+  { no: '25', type: 'นักศึกษา', studentId: '6806049', name: 'นางสาว สุทธิกานต์ เอกสมัย', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:39:36' },
+  { no: '26', type: 'นักศึกษา', studentId: '6806086', name: 'นางสาว รัตนากร น้อยวัน', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:39:33' },
+  { no: '27', type: 'นักศึกษา', studentId: '6806068', name: 'นาย ติณณภพ อารีวัฒนะ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:39:30' },
+  { no: '28', type: 'นักศึกษา', studentId: '6806020', name: 'นางสาว กณิศา สร้อยสังวาลย์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:39:20' },
+  { no: '29', type: 'นักศึกษา', studentId: '6806054', name: 'นางสาว กฤษณา บุญศรี', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:39:12' },
+  { no: '30', type: 'นักศึกษา', studentId: '6806078', name: 'นางสาว พัณณ์ชิตา สงวนเกียรติชัย', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:39:12' },
+  { no: '31', type: 'นักศึกษา', studentId: '6806070', name: 'นางสาว ธนพร เจริญวิทยวรกุล', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'GPS_ONLY', note: '-', time: '3/8/2569 13:39:12' },
+  { no: '32', type: 'นักศึกษา', studentId: '6806083', name: 'นาย ภาณุวัฒน์ คำศรีสุข', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:39:08' },
+  { no: '33', type: 'นักศึกษา', studentId: '6806075', name: 'นางสาว ปุณิกา เบญจกาญจน์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:39:07' },
+  { no: '34', type: 'นักศึกษา', studentId: '6806076', name: 'นางสาว พัชรพร ขาวนาค', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:55' },
+  { no: '35', type: 'นักศึกษา', studentId: '6806077', name: 'นางสาว พัชริญา ฉัตรเทียนชัย', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:54' },
+  { no: '36', type: 'นักศึกษา', studentId: '6806010', name: 'นาย PRAKASIT KAEWTRAKULCHAI', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:52' },
+  { no: '37', type: 'นักศึกษา', studentId: '6806037', name: 'นางสาว พรรณพนัช จงกลกลาง', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:52' },
+  { no: '38', type: 'นักศึกษา', studentId: '6806028', name: 'นางสาว ณภัทร หวังศรีโรจน์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:51' },
+  { no: '39', type: 'นักศึกษา', studentId: '6806096', name: 'นางสาว SUCHADA KLINTOMYA', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:50' },
+  { no: '40', type: 'นักศึกษา', studentId: '6806050', name: 'นางสาว สุพิธชยา ทองสุข', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:50' },
+  { no: '41', type: 'นักศึกษา', studentId: '6806084', name: 'นางสาว PURITA KANOKKAWINCHOT', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:48' },
+  { no: '42', type: 'นักศึกษา', studentId: '6806046', name: 'นาย ศิภูริน บางโพ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:48' },
+  { no: '43', type: 'นักศึกษา', studentId: '6806090', name: 'นางสาว ศรัณย์พร แซ่เตีย', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:47' },
+  { no: '44', type: 'นักศึกษา', studentId: '6706017', name: 'นางสาว ภัทรวดี คำมา', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:46' },
+  { no: '45', type: 'นักศึกษา', studentId: '6806061', name: 'นางสาว ณัฏฐกมล อรุณนันทพานิช', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:45' },
+  { no: '46', type: 'นักศึกษา', studentId: '6806072', name: 'นาย NOPPADON SONGSARN', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:45' },
+  { no: '47', type: 'นักศึกษา', studentId: '6806006', name: 'นางสาว ธนภรณ์ สร้อยทอง', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:45' },
+  { no: '48', type: 'นักศึกษา', studentId: '6806091', name: 'นางสาว ศิริรัตน์ ทองสง', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:44' },
+  { no: '49', type: 'นักศึกษา', studentId: '6806032', name: 'นาย ธนาชัย น้อยจีน', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:44' },
+  { no: '50', type: 'นักศึกษา', studentId: '6806053', name: 'นาย กรภัทร สุขสบาย', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:44' },
+  { no: '51', type: 'นักศึกษา', studentId: '6806048', name: 'นางสาว สิริฉัตร แซ่ลี้', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:43' },
+  { no: '52', type: 'นักศึกษา', studentId: '6806042', name: 'นางสาว รินนภา โฮ้หนู', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:41' },
+  { no: '53', type: 'นักศึกษา', studentId: '6806097', name: 'นางสาว สุนิสา เหมือนแจ่ม', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:41' },
+  { no: '54', type: 'นักศึกษา', studentId: '6806034', name: 'นางสาว นันทพัชร์ เธียรสุวรรณแสง', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:41' },
+  { no: '55', type: 'นักศึกษา', studentId: '6806087', name: 'นางสาว ลดาดล อินถาเครือ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:41' },
+  { no: '56', type: 'นักศึกษา', studentId: '6806013', name: 'นางสาว พวงมณี พรหมชนะ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:40' },
+  { no: '57', type: 'นักศึกษา', studentId: '6806074', name: 'นางสาว PALITA SIRILEARNMAN', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:39' },
+  { no: '58', type: 'นักศึกษา', studentId: '6806031', name: 'นางสาว THANANCHANOK YIMJANG', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:39' },
+  { no: '59', type: 'นักศึกษา', studentId: '6806025', name: 'นางสาว ฉันท์ชนิต ธรรมสูตร', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:38' },
+  { no: '60', type: 'นักศึกษา', studentId: '6806038', name: 'นางสาว PHATCHARIN SRIKHAMSAENG', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:37' },
+  { no: '61', type: 'นักศึกษา', studentId: '6806003', name: 'นางสาว จิดาภา แซ่ลี่', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:37' },
+  { no: '62', type: 'นักศึกษา', studentId: '6806088', name: 'นางสาว วรนิษฐา ดวงดี', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:37' },
+  { no: '63', type: 'นักศึกษา', studentId: '6806030', name: 'นางสาว ณิชมน พฤกษ์รังษี', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:34' },
+  { no: '64', type: 'นักศึกษา', studentId: '6806004', name: 'นาย ญาณกร พูลทรัพย์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:33' },
+  { no: '65', type: 'นักศึกษา', studentId: '6806001', name: 'นางสาว กุศลิน หนูในน้ำ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:33' },
+  { no: '66', type: 'นักศึกษา', studentId: '6806022', name: 'นางสาว เขมจิรา รอชัยกุล', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'GPS_ONLY', note: '-', time: '3/8/2569 13:38:31' },
+  { no: '67', type: 'นักศึกษา', studentId: '6806023', name: 'นางสาว จิดาภา ยอดชาญ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:31' },
+  { no: '68', type: 'นักศึกษา', studentId: '6806041', name: 'นางสาว ภูษชา คนไว', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:30' },
+  { no: '69', type: 'นักศึกษา', studentId: '6806017', name: 'นางสาว วศินี บุญณมี', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:29' },
+  { no: '70', type: 'นักศึกษา', studentId: '6806002', name: 'นางสาว แก้วตา อินทวงค์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:29' },
+  { no: '71', type: 'นักศึกษา', studentId: '6806011', name: 'นางสาว ปวีณ์ลดา เพ็ชรมณี', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:28' },
+  { no: '72', type: 'นักศึกษา', studentId: '6806026', name: 'นางสาว ชญาดา เพ็ชรปิ่นแก้ว', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:27' },
+  { no: '73', type: 'นักศึกษา', studentId: '6806029', name: 'นาย ณัฐนนท์ อินทร์กลิ่น', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:26' },
+  { no: '74', type: 'นักศึกษา', studentId: '6806067', name: 'นางสาว ดวงกมล จงพิริยะไพบูลย์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:25' },
+  { no: '75', type: 'นักศึกษา', studentId: '6806092', name: 'นาย ศุภวิชญ์ อิงคศรี', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:25' },
+  { no: '76', type: 'นักศึกษา', studentId: '6806062', name: 'นางสาว ณัฐนรี ทองสงค์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:24' },
+  { no: '77', type: 'นักศึกษา', studentId: '6806007', name: 'นาย TEERAPAT JAROENSUK', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:24' },
+  { no: '78', type: 'นักศึกษา', studentId: '6806095', name: 'นาย SINGHA KETKAN', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:23' },
+  { no: '79', type: 'นักศึกษา', studentId: '6806044', name: 'นางสาว วริศา ณัทกลทีป์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:19' },
+  { no: '80', type: 'นักศึกษา', studentId: '6806036', name: 'นางสาว ปาริชาติ ตระกูลเกษมสิริ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:19' },
+  { no: '81', type: 'นักศึกษา', studentId: '6806012', name: 'นางสาว เปรมมิกา บัณฑิตสินทรัพย์', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:18' },
+  { no: '82', type: 'นักศึกษา', studentId: '6806009', name: 'นาย ปฐมกาล สุทธิ์เสงี่ยม', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:17' },
+  { no: '83', type: 'นักศึกษา', studentId: '6806008', name: 'นางสาว NARA HUSSAWARIN', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:15' },
+  { no: '84', type: 'นักศึกษา', studentId: '6806082', name: 'นางสาว ภัทรนันท์ แซ่ปึง', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:11' },
+  { no: '85', type: 'นักศึกษา', studentId: '6806094', name: 'นางสาว สาริศา แดงประภา', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '3/8/2569 13:38:04' },
+  { no: '86', type: 'นักศึกษา', studentId: '66010012', name: 'นาย กิตติพงษ์ สุขเสริฐ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 2', status: 'มาเรียน (PRESENT)', method: 'HYBRID', note: '-', time: '31/7/2569 13:55:17' },
+  { no: '87', type: 'นักศึกษา', studentId: '66010012', name: 'นาย กิตติพงษ์ สุขเสริฐ', code: 'MTID 204', course: 'Basic Data Management with Computer', week: 'สัปดาห์ที่ 1', status: 'มาเรียน (PRESENT)', method: 'TOKEN', note: '-', time: '31/7/2569 13:52:05' },
+];
+
+function parseThaiDateTime(timeStr: string): string {
+  try {
+    const [datePart, timePart] = timeStr.trim().split(' ');
+    const [dStr, mStr, yBEStr] = datePart.split('/');
+    const d = parseInt(dStr, 10);
+    const m = parseInt(mStr, 10);
+    const yBE = parseInt(yBEStr, 10);
+    const yCE = yBE - 543;
+    const [hhStr, mmStr, ssStr] = timePart.split(':');
+    const hh = parseInt(hhStr, 10);
+    const mm = parseInt(mmStr, 10);
+    const ss = parseInt(ssStr, 10);
+
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    return `${yCE}-${pad(m)}-${pad(d)}T${pad(hh)}:${pad(mm)}:${pad(ss)}+07:00`;
+  } catch (err) {
+    return new Date().toISOString();
+  }
+}
+
+function splitThaiName(fullNameStr: string) {
+  let title = '';
+  let rest = fullNameStr.trim();
+  if (rest.startsWith('นางสาว ')) {
+    title = 'นางสาว';
+    rest = rest.substring(7).trim();
+  } else if (rest.startsWith('นาย ')) {
+    title = 'นาย';
+    rest = rest.substring(4).trim();
+  }
+
+  const parts = rest.split(/\s+/);
+  const firstName = parts[0] || '';
+  const lastName = parts.slice(1).join(' ') || '';
+
+  const isEnglish = /^[A-Za-z\s]+$/.test(rest);
+
+  return {
+    title,
+    firstNameTh: isEnglish ? '' : firstName,
+    lastNameTh: isEnglish ? '' : lastName,
+    firstNameEn: isEnglish ? firstName : '',
+    lastNameEn: isEnglish ? lastName : '',
+  };
+}
+
+async function importRealCsvAttendanceRecords() {
+  console.log('[CSV Import] Starting import of 87 real exported attendance records...');
+
+  // 1. Ensure courses exist
+  const mtid204: Course = {
+    id: 'crs_mtid204',
+    courseCode: 'MTID204',
+    courseName: 'Basic Data Management with Computer',
+    academicYear: 2569,
+    semester: Semester.FIRST,
+    coordinatorName: 'ผศ.ดร. วนิดา เรียนดี',
+    ownerId: 'usr_t2',
+    ownerName: 'ผศ.ดร. วนิดา เรียนดี',
+    facultyCode: 'MT',
+    departmentCode: 'ID',
+    majorCode: 'MTMT',
+    degreeLevel: 'ปริญญาตรี',
+    curriculums: ['วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)'],
+    defaultLat: 13.7988363,
+    defaultLng: 100.322944,
+    allowedGpsRadius: 200,
+    weeks: [
+      { weekNumber: 1, topic: 'Basic Data Management with Computer - Lecture 1', date: '2026-08-03' },
+      { weekNumber: 2, topic: 'Basic Data Management with Computer - Lecture 2', date: '2026-07-31' },
+    ],
+    createdAt: new Date().toISOString(),
+  };
+  courses.set(mtid204.id, mtid204);
+  await saveToFirestore(COLLECTIONS.COURSES, mtid204);
+
+  const test101 = courses.get('crs_test101');
+  if (test101) {
+    test101.courseName = 'Basic Data Management with Computer';
+    await saveToFirestore(COLLECTIONS.COURSES, test101);
+  }
+
+  // 2. Ensure Sessions exist
+  const sesMtid204W1: Session = {
+    id: 'ses_mtid204_w1',
+    courseId: 'crs_mtid204',
+    weekNumber: 1,
+    topic: 'Basic Data Management with Computer - Lecture 1',
+    teacherLat: 13.7988363,
+    teacherLng: 100.322944,
+    isActive: false,
+    createdAt: new Date().toISOString(),
+  };
+  const sesMtid204W2: Session = {
+    id: 'ses_mtid204_w2',
+    courseId: 'crs_mtid204',
+    weekNumber: 2,
+    topic: 'Basic Data Management with Computer - Lecture 2',
+    teacherLat: 13.7988363,
+    teacherLng: 100.322944,
+    isActive: false,
+    createdAt: new Date().toISOString(),
+  };
+  sessions.set(sesMtid204W1.id, sesMtid204W1);
+  sessions.set(sesMtid204W2.id, sesMtid204W2);
+  await saveToFirestore(COLLECTIONS.SESSIONS, sesMtid204W1);
+  await saveToFirestore(COLLECTIONS.SESSIONS, sesMtid204W2);
+
+  const sesTest101W1: Session = {
+    id: 'ses_1',
+    courseId: 'crs_test101',
+    weekNumber: 1,
+    topic: 'Basic Data Management with Computer - Lecture 1',
+    teacherLat: 13.7988363,
+    teacherLng: 100.322944,
+    isActive: false,
+    createdAt: new Date().toISOString(),
+  };
+  const sesTest101W2: Session = {
+    id: 'ses_2',
+    courseId: 'crs_test101',
+    weekNumber: 2,
+    topic: 'Basic Data Management with Computer - Lecture 2',
+    teacherLat: 13.7988363,
+    teacherLng: 100.322944,
+    isActive: false,
+    createdAt: new Date().toISOString(),
+  };
+  sessions.set(sesTest101W1.id, sesTest101W1);
+  sessions.set(sesTest101W2.id, sesTest101W2);
+  await saveToFirestore(COLLECTIONS.SESSIONS, sesTest101W1);
+  await saveToFirestore(COLLECTIONS.SESSIONS, sesTest101W2);
+
+  // 3. Import Students, Members & Attendance Records
+  const usersToSave: User[] = [];
+  const membersToSave: CourseMember[] = [];
+  const recordsToSave: AttendanceRecord[] = [];
+
+  for (const item of CSV_RAW_RECORDS) {
+    const stdId = item.studentId.trim();
+    const userId = `usr_std_${stdId}`;
+    const nameInfo = splitThaiName(item.name);
+
+    // Create/update User
+    const existingUser = users.get(userId);
+    const studentUser: User = existingUser || {
+      id: userId,
+      role: UserRole.STUDENT,
+      title: nameInfo.title,
+      firstNameTh: nameInfo.firstNameTh,
+      lastNameTh: nameInfo.lastNameTh,
+      firstNameEn: nameInfo.firstNameEn,
+      lastNameEn: nameInfo.lastNameEn,
+      universityId: stdId,
+      email: `${stdId}@student.mahidol.ac.th`,
+      password: 'password123',
+      department: 'ID',
+      createdAt: new Date().toISOString(),
+    };
+    if (!users.has(userId)) {
+      users.set(userId, studentUser);
+      usersToSave.push(studentUser);
+    }
+
+    // Enroll in MTID204 & TEST101
+    const cmMtid204Id = `cm_mtid204_${stdId}`;
+    if (!courseMembers.some((m) => m.id === cmMtid204Id)) {
+      const cm: CourseMember = {
+        id: cmMtid204Id,
+        courseId: 'crs_mtid204',
+        userId,
+        role: CourseMemberRole.STUDENT,
+        joinedAt: new Date().toISOString(),
+      };
+      courseMembers.push(cm);
+      membersToSave.push(cm);
+    }
+
+    const cmTest101Id = `cm_test101_${stdId}`;
+    if (!courseMembers.some((m) => m.id === cmTest101Id)) {
+      const cm: CourseMember = {
+        id: cmTest101Id,
+        courseId: 'crs_test101',
+        userId,
+        role: CourseMemberRole.STUDENT,
+        joinedAt: new Date().toISOString(),
+      };
+      courseMembers.push(cm);
+      membersToSave.push(cm);
+    }
+
+    // Parse attendance record
+    const weekNum = item.week.includes('2') ? 2 : 1;
+    const isoTimestamp = parseThaiDateTime(item.time);
+    const methodClean = (item.method.trim() || 'HYBRID') as any;
+
+    // MTID204 Record
+    const recId = `rec_csv_${item.no}`;
+    const recordMtid204: AttendanceRecord = {
+      id: recId,
+      sessionId: weekNum === 1 ? 'ses_mtid204_w1' : 'ses_mtid204_w2',
+      studentId: userId,
+      studentNameTh: item.name,
+      studentNameEn: nameInfo.firstNameEn ? `${nameInfo.firstNameEn} ${nameInfo.lastNameEn}` : item.name,
+      studentUniversityId: stdId,
+      timestamp: isoTimestamp,
+      status: AttendanceStatus.PRESENT,
+      scannedLat: 13.7988363,
+      scannedLng: 100.322944,
+      distanceMeters: 3,
+      deviceId: `dev_${stdId}`,
+      checkinMethod: methodClean,
+    };
+
+    const existingIdx = attendanceRecords.findIndex((r) => r.id === recId);
+    if (existingIdx >= 0) {
+      attendanceRecords[existingIdx] = recordMtid204;
+    } else {
+      attendanceRecords.push(recordMtid204);
+    }
+    recordsToSave.push(recordMtid204);
+
+    // TEST101 Record
+    const recTest101Id = `rec_csv_test101_${item.no}`;
+    const recordTest101: AttendanceRecord = {
+      id: recTest101Id,
+      sessionId: weekNum === 1 ? 'ses_1' : 'ses_2',
+      studentId: userId,
+      studentNameTh: item.name,
+      studentNameEn: nameInfo.firstNameEn ? `${nameInfo.firstNameEn} ${nameInfo.lastNameEn}` : item.name,
+      studentUniversityId: stdId,
+      timestamp: isoTimestamp,
+      status: AttendanceStatus.PRESENT,
+      scannedLat: 13.7988363,
+      scannedLng: 100.322944,
+      distanceMeters: 3,
+      deviceId: `dev_${stdId}`,
+      checkinMethod: methodClean,
+    };
+
+    const existingTest101Idx = attendanceRecords.findIndex((r) => r.id === recTest101Id);
+    if (existingTest101Idx >= 0) {
+      attendanceRecords[existingTest101Idx] = recordTest101;
+    } else {
+      attendanceRecords.push(recordTest101);
+    }
+    recordsToSave.push(recordTest101);
+  }
+
+  // Execute batch writes in parallel
+  await Promise.all([
+    batchSaveToFirestore(COLLECTIONS.USERS, usersToSave),
+    batchSaveToFirestore(COLLECTIONS.COURSE_MEMBERS, membersToSave),
+    batchSaveToFirestore(COLLECTIONS.ATTENDANCE, recordsToSave),
+  ]);
+
+  console.log(`[CSV Import] Successfully imported all 87 real attendance records! Current total attendance records: ${attendanceRecords.length}`);
+}
+
+app.post('/api/admin/import-csv', async (req, res) => {
+  try {
+    await importRealCsvAttendanceRecords();
+    res.json({
+      message: 'นำเข้าข้อมูลการเช็กชื่อจริงจากไฟล์ CSV จำนวน 87 รายการสำเร็จเรียบร้อยแล้ว',
+      totalRecords: attendanceRecords.length,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Firestore Database Sync Handler
 async function syncFromFirestore() {
   try {
     const fsSettings = await getAllFromFirestore<SystemSettings>(COLLECTIONS.SYSTEM_SETTINGS);
-    const hasInitializedConfig = fsSettings && fsSettings.length > 0;
+    const hasInitializedConfig = Boolean(fsSettings && fsSettings.length > 0);
 
-    if (hasInitializedConfig) {
+    if (fsSettings && fsSettings.length > 0) {
       const config = fsSettings.find((s) => s.id === 'global_config') || fsSettings[0];
       if (config) {
         systemSettings = { ...systemSettings, ...config };
       }
-    } else {
+    } else if (fsSettings !== null && !hasInitializedConfig) {
       await saveToFirestore(COLLECTIONS.SYSTEM_SETTINGS, { id: 'global_config', ...systemSettings });
     }
 
+    // 1. Sync Users
     const fsUsers = await getAllFromFirestore<User>(COLLECTIONS.USERS);
-    if (fsUsers && fsUsers.length > 0) {
-      users.clear();
+    if (fsUsers !== null && fsUsers.length > 0) {
       for (const u of fsUsers) {
-        if (u && u.id) {
+        if (!u || !u.id) continue;
+        if (deletedUserIds.has(u.id)) {
+          deleteFromFirestore(COLLECTIONS.USERS, u.id).catch(() => {});
+        } else {
+          if (DEMO_USER_IDS.has(u.id)) {
+            u.isDemo = true;
+          }
           users.set(u.id, u);
         }
       }
-    } else if (!hasInitializedConfig) {
-      for (const u of users.values()) {
-        await saveToFirestore(COLLECTIONS.USERS, u);
+    }
+    for (const [id] of Array.from(users.entries())) {
+      if (deletedUserIds.has(id)) {
+        users.delete(id);
       }
-    } else {
-      users.clear();
     }
 
+    // 2. Sync Courses
     const fsCourses = await getAllFromFirestore<Course>(COLLECTIONS.COURSES);
-    if (fsCourses && fsCourses.length > 0) {
-      courses.clear();
+    if (fsCourses !== null && fsCourses.length > 0) {
       for (const c of fsCourses) {
-        courses.set(c.id, c);
+        if (!c || !c.id) continue;
+        if (deletedCourseIds.has(c.id)) {
+          deleteFromFirestore(COLLECTIONS.COURSES, c.id).catch(() => {});
+        } else {
+          courses.set(c.id, c);
+        }
       }
-    } else if (!hasInitializedConfig) {
-      for (const c of courses.values()) {
-        await saveToFirestore(COLLECTIONS.COURSES, c);
+    }
+    for (const [id] of Array.from(courses.entries())) {
+      if (deletedCourseIds.has(id)) {
+        courses.delete(id);
       }
-    } else {
-      courses.clear();
     }
 
+    // 3. Sync Course Members
     const fsMembers = await getAllFromFirestore<CourseMember>(COLLECTIONS.COURSE_MEMBERS);
-    if (fsMembers && fsMembers.length > 0) {
-      courseMembers.length = 0;
+    if (fsMembers !== null && fsMembers.length > 0) {
+      const memberMap = new Map<string, CourseMember>();
+      courseMembers.forEach((m) => {
+        if (m && m.id && !deletedMemberIds.has(m.id)) memberMap.set(m.id, m);
+      });
       for (const cm of fsMembers) {
-        if (cm.courseId === 'crs_mtid204') {
-          cm.courseId = 'crs_test101';
-          await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, cm);
+        if (!cm || !cm.id) continue;
+        if (deletedMemberIds.has(cm.id)) {
+          deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, cm.id).catch(() => {});
+        } else {
+          memberMap.set(cm.id, cm);
         }
-        courseMembers.push(cm);
       }
-    } else if (!hasInitializedConfig) {
-      for (const cm of courseMembers) {
-        await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, cm);
-      }
-    } else {
       courseMembers.length = 0;
+      courseMembers.push(...memberMap.values());
     }
 
+    // 4. Sync Sessions
     const fsSessions = await getAllFromFirestore<Session>(COLLECTIONS.SESSIONS);
-    if (fsSessions && fsSessions.length > 0) {
-      sessions.clear();
+    if (fsSessions !== null && fsSessions.length > 0) {
       for (const s of fsSessions) {
-        if (s.courseId === 'crs_mtid204') {
-          s.courseId = 'crs_test101';
-          await saveToFirestore(COLLECTIONS.SESSIONS, s);
+        if (!s || !s.id) continue;
+        if (deletedSessionIds.has(s.id)) {
+          deleteFromFirestore(COLLECTIONS.SESSIONS, s.id).catch(() => {});
+        } else {
+          sessions.set(s.id, s);
         }
-        sessions.set(s.id, s);
       }
-    } else if (!hasInitializedConfig) {
-      for (const s of sessions.values()) {
-        await saveToFirestore(COLLECTIONS.SESSIONS, s);
+    }
+    for (const [id] of Array.from(sessions.entries())) {
+      if (deletedSessionIds.has(id)) {
+        sessions.delete(id);
       }
-    } else {
-      sessions.clear();
     }
 
+    // 5. Sync Attendance Records
     const fsAttendance = await getAllFromFirestore<AttendanceRecord>(COLLECTIONS.ATTENDANCE);
-    if (fsAttendance && fsAttendance.length > 0) {
-      attendanceRecords.length = 0;
-      attendanceRecords.push(...fsAttendance);
-    } else if (!hasInitializedConfig) {
-      for (const ar of attendanceRecords) {
-        await saveToFirestore(COLLECTIONS.ATTENDANCE, ar);
+    if (fsAttendance !== null && fsAttendance.length > 0) {
+      const existingIds = new Set(attendanceRecords.map((r) => r.id));
+      for (const ar of fsAttendance) {
+        if (!ar || !ar.id) continue;
+        if (ar.id.startsWith('rec_crs_') || ar.id === 'rec_1' || ar.id === 'rec_2' || ar.id === 'rec_3') {
+          deleteFromFirestore(COLLECTIONS.ATTENDANCE, ar.id).catch(() => {});
+        } else if (!existingIds.has(ar.id)) {
+          attendanceRecords.push(ar);
+          existingIds.add(ar.id);
+        }
       }
-    } else {
-      attendanceRecords.length = 0;
     }
 
+    // 6. Sync Leave Requests
     const fsLeaves = await getAllFromFirestore<LeaveRequest>(COLLECTIONS.LEAVE_REQUESTS);
-    if (fsLeaves && fsLeaves.length > 0) {
-      leaveRequests.length = 0;
-      leaveRequests.push(...fsLeaves);
-    } else if (!hasInitializedConfig) {
-      for (const lr of leaveRequests) {
-        await saveToFirestore(COLLECTIONS.LEAVE_REQUESTS, lr);
+    if (fsLeaves !== null && fsLeaves.length > 0) {
+      const existingLeaveIds = new Set(leaveRequests.map((l) => l.id));
+      for (const l of fsLeaves) {
+        if (l && l.id && !existingLeaveIds.has(l.id)) {
+          leaveRequests.push(l);
+          existingLeaveIds.add(l.id);
+        }
       }
-    } else {
-      leaveRequests.length = 0;
     }
 
+    // 7. Sync Teacher Attendance Records
     const fsTeacherAttendance = await getAllFromFirestore<TeacherAttendanceRecord>(COLLECTIONS.TEACHER_ATTENDANCE);
-    if (fsTeacherAttendance && fsTeacherAttendance.length > 0) {
-      teacherAttendanceRecords.length = 0;
-      teacherAttendanceRecords.push(...fsTeacherAttendance);
-    } else if (!hasInitializedConfig) {
-      for (const tar of teacherAttendanceRecords) {
-        await saveToFirestore(COLLECTIONS.TEACHER_ATTENDANCE, tar);
+    if (fsTeacherAttendance !== null && fsTeacherAttendance.length > 0) {
+      const existingTeacherRecIds = new Set(teacherAttendanceRecords.map((t) => t.id));
+      for (const t of fsTeacherAttendance) {
+        if (t && t.id && !existingTeacherRecIds.has(t.id)) {
+          teacherAttendanceRecords.push(t);
+          existingTeacherRecIds.add(t.id);
+        }
       }
-    } else {
-      teacherAttendanceRecords.length = 0;
     }
 
     // Sync Master Departments
     const fsDeps = await getAllFromFirestore<MasterDepartment>(COLLECTIONS.MASTER_DEPARTMENTS);
-    if (fsDeps && fsDeps.length > 0) {
-      masterDepartments.clear();
+    if (fsDeps !== null && fsDeps.length > 0) {
       for (const d of fsDeps) {
-        masterDepartments.set(d.id, d);
-      }
-    } else {
-      // Seed default master departments (Faculty of Medical Technology)
-      const defaultDeps: MasterDepartment[] = [
-        {
-          id: 'dep_ch',
-          code: 'CH',
-          nameTh: 'ภาควิชาเคมีคลินิก',
-          nameEn: 'Department of Clinical Chemistry',
-          facultyTh: 'คณะเทคนิคการแพทย์',
-          facultyCode: 'MT',
-          majorCode: 'MTMT',
-          majorNameTh: 'สาขาวิชาเทคนิคการแพทย์',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'dep_mi',
-          code: 'MI',
-          nameTh: 'ภาควิชาจุลชีววิทยาคลินิกและเทคโนโลยีประยุกต์',
-          nameEn: 'Department of Clinical Microbiology and Applied Technology',
-          facultyTh: 'คณะเทคนิคการแพทย์',
-          facultyCode: 'MT',
-          majorCode: 'MTMT',
-          majorNameTh: 'สาขาวิชาเทคนิคการแพทย์',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'dep_ms',
-          code: 'MS',
-          nameTh: 'ภาควิชาจุลทรรศนศาสตร์คลินิก',
-          nameEn: 'Department of Clinical Microscopy',
-          facultyTh: 'คณะเทคนิคการแพทย์',
-          facultyCode: 'MT',
-          majorCode: 'MTMT',
-          majorNameTh: 'สาขาวิชาเทคนิคการแพทย์',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'dep_cm',
-          code: 'CM',
-          nameTh: 'ภาควิชาเทคนิคการแพทย์ชุมชน',
-          nameEn: 'Department of Community Medical Technology',
-          facultyTh: 'คณะเทคนิคการแพทย์',
-          facultyCode: 'MT',
-          majorCode: 'MTMT',
-          majorNameTh: 'สาขาวิชาเทคนิคการแพทย์',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'dep_rt',
-          code: 'RT',
-          nameTh: 'ภาควิชารังสีเทคนิค',
-          nameEn: 'Department of Radiological Technology',
-          facultyTh: 'คณะเทคนิคการแพทย์',
-          facultyCode: 'MT',
-          majorCode: 'MTRT',
-          majorNameTh: 'สาขาวิชารังสีเทคนิค',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'dep_id',
-          code: 'ID',
-          nameTh: 'วิชาทั่วไป / สหวิทยาการ (Interdisciplinary)',
-          nameEn: 'Interdisciplinary Studies',
-          facultyTh: 'คณะเทคนิคการแพทย์',
-          facultyCode: 'MT',
-          majorCode: 'ALL',
-          majorNameTh: 'ใช้ร่วมทุกสาขา',
-          createdAt: new Date().toISOString(),
-        },
-      ];
-      for (const d of defaultDeps) {
-        masterDepartments.set(d.id, d);
-        await saveToFirestore(COLLECTIONS.MASTER_DEPARTMENTS, d);
+        if (d && d.id) masterDepartments.set(d.id, d);
       }
     }
 
     // Sync Master Curriculums
     const fsCurrs = await getAllFromFirestore<MasterCurriculum>(COLLECTIONS.MASTER_CURRICULUMS);
-    if (fsCurrs && fsCurrs.length > 0) {
-      masterCurriculums.clear();
+    if (fsCurrs !== null && fsCurrs.length > 0) {
       for (const c of fsCurrs) {
-        masterCurriculums.set(c.id, c);
-      }
-    } else {
-      const defaultCurrs: MasterCurriculum[] = [
-        {
-          id: 'curr_bs_mt',
-          code: 'CURR_BS_MT',
-          nameTh: 'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)',
-          nameEn: 'Bachelor of Science (Medical Technology)',
-          facultyCode: 'MT',
-          majorCode: 'MTMT',
-          degreeLevel: 'ปริญญาตรี',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'curr_bs_rt',
-          code: 'CURR_BS_RT',
-          nameTh: 'วิทยาศาสตร์บัณฑิต (รังสีเทคนิค)',
-          nameEn: 'Bachelor of Science (Radiological Technology)',
-          facultyCode: 'MT',
-          majorCode: 'MTRT',
-          degreeLevel: 'ปริญญาตรี',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'curr_ms_mt',
-          code: 'CURR_MS_MT',
-          nameTh: 'วิทยาศาสตร์มหาบัณฑิต (เทคนิคการแพทย์)',
-          nameEn: 'Master of Science (Medical Technology)',
-          facultyCode: 'MT',
-          majorCode: 'MTMT',
-          degreeLevel: 'บัณฑิตศึกษา',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'curr_phd_mt',
-          code: 'CURR_PHD_MT',
-          nameTh: 'ปรัชญาดุษฎีบัณฑิต (เทคนิคการแพทย์)',
-          nameEn: 'Doctor of Philosophy (Medical Technology)',
-          facultyCode: 'MT',
-          majorCode: 'MTMT',
-          degreeLevel: 'บัณฑิตศึกษา',
-          createdAt: new Date().toISOString(),
-        },
-      ];
-      for (const c of defaultCurrs) {
-        masterCurriculums.set(c.id, c);
-        await saveToFirestore(COLLECTIONS.MASTER_CURRICULUMS, c);
+        if (c && c.id) masterCurriculums.set(c.id, c);
       }
     }
 
     // Sync Master Prefixes
     const fsPrefixes = await getAllFromFirestore<MasterPrefix>(COLLECTIONS.MASTER_PREFIXES);
-    if (fsPrefixes && fsPrefixes.length > 0) {
-      masterPrefixes.clear();
+    if (fsPrefixes !== null && fsPrefixes.length > 0) {
       for (const p of fsPrefixes) {
-        masterPrefixes.set(p.id, p);
-      }
-    } else {
-      const defaultPrefixes: MasterPrefix[] = [
-        { id: 'pref_1', titleTh: 'นาย', titleEn: 'Mr.', category: 'STUDENT' },
-        { id: 'pref_2', titleTh: 'นางสาว', titleEn: 'Miss', category: 'STUDENT' },
-        { id: 'pref_3', titleTh: 'นาง', titleEn: 'Mrs.', category: 'STUDENT' },
-        { id: 'pref_4', titleTh: 'อ.ดร.', titleEn: 'Dr.', category: 'TEACHER' },
-        { id: 'pref_5', titleTh: 'ผศ.ดร.', titleEn: 'Asst.Prof.Dr.', category: 'TEACHER' },
-        { id: 'pref_6', titleTh: 'รศ.ดร.', titleEn: 'Assoc.Prof.Dr.', category: 'TEACHER' },
-        { id: 'pref_7', titleTh: 'ศ.ดร.', titleEn: 'Prof.Dr.', category: 'TEACHER' },
-        { id: 'pref_8', titleTh: 'อาจารย์', titleEn: 'Lecturer', category: 'TEACHER' },
-      ];
-      for (const p of defaultPrefixes) {
-        masterPrefixes.set(p.id, p);
-        await saveToFirestore(COLLECTIONS.MASTER_PREFIXES, p);
+        if (p && p.id) masterPrefixes.set(p.id, p);
       }
     }
 
-    console.log('[Firestore Sync] Firestore database synchronized successfully.');
-    const orphanSummary = await cleanOrphanedData();
-    console.log('[Firestore Sync] Orphan cleanup summary:', JSON.stringify(orphanSummary));
+    // Ensure base CSV exported attendance records are present if database is empty or missing records
+    if (attendanceRecords.length < 87) {
+      await importRealCsvAttendanceRecords();
+    }
+
+    // Save updated state to local cache
+    saveLocalCache();
+
+    console.log(`[Firestore Sync] Database synchronized successfully. Courses: ${courses.size}, Attendance Records Total: ${attendanceRecords.length}`);
   } catch (err) {
-    console.error('[Firestore Sync Warning] Falling back to initial seed data:', err);
+    console.error('[Firestore Sync Warning] Falling back to local cache data:', err);
   }
 }
 
