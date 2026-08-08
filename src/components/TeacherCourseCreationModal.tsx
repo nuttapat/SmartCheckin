@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Semester, TeachingWeek, Course, User } from '../types';
-import { createCourse } from '../services/api';
+import { createCourse, fetchTeachers } from '../services/api';
 import { X, Plus, Minus, BookOpen, Calendar, CheckCircle2, MapPin, Globe, UserCheck, Maximize2, Minimize2 } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { useTheme } from '../context/ThemeContext';
@@ -58,17 +58,47 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
   const [semester, setSemester] = useState<Semester>(getCurrentSemester());
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>(ownerId || '');
   const [coordinatorName, setCoordinatorName] = useState<string>(coordinatorDefault || '');
+  const [fetchedTeachers, setFetchedTeachers] = useState<User[]>([]);
 
   useEffect(() => {
-    if (teachersList && teachersList.length > 0) {
-      const defaultTeacher = teachersList.find((t) => t.id === ownerId) || teachersList[0];
-      if (defaultTeacher) {
-        setSelectedTeacherId(defaultTeacher.id);
-        const name = `${defaultTeacher.title || ''}${defaultTeacher.firstNameTh || defaultTeacher.firstName || ''} ${defaultTeacher.lastNameTh || defaultTeacher.lastName || ''}`.trim() || defaultTeacher.email;
-        setCoordinatorName(name);
+    let isMounted = true;
+    if (isOpen) {
+      if (!teachersList || teachersList.length === 0) {
+        fetchTeachers()
+          .then((data) => {
+            if (isMounted && data) {
+              setFetchedTeachers(data);
+            }
+          })
+          .catch((err) => {
+            console.error('Error fetching teachers for creation modal:', err);
+          });
       }
     }
-  }, [teachersList, ownerId]);
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, teachersList]);
+
+  const activeTeachers = (teachersList && teachersList.length > 0) ? teachersList : fetchedTeachers;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (activeTeachers.length > 0) {
+      const defaultTeacher = activeTeachers.find((t) => t.id === ownerId) || activeTeachers.find((t) => t.id === selectedTeacherId) || activeTeachers[0];
+      if (defaultTeacher) {
+        if (!selectedTeacherId || selectedTeacherId === ownerId) {
+          setSelectedTeacherId(defaultTeacher.id);
+        }
+        const name = `${defaultTeacher.prefixTh || defaultTeacher.title || ''}${defaultTeacher.firstNameTh || defaultTeacher.firstName || ''} ${defaultTeacher.lastNameTh || defaultTeacher.lastName || ''}`.trim() || defaultTeacher.email;
+        if (!coordinatorName || coordinatorName === coordinatorDefault) {
+          setCoordinatorName(name);
+        }
+      }
+    } else if (coordinatorDefault && !coordinatorName) {
+      setCoordinatorName(coordinatorDefault);
+    }
+  }, [isOpen, activeTeachers, ownerId]);
 
   // Course GPS default coordinates
   const [defaultLat, setDefaultLat] = useState<number>(13.7988363);
@@ -214,111 +244,115 @@ export const TeacherCourseCreationModal: React.FC<TeacherCourseCreationModalProp
             <h3 className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`}>
               ข้อมูลทั่วไปของรายวิชา (GENERAL INFORMATION)
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                รหัสวิชา (Course Code) <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="text"
-                placeholder="เช่น MTID204"
-                value={courseCode}
-                onChange={(e) => setCourseCode(e.target.value)}
-                required
-                className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 uppercase ${
-                  isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                }`}
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                ชื่อรายวิชา (Course Name) <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="text"
-                placeholder="เช่น Basic Data Management with Computer"
-                value={courseName}
-                onChange={(e) => setCourseName(e.target.value)}
-                required
-                className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
-                  isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                }`}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                ปีการศึกษา (พ.ศ.)
-              </label>
-              <input
-                type="number"
-                value={academicYear}
-                onChange={(e) => setAcademicYear(parseInt(e.target.value, 10))}
-                className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
-                  isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                }`}
-              />
-            </div>
-            <div>
-              <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                ภาคการศึกษา (Semester)
-              </label>
-              <select
-                value={semester}
-                onChange={(e) => setSemester(e.target.value as Semester)}
-                className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
-                  isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                }`}
-              >
-                <option value={Semester.FIRST}>ภาคเรียนที่ 1 (First Semester)</option>
-                <option value={Semester.SECOND}>ภาคเรียนที่ 2 (Second Semester)</option>
-                <option value={Semester.SUMMER}>ภาคฤดูร้อน (Summer)</option>
-              </select>
-            </div>
-            <div>
-              <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                อาจารย์ผู้รับผิดชอบรายวิชา
-              </label>
-              {teachersList && teachersList.length > 0 ? (
-                <select
-                  value={selectedTeacherId}
-                  onChange={(e) => {
-                    const tId = e.target.value;
-                    setSelectedTeacherId(tId);
-                    const tObj = teachersList.find((t) => t.id === tId);
-                    if (tObj) {
-                      const name = `${tObj.prefixTh || tObj.title || ''}${tObj.firstNameTh || tObj.firstName || ''} ${tObj.lastNameTh || tObj.lastName || ''}`.trim() || tObj.email;
-                      setCoordinatorName(name);
-                    }
-                  }}
-                  className={`w-full border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-sky-500 ${
-                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                  }`}
-                >
-                  {teachersList.map((t) => {
-                    const name = `${t.prefixTh || t.title || ''}${t.firstNameTh || t.firstName || ''} ${t.lastNameTh || t.lastName || ''}`.trim() || t.email;
-                    return (
-                      <option key={t.id} value={t.id}>
-                        {name} ({t.email})
-                      </option>
-                    );
-                  })}
-                </select>
-              ) : (
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-start">
+              {/* Row 1: Course Code (4 cols) & Course Name (8 cols) */}
+              <div className="md:col-span-4">
+                <label className={`block text-xs font-semibold mb-1 truncate ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  รหัสวิชา (Course Code) <span className="text-rose-500">*</span>
+                </label>
                 <input
                   type="text"
-                  value={coordinatorName}
-                  onChange={(e) => setCoordinatorName(e.target.value)}
-                  placeholder="ชื่ออาจารย์ผู้ประสานงาน/ผู้สอน..."
-                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
+                  placeholder="เช่น MTID204"
+                  value={courseCode}
+                  onChange={(e) => setCourseCode(e.target.value)}
+                  required
+                  className={`w-full h-[38px] border rounded-xl px-3 text-xs focus:outline-none focus:border-sky-500 uppercase font-mono font-bold ${
                     isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
                   }`}
                 />
-              )}
+              </div>
+
+              <div className="md:col-span-8">
+                <label className={`block text-xs font-semibold mb-1 truncate ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  ชื่อรายวิชา (Course Name) <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="เช่น Basic Data Management with Computer"
+                  value={courseName}
+                  onChange={(e) => setCourseName(e.target.value)}
+                  required
+                  className={`w-full h-[38px] border rounded-xl px-3 text-xs focus:outline-none focus:border-sky-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                />
+              </div>
+
+              {/* Row 2: Academic Year (3 cols), Semester (3 cols), Coordinator (6 cols) */}
+              <div className="md:col-span-3">
+                <label className={`block text-xs font-semibold mb-1 truncate ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  ปีการศึกษา (พ.ศ.)
+                </label>
+                <input
+                  type="number"
+                  value={academicYear}
+                  onChange={(e) => setAcademicYear(parseInt(e.target.value, 10))}
+                  className={`w-full h-[38px] border rounded-xl px-3 text-xs focus:outline-none focus:border-sky-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                />
+              </div>
+
+              <div className="md:col-span-3">
+                <label className={`block text-xs font-semibold mb-1 truncate ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  ภาคการศึกษา (Semester)
+                </label>
+                <select
+                  value={semester}
+                  onChange={(e) => setSemester(e.target.value as Semester)}
+                  className={`w-full h-[38px] border rounded-xl px-3 text-xs focus:outline-none focus:border-sky-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  <option value={Semester.FIRST}>ภาคเรียนที่ 1</option>
+                  <option value={Semester.SECOND}>ภาคเรียนที่ 2</option>
+                  <option value={Semester.SUMMER}>ภาคฤดูร้อน (Summer)</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-6">
+                <label className={`block text-xs font-semibold mb-1 truncate ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`} title="อาจารย์ผู้รับผิดชอบรายวิชา">
+                  อาจารย์ผู้รับผิดชอบรายวิชา
+                </label>
+                {activeTeachers && activeTeachers.length > 0 ? (
+                  <select
+                    value={selectedTeacherId}
+                    onChange={(e) => {
+                      const tId = e.target.value;
+                      setSelectedTeacherId(tId);
+                      const tObj = activeTeachers.find((t) => t.id === tId);
+                      if (tObj) {
+                        const name = `${tObj.prefixTh || tObj.title || ''}${tObj.firstNameTh || tObj.firstName || ''} ${tObj.lastNameTh || tObj.lastName || ''}`.trim() || tObj.email;
+                        setCoordinatorName(name);
+                      }
+                    }}
+                    className={`w-full h-[38px] border rounded-xl px-3 text-xs font-semibold focus:outline-none focus:border-sky-500 ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    <option value="">-- เลือกอาจารย์ผู้รับผิดชอบรายวิชา --</option>
+                    {activeTeachers.map((t) => {
+                      const name = `${t.prefixTh || t.title || ''}${t.firstNameTh || t.firstName || ''} ${t.lastNameTh || t.lastName || ''}`.trim() || t.email;
+                      return (
+                        <option key={t.id} value={t.id}>
+                          {name} ({t.email})
+                        </option>
+                      );
+                    })}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={coordinatorName}
+                    onChange={(e) => setCoordinatorName(e.target.value)}
+                    placeholder="ชื่ออาจารย์ผู้ประสานงาน/ผู้สอน..."
+                    className={`w-full h-[38px] border rounded-xl px-3 text-xs focus:outline-none focus:border-sky-500 ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  />
+                )}
+              </div>
             </div>
-          </div>
           </div>
 
           {/* Course GPS Default Location */}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Course, TeachingWeek, Semester, User } from '../types';
-import { updateCourse } from '../services/api';
+import { updateCourse, fetchTeachers } from '../services/api';
 import { X, BookOpen, Plus, Minus, Trash2, Calendar, Save, CheckCircle2, MapPin, Globe, Maximize2, Minimize2 } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { DeleteCourseConfirmModal } from './DeleteCourseConfirmModal';
@@ -15,6 +15,7 @@ interface TeacherCourseEditModalProps {
   onDeleteSuccess?: (courseId: string) => void;
   teacherId?: string;
   teachersList?: User[];
+  isAdmin?: boolean;
   isDarkMode?: boolean;
 }
 
@@ -26,6 +27,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   onDeleteSuccess,
   teacherId,
   teachersList,
+  isAdmin = false,
   isDarkMode: propIsDarkMode,
 }) => {
   const { isDarkMode: themeIsDarkMode } = useTheme();
@@ -47,6 +49,29 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [successMsg, setSuccessMsg] = useState<string>('');
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState<boolean>(false);
+  const [fetchedTeachers, setFetchedTeachers] = useState<User[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (isOpen) {
+      if (!teachersList || teachersList.length === 0) {
+        fetchTeachers()
+          .then((data) => {
+            if (isMounted && data) {
+              setFetchedTeachers(data);
+            }
+          })
+          .catch((err) => {
+            console.error('Error fetching teachers for edit modal:', err);
+          });
+      }
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, teachersList]);
+
+  const activeTeachers = (teachersList && teachersList.length > 0) ? teachersList : fetchedTeachers;
 
   useEffect(() => {
     setCourseCode(course.courseCode);
@@ -225,9 +250,10 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
               ข้อมูลทั่วไปของรายวิชา (GENERAL INFORMATION)
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-start">
+              {/* Row 1: Course Code (4 cols) & Course Name (8 cols) */}
+              <div className="md:col-span-4">
+                <label className={`block text-xs font-semibold mb-1 truncate ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                   รหัสวิชา (Course Code) <span className="text-rose-500">*</span>
                 </label>
                 <input
@@ -235,14 +261,14 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
                   value={courseCode}
                   onChange={(e) => setCourseCode(e.target.value)}
                   required
-                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 uppercase font-mono font-bold ${
+                  className={`w-full h-[38px] border rounded-xl px-3 text-xs focus:outline-none focus:border-sky-500 uppercase font-mono font-bold ${
                     isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
                   }`}
                 />
               </div>
 
-              <div className="md:col-span-2">
-                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+              <div className="md:col-span-8">
+                <label className={`block text-xs font-semibold mb-1 truncate ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                   ชื่อรายวิชา (Course Name) <span className="text-rose-500">*</span>
                 </label>
                 <input
@@ -250,36 +276,35 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
                   value={courseName}
                   onChange={(e) => setCourseName(e.target.value)}
                   required
-                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
+                  className={`w-full h-[38px] border rounded-xl px-3 text-xs focus:outline-none focus:border-sky-500 ${
                     isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
                   }`}
                 />
               </div>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+              {/* Row 2: Academic Year (3 cols), Semester (3 cols), Creator/Coordinator (6 cols) */}
+              <div className="md:col-span-3">
+                <label className={`block text-xs font-semibold mb-1 truncate ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                   ปีการศึกษา (พ.ศ.)
                 </label>
                 <input
                   type="number"
                   value={academicYear}
                   onChange={(e) => setAcademicYear(parseInt(e.target.value, 10) || 2569)}
-                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
+                  className={`w-full h-[38px] border rounded-xl px-3 text-xs focus:outline-none focus:border-sky-500 ${
                     isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
                   }`}
                 />
               </div>
 
-              <div>
-                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+              <div className="md:col-span-3">
+                <label className={`block text-xs font-semibold mb-1 truncate ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                   ภาคการศึกษา (Semester)
                 </label>
                 <select
                   value={semester}
                   onChange={(e) => setSemester(e.target.value as Semester)}
-                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
+                  className={`w-full h-[38px] border rounded-xl px-3 text-xs focus:outline-none focus:border-sky-500 ${
                     isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
                   }`}
                 >
@@ -289,45 +314,56 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  อาจารย์ผู้รับผิดชอบวิชา
+              <div className="md:col-span-6">
+                <label className={`block text-xs font-semibold mb-1 truncate ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`} title="อาจารย์ผู้รับผิดชอบรายวิชา / ผู้สร้างรายวิชา">
+                  อาจารย์ผู้รับผิดชอบรายวิชา / ผู้สร้างรายวิชา
                 </label>
-                {teachersList && teachersList.length > 0 ? (
-                  <select
-                    value={selectedTeacherId}
-                    onChange={(e) => {
-                      const tId = e.target.value;
-                      setSelectedTeacherId(tId);
-                      const tObj = teachersList.find((t) => t.id === tId);
-                      if (tObj) {
-                        const name = `${tObj.prefixTh || tObj.title || ''}${tObj.firstNameTh || tObj.firstName || ''} ${tObj.lastNameTh || tObj.lastName || ''}`.trim() || tObj.email;
-                        setCoordinatorName(name);
-                      }
-                    }}
-                    className={`w-full border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-sky-500 ${
-                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                    }`}
-                  >
-                    <option value="">-- ไม่ระบุ / คงเดิม --</option>
-                    {teachersList.map((t) => {
-                      const name = `${t.prefixTh || t.title || ''}${t.firstNameTh || t.firstName || ''} ${t.lastNameTh || t.lastName || ''}`.trim() || t.email;
-                      return (
-                        <option key={t.id} value={t.id}>
-                          {name} ({t.email})
-                        </option>
-                      );
-                    })}
-                  </select>
+                {isAdmin ? (
+                  activeTeachers && activeTeachers.length > 0 ? (
+                    <select
+                      value={selectedTeacherId}
+                      onChange={(e) => {
+                        const tId = e.target.value;
+                        setSelectedTeacherId(tId);
+                        const tObj = activeTeachers.find((t) => t.id === tId);
+                        if (tObj) {
+                          const name = `${tObj.prefixTh || tObj.title || ''}${tObj.firstNameTh || tObj.firstName || ''} ${tObj.lastNameTh || tObj.lastName || ''}`.trim() || tObj.email;
+                          setCoordinatorName(name);
+                        }
+                      }}
+                      className={`w-full h-[38px] border rounded-xl px-3 text-xs font-semibold focus:outline-none focus:border-sky-500 ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                      }`}
+                    >
+                      <option value="">-- โอนย้ายผู้สร้าง/ผู้รับผิดชอบรายวิชา (Admin Only) --</option>
+                      {activeTeachers.map((t) => {
+                        const name = `${t.prefixTh || t.title || ''}${t.firstNameTh || t.firstName || ''} ${t.lastNameTh || t.lastName || ''}`.trim() || t.email;
+                        return (
+                          <option key={t.id} value={t.id}>
+                            {name} ({t.email})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={coordinatorName}
+                      onChange={(e) => setCoordinatorName(e.target.value)}
+                      className={`w-full h-[38px] border rounded-xl px-3 text-xs focus:outline-none focus:border-sky-500 ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                      }`}
+                    />
+                  )
                 ) : (
-                  <input
-                    type="text"
-                    value={coordinatorName}
-                    onChange={(e) => setCoordinatorName(e.target.value)}
-                    className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 ${
-                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                    }`}
-                  />
+                  <div className={`h-[38px] px-3.5 rounded-xl border text-xs flex items-center justify-between overflow-hidden ${
+                    isDarkMode ? 'bg-slate-800/80 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'
+                  }`}>
+                    <span className="font-bold flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-ellipsis">
+                      <span>👑</span>
+                      <span className="truncate">ผู้สร้างรายวิชา: {coordinatorName || course.ownerName}</span>
+                    </span>
+                  </div>
                 )}
               </div>
             </div>

@@ -371,7 +371,7 @@ export const TeacherInviteModal: React.FC<TeacherInviteModalProps> = ({
                     <span className={`text-[11px] font-medium leading-tight ${
                       isDarkMode ? 'text-slate-400' : 'text-slate-500'
                     }`}>
-                      แก้ไขและลบวิชาได้ สิทธิ์ระดับสูงสุด
+                      อำนาจจัดการคอร์สเทียบเท่าผู้สร้างรายวิชา จัดการวิชา/สัปดาห์/เช็คชื่อ ได้เต็มรูปแบบ
                     </span>
                   </label>
 
@@ -397,12 +397,12 @@ export const TeacherInviteModal: React.FC<TeacherInviteModalProps> = ({
                         ? 'text-sky-600'
                         : isDarkMode ? 'text-sky-400' : 'text-sky-700'
                     }`}>
-                      <span>🤝</span> <span>ผู้ร่วมรับผิดชอบ</span>
+                      <span>🤝</span> <span>ผู้ร่วมรับผิดชอบรายวิชา</span>
                     </span>
                     <span className={`text-[11px] font-medium leading-tight ${
                       isDarkMode ? 'text-slate-400' : 'text-slate-500'
                     }`}>
-                      สร้าง QR/เช็คชื่อได้ ไม่สามารถแก้ไขหรือลบวิชาได้
+                      แก้ไขสถานะการเช็คชื่อตารางเรียนและเปิด QR ได้ (เพิ่ม/ลดสัปดาห์ไม่ได้)
                     </span>
                   </label>
 
@@ -433,7 +433,7 @@ export const TeacherInviteModal: React.FC<TeacherInviteModalProps> = ({
                     <span className={`text-[11px] font-medium leading-tight ${
                       isDarkMode ? 'text-slate-400' : 'text-slate-500'
                     }`}>
-                      สร้าง QR/เช็คชื่อและดูรายชื่อนักศึกษาได้
+                      เปิด QR Code เพื่อเช็คชื่อได้เท่านั้น ฟังก์ชั่นอื่นเป็น Read-only
                     </span>
                   </label>
                 </div>
@@ -550,11 +550,11 @@ export const TeacherInviteModal: React.FC<TeacherInviteModalProps> = ({
                     }`}>
                       <span>{course.coordinatorName || course.ownerName}</span>
                       <span className="text-[10px] px-2 py-0.5 rounded-md font-extrabold bg-sky-600 text-white">
-                        เจ้าของรายวิชา/ผู้รับผิดชอบ
+                        👑 ผู้สร้างรายวิชา (Course Creator)
                       </span>
                     </div>
                     <p className={`text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                      สิทธิ์ผู้สร้างและจัดการหลัก
+                      อำนาจจัดการคอร์สทั้งหมด (ไม่สามารถโอนย้ายได้ยกเว้นโดย Admin)
                     </p>
                   </div>
                 </div>

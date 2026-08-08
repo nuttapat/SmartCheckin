@@ -1567,6 +1567,50 @@ app.post('/api/courses', (req, res) => {
   res.json({ message: 'Course created successfully', course: newCourse });
 });
 
+// Helper function to guarantee Session entries exist for every week in course.weeks
+function ensureCourseSessions(course: Course): Session[] {
+  if (!course) return [];
+
+  const courseLat = course.defaultLat || 13.7988363;
+  const courseLng = course.defaultLng || 100.322944;
+
+  if (Array.isArray(course.weeks) && course.weeks.length > 0) {
+    const existingSessions = Array.from(sessions.values()).filter((s) => s.courseId === course.id);
+    const existingWeekMap = new Map<number, Session>();
+    existingSessions.forEach((s) => {
+      existingWeekMap.set(Number(s.weekNumber), s);
+    });
+
+    course.weeks.forEach((w) => {
+      const wNum = Number(w.weekNumber) || 1;
+      const existing = existingWeekMap.get(wNum);
+      if (!existing) {
+        const sesId = `ses_${course.id}_w${wNum}`;
+        const newSession: Session = {
+          id: sesId,
+          courseId: course.id,
+          weekNumber: wNum,
+          topic: w.topic || `สัปดาห์ที่ ${wNum}`,
+          teacherLat: courseLat,
+          teacherLng: courseLng,
+          isActive: false,
+          createdAt: new Date().toISOString(),
+        };
+        sessions.set(sesId, newSession);
+        saveToFirestore(COLLECTIONS.SESSIONS, newSession).catch(() => {});
+      } else if (w.topic && existing.topic !== w.topic) {
+        existing.topic = w.topic;
+        sessions.set(existing.id, existing);
+        saveToFirestore(COLLECTIONS.SESSIONS, existing).catch(() => {});
+      }
+    });
+  }
+
+  return Array.from(sessions.values())
+    .filter((s) => s.courseId === course.id)
+    .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
+}
+
 app.get('/api/courses/:id', (req, res) => {
   const course = courses.get(req.params.id);
   if (!course) {
@@ -1584,9 +1628,7 @@ app.get('/api/courses/:id', (req, res) => {
       user: users.get(cm.userId),
     }));
 
-  const courseSessions = Array.from(sessions.values())
-    .filter((s) => s.courseId === course.id)
-    .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
+  const courseSessions = ensureCourseSessions(course);
 
   res.json({
     course,
@@ -3123,9 +3165,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
     const studentMembers = membersInCourse.filter((m) => m.role === CourseMemberRole.STUDENT);
     const coTeacherMembers = membersInCourse.filter((m) => m.role === CourseMemberRole.CO_TEACHER);
 
-    const cSessions = Array.from(sessions.values())
-      .filter((s) => s.courseId === course.id)
-      .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
+    const cSessions = ensureCourseSessions(course);
 
     const studentList = studentMembers.map((m) => {
       const studentUser = users.get(m.userId);

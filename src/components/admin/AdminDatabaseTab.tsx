@@ -450,18 +450,39 @@ export const AdminDatabaseTab: React.FC<AdminDatabaseTabProps> = ({
 
   // Selection state
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [lastSelectedDocIndex, setLastSelectedDocIndex] = useState<number | null>(null);
 
   // Reset selection on collection change
   useEffect(() => {
     setSelectedDocIds([]);
+    setLastSelectedDocIndex(null);
   }, [selectedCollection]);
 
   const allVisibleDocsSelected = sortedAndFilteredDocs.length > 0 && sortedAndFilteredDocs.every((doc) => selectedDocIds.includes(doc.id));
 
-  const handleToggleSelectDoc = (id: string) => {
-    setSelectedDocIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
+  const handleToggleSelectDoc = (id: string, index?: number, e?: React.MouseEvent) => {
+    if (e?.shiftKey && lastSelectedDocIndex !== null && index !== undefined && lastSelectedDocIndex !== index) {
+      const start = Math.min(lastSelectedDocIndex, index);
+      const end = Math.max(lastSelectedDocIndex, index);
+      const rangeIds = sortedAndFilteredDocs.slice(start, end + 1).map((doc) => doc.id);
+
+      const isTargetSelected = selectedDocIds.includes(id);
+
+      setSelectedDocIds((prev) => {
+        if (!isTargetSelected) {
+          return Array.from(new Set([...prev, ...rangeIds]));
+        } else {
+          return prev.filter((prevId) => !rangeIds.includes(prevId));
+        }
+      });
+    } else {
+      setSelectedDocIds((prev) =>
+        prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      );
+    }
+    if (index !== undefined) {
+      setLastSelectedDocIndex(index);
+    }
   };
 
   const handleSelectAllVisibleDocs = () => {
@@ -948,7 +969,7 @@ export const AdminDatabaseTab: React.FC<AdminDatabaseTabProps> = ({
                       {dbVisibleCols.select !== false && (
                         <td className="p-3.5 text-center">
                           <button
-                            onClick={() => handleToggleSelectDoc(doc.id)}
+                            onClick={(e) => handleToggleSelectDoc(doc.id, idx, e)}
                             className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
                           >
                             {isSelected ? <CheckSquare className="w-4 h-4 text-purple-500" /> : <Square className="w-4 h-4 text-slate-400" />}

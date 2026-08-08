@@ -54,6 +54,7 @@ interface TeacherAttendanceGridModalProps {
   studentList: StudentAttendanceGridItem[];
   sessions?: Session[];
   onRefresh?: () => void;
+  canEditAttendance?: boolean;
   isDarkMode?: boolean;
 }
 
@@ -64,6 +65,7 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
   studentList: initialStudentList,
   sessions = [],
   onRefresh,
+  canEditAttendance = true,
   isDarkMode: propIsDarkMode,
 }) => {
   const { isDarkMode: themeIsDarkMode } = useTheme();
@@ -298,6 +300,15 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
     newStatus: 'PRESENT' | 'LATE' | 'LEAVE' | 'ABSENT'
   ) => {
     setStatusMessage(null);
+
+    if (!canEditAttendance) {
+      setStatusMessage({
+        text: 'สิทธิ์ไม่เพียงพอ: อาจารย์ผู้สอน (Instructor) อ่านข้อมูลได้เท่านั้น ไม่สามารถแก้ไขสถานะได้',
+        type: 'error',
+      });
+      return;
+    }
+
     const key = `${studentId}_${weekNumber}`;
     const orig = originalStatuses[key] || 'ABSENT';
 
@@ -579,6 +590,11 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
               <span className="text-[11px] sm:text-xs px-2 sm:px-2.5 py-0.5 rounded-full font-bold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                 ปีการศึกษา {course.academicYear} / ภาคเรียน {course.semester}
               </span>
+              {!canEditAttendance && (
+                <span className="text-[11px] sm:text-xs px-2 sm:px-2.5 py-0.5 rounded-full font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                  🔒 อ่านอย่างเดียว (อาจารย์ผู้สอน)
+                </span>
+              )}
             </div>
             <p className={`text-[11px] sm:text-xs flex items-center space-x-1.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
               <FileSpreadsheet className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-500 shrink-0" />

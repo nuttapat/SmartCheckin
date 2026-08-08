@@ -66,6 +66,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
   const [userDeptFilter, setUserDeptFilter] = useState<string>('ALL');
   const [hideDemoUsers, setHideDemoUsers] = useState<boolean>(false);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [lastSelectedUserIndex, setLastSelectedUserIndex] = useState<number | null>(null);
   const [bulkActionProcessing, setBulkActionProcessing] = useState<boolean>(false);
 
   // Sorting
@@ -195,10 +196,29 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
     }
   };
 
-  const handleToggleSelectUser = (id: string) => {
-    setSelectedUserIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
+  const handleToggleSelectUser = (id: string, index?: number, e?: React.MouseEvent) => {
+    if (e?.shiftKey && lastSelectedUserIndex !== null && index !== undefined && lastSelectedUserIndex !== index) {
+      const start = Math.min(lastSelectedUserIndex, index);
+      const end = Math.max(lastSelectedUserIndex, index);
+      const rangeIds = filteredAndSortedUsers.slice(start, end + 1).map((u) => u.id);
+
+      const isTargetSelected = selectedUserIds.includes(id);
+
+      setSelectedUserIds((prev) => {
+        if (!isTargetSelected) {
+          return Array.from(new Set([...prev, ...rangeIds]));
+        } else {
+          return prev.filter((prevId) => !rangeIds.includes(prevId));
+        }
+      });
+    } else {
+      setSelectedUserIds((prev) =>
+        prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      );
+    }
+    if (index !== undefined) {
+      setLastSelectedUserIndex(index);
+    }
   };
 
   const handleSelectAllVisibleUsers = (visibleUsers: User[]) => {
@@ -950,7 +970,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                       {userVisibleCols.select && (
                         <td className="p-3.5 text-center">
                           <button
-                            onClick={() => handleToggleSelectUser(user.id)}
+                            onClick={(e) => handleToggleSelectUser(user.id, idx, e)}
                             className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
                           >
                             {isSelected ? <CheckSquare className="w-4 h-4 text-purple-500" /> : <Square className="w-4 h-4 text-slate-400" />}

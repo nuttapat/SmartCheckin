@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { User, Course, Session, AttendanceRecord, TeacherAttendanceRecord, InviteLink, CourseMember, CourseMemberRole } from '../types';
+import { User, UserRole, Course, Session, AttendanceRecord, TeacherAttendanceRecord, InviteLink, CourseMember, CourseMemberRole } from '../types';
 import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck, toggleQrMode, updateQrInterval, fetchSystemSettings } from '../services/api';
 import { QrCode, Users, Download, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown, EyeOff, Eye, Lock, Maximize2, Minimize2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import QRCode from 'qrcode';
@@ -38,6 +38,25 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [courseSessions, setCourseSessions] = useState<Session[]>([]);
+
+  const effectiveSessions = useMemo(() => {
+    if (courseSessions && courseSessions.length > 0) {
+      return courseSessions;
+    }
+    if (selectedCourse?.weeks && selectedCourse.weeks.length > 0) {
+      return selectedCourse.weeks.map((w) => ({
+        id: `ses_${selectedCourse.id}_w${w.weekNumber}`,
+        courseId: selectedCourse.id,
+        weekNumber: Number(w.weekNumber),
+        topic: w.topic || `สัปดาห์ที่ ${w.weekNumber}`,
+        teacherLat: selectedCourse.defaultLat || 13.7988363,
+        teacherLng: selectedCourse.defaultLng || 100.322944,
+        isActive: false,
+        createdAt: new Date().toISOString(),
+      }));
+    }
+    return [];
+  }, [courseSessions, selectedCourse]);
   const [currentCourseMembers, setCurrentCourseMembers] = useState<CourseMember[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
@@ -163,15 +182,40 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   // Compute teacher role in the currently selected course
   const teacherRoleInfo = useMemo(() => {
-    if (!selectedCourse) return { role: CourseMemberRole.INSTRUCTOR, isOwner: false, isCoordinator: false, isCoCoordinator: false, isInstructor: true, canEdit: false };
+    if (!selectedCourse) return {
+      role: CourseMemberRole.INSTRUCTOR,
+      isOwner: false,
+      isCoordinator: false,
+      isCoCoordinator: false,
+      isInstructor: true,
+      canEditCourse: false,
+      canManageWeeks: false,
+      canEditAttendance: false,
+      canOpenQR: true,
+      canManageLeave: false,
+      canManageMembers: false,
+      canEdit: false,
+    };
 
-    const isOwner = selectedCourse.ownerId === teacher.id;
+    const isOwner = selectedCourse.ownerId === teacher.id || teacher.role === UserRole.ADMIN;
     const member = currentCourseMembers.find((m) => m.userId === teacher.id);
     const role = member ? member.role : (isOwner ? CourseMemberRole.COORDINATOR : CourseMemberRole.INSTRUCTOR);
 
     const isCoordinator = isOwner || role === CourseMemberRole.COORDINATOR || role === CourseMemberRole.CO_TEACHER;
-    const isCoCoordinator = role === CourseMemberRole.CO_COORDINATOR;
-    const isInstructor = role === CourseMemberRole.INSTRUCTOR;
+    const isCoCoordinator = !isCoordinator && role === CourseMemberRole.CO_COORDINATOR;
+    const isInstructor = !isCoordinator && !isCoCoordinator;
+
+    // Granular permissions:
+    // 1. Course Creator & Coordinator: Full management
+    // 2. Co-coordinator: Cannot edit course structure/weeks. Can edit attendance grid, open QR, handle leaves.
+    // 3. Instructor: ONLY open QR. All other functions are Read-Only.
+
+    const canEditCourse = isCoordinator;
+    const canManageWeeks = isCoordinator;
+    const canEditAttendance = isCoordinator || isCoCoordinator;
+    const canOpenQR = true;
+    const canManageLeave = isCoordinator || isCoCoordinator;
+    const canManageMembers = isCoordinator;
 
     return {
       role,
@@ -179,9 +223,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       isCoordinator,
       isCoCoordinator,
       isInstructor,
-      canEdit: isCoordinator, // Owner & Course Coordinators can edit/delete
+      canEdit: canEditCourse,
+      canEditCourse,
+      canManageWeeks,
+      canEditAttendance,
+      canOpenQR,
+      canManageLeave,
+      canManageMembers,
     };
-  }, [selectedCourse, currentCourseMembers, teacher.id]);
+  }, [selectedCourse, currentCourseMembers, teacher.id, teacher.role]);
 
   const handleCourseDeleted = async (deletedCourseId: string) => {
     setIsDeleteCourseModalOpen(false);
@@ -1363,17 +1413,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       <span className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>({selectedCourse.courseName})</span>
                       
                       {/* Course Role Badge */}
-                      {teacherRoleInfo.isCoordinator && (
+                      {teacherRoleInfo.isOwner ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-sky-500/15 text-sky-600 dark:text-sky-300 border border-sky-500/30 flex items-center gap-1">
+                          👑 ผู้สร้างรายวิชา (Course Creator)
+                        </span>
+                      ) : teacherRoleInfo.isCoordinator ? (
                         <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/30 flex items-center gap-1">
                           👑 ผู้รับผิดชอบรายวิชา (Coordinator)
                         </span>
-                      )}
-                      {teacherRoleInfo.isCoCoordinator && (
+                      ) : teacherRoleInfo.isCoCoordinator ? (
                         <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 flex items-center gap-1">
                           🤝 ผู้ร่วมรับผิดชอบรายวิชา (Co-coordinator)
                         </span>
-                      )}
-                      {teacherRoleInfo.isInstructor && !teacherRoleInfo.isCoordinator && !teacherRoleInfo.isCoCoordinator && (
+                      ) : (
                         <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                           👨‍🏫 อาจารย์ผู้สอน (Instructor)
                         </span>
@@ -1387,18 +1439,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center justify-end gap-2 w-full sm:w-auto ml-auto">
                     <button
                       onClick={() => {
-                        if (teacherRoleInfo.canEdit) {
+                        if (teacherRoleInfo.canEditCourse) {
                           setIsEditModalOpen(true);
                         } else {
-                          alert("สิทธิ์ไม่เพียงพอ: เฉพาะผู้รับผิดชอบรายวิชา (Course Coordinator) และเจ้าของรายวิชาเท่านั้นที่มีสิทธิ์แก้ไขข้อมูลรายวิชา\n\nสิทธิ์ของคุณ: " + (teacherRoleInfo.isCoCoordinator ? "ผู้ร่วมรับผิดชอบรายวิชา" : "อาจารย์ผู้สอน") + " สามารถเปิดเช็คชื่อ สร้าง QR Code และดูรายชื่อนักศึกษาได้");
+                          const roleText = teacherRoleInfo.isCoCoordinator ? "ผู้ร่วมรับผิดชอบรายวิชา" : "อาจารย์ผู้สอน";
+                          const detailText = teacherRoleInfo.isCoCoordinator
+                            ? "ผู้ร่วมรับผิดชอบรายวิชาไม่มีอำนาจในการเพิ่ม/ลดสัปดาห์สอนหรือแก้ไขโครงสร้างวิชา (แต่สามารถแก้ไขตารางเช็คชื่อและเปิด QR Code ได้)"
+                            : "อาจารย์ผู้สอนมีอำนาจแค่เปิด QR Code เพื่อเช็คชื่อได้เท่านั้น ฟังก์ชั่นอื่นเป็น Read-only";
+                          alert(`สิทธิ์ไม่เพียงพอ: เฉพาะผู้สร้างรายวิชาและผู้รับผิดชอบรายวิชาเท่านั้นที่มีสิทธิ์แก้ไขวิชาและเพิ่ม/ลดสัปดาห์สอน\n\nสิทธิ์ของคุณ: ${roleText}\n${detailText}`);
                         }
                       }}
                       className={`w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-95 cursor-pointer ${
-                        teacherRoleInfo.canEdit
+                        teacherRoleInfo.canEditCourse
                           ? 'bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30'
                           : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 opacity-70'
                       }`}
-                      title={teacherRoleInfo.canEdit ? "แก้ไขวิชา / เพิ่มลดสัปดาห์" : "เฉพาะผู้รับผิดชอบรายวิชาเท่านั้นที่แก้ไขได้"}
+                      title={teacherRoleInfo.canEditCourse ? "แก้ไขวิชา / เพิ่มลดสัปดาห์" : "เฉพาะผู้สร้างวิชาและผู้รับผิดชอบรายวิชาเท่านั้นที่แก้ไขได้"}
                     >
                       <Edit3 className="w-3.5 h-3.5" />
                       <span>แก้ไขวิชา / เพิ่มลดสัปดาห์</span>
@@ -1409,40 +1465,65 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 </div>
 
               {/* Sessions List */}
-              <div className="space-y-3">
-                {[...courseSessions].sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0)).map((session) => (
-                  <div
-                    key={session.id}
-                    className={`p-4 border rounded-2xl flex items-center justify-between transition ${
-                      isDarkMode 
-                        ? 'bg-slate-800/60 border-slate-700/80 hover:border-slate-600' 
-                        : 'bg-slate-50/80 border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center space-x-2">
-                        <span className="px-2.5 py-0.5 rounded-md bg-sky-100 dark:bg-sky-950/80 text-blue-950 dark:text-sky-200 border border-sky-300/80 dark:border-sky-800 text-xs font-mono font-black">
-                          สัปดาห์ที่ {session.weekNumber}
-                        </span>
-                        <span className={`text-xs font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{session.topic}</span>
-                      </div>
-                      <p className={`text-[11px] flex items-center space-x-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>สร้างเมื่อ {new Date(session.createdAt).toLocaleDateString('th-TH')}</span>
-                      </p>
-                    </div>
+              {effectiveSessions && effectiveSessions.length > 0 ? (
+                <div className="space-y-3">
+                  {[...effectiveSessions]
+                    .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0))
+                    .map((session) => (
+                      <div
+                        key={session.id}
+                        className={`p-4 border rounded-2xl flex items-center justify-between transition ${
+                          isDarkMode 
+                            ? 'bg-slate-800/60 border-slate-700/80 hover:border-slate-600' 
+                            : 'bg-slate-50/80 border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="px-2.5 py-0.5 rounded-md bg-sky-100 dark:bg-sky-950/80 text-blue-950 dark:text-sky-200 border border-sky-300/80 dark:border-sky-800 text-xs font-mono font-black">
+                              สัปดาห์ที่ {session.weekNumber}
+                            </span>
+                            <span className={`text-xs font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{session.topic}</span>
+                          </div>
+                          <p className={`text-[11px] flex items-center space-x-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>สร้างเมื่อ {new Date(session.createdAt || Date.now()).toLocaleDateString('th-TH')}</span>
+                          </p>
+                        </div>
 
-                    <button
-                      onClick={() => handleStartSessionQR(session)}
-                      className="px-3 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5 transition shadow-sm active:scale-95 shrink-0"
-                      title="เปิด Dynamic QR Code"
-                    >
-                      <QrCode className="w-4 h-4 shrink-0" />
-                      <span className="hidden sm:inline">เปิด Dynamic QR Code</span>
-                    </button>
+                        <button
+                          onClick={() => handleStartSessionQR(session)}
+                          className="px-3 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5 transition shadow-sm active:scale-95 shrink-0 cursor-pointer"
+                          title="เปิด Dynamic QR Code"
+                        >
+                          <QrCode className="w-4 h-4 shrink-0" />
+                          <span className="hidden sm:inline">เปิด Dynamic QR Code</span>
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <div className={`p-8 text-center border rounded-2xl ${
+                  isDarkMode ? 'bg-slate-900/60 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'
+                }`}>
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20 flex items-center justify-center mx-auto mb-3">
+                    <Calendar className="w-6 h-6 stroke-[2]" />
                   </div>
-                ))}
-              </div>
+                  <h4 className="text-sm font-bold mb-1">ยังไม่มีการเพิ่มสัปดาห์การสอนในรายวิชานี้</h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-4">
+                    กดปุ่ม "แก้ไขวิชา / เพิ่มลดสัปดาห์" ด้านบน เพื่อกำหนดหัวข้อสอนและวันที่สำหรับแต่ละสัปดาห์
+                  </p>
+                  {teacherRoleInfo.canEditCourse && (
+                    <button
+                      onClick={() => setIsEditModalOpen(true)}
+                      className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl shadow-md transition active:scale-95 inline-flex items-center space-x-2 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>เพิ่มสัปดาห์การสอน</span>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className={`p-12 text-center border rounded-2xl text-xs font-semibold ${
@@ -3315,6 +3396,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         }}
         teacher={teacher}
         courses={courses}
+        canManageLeave={teacherRoleInfo.canManageLeave}
         isDarkMode={isDarkMode}
       />
 
@@ -3361,7 +3443,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 studentIdNum: m.user?.universityId || '-',
                 email: m.user?.email || '',
                 avatarUrl: m.user?.avatarUrl,
-                sessionStatuses: courseSessions.map((s) => ({
+                sessionStatuses: effectiveSessions.map((s) => ({
                   sessionId: s.id,
                   weekNumber: s.weekNumber,
                   topic: s.topic,
@@ -3369,7 +3451,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 })),
               }))
           }
-          sessions={courseSessions.length > 0 ? courseSessions : currentOverviewItem?.sessionDetailsList || []}
+          sessions={effectiveSessions.length > 0 ? effectiveSessions : currentOverviewItem?.sessionDetailsList || []}
+          canEditAttendance={teacherRoleInfo.canEditAttendance}
           onRefresh={() => {
             loadOverviewData();
             if (selectedCourse) {

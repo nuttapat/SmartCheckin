@@ -162,6 +162,8 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
 
   // Edit & Delete Log Modal State
   const [editingLog, setEditingLog] = useState<any | null>(null);
+  const [editCourseId, setEditCourseId] = useState<string>('');
+  const [editWeekNumber, setEditWeekNumber] = useState<number | string>(1);
   const [editStatus, setEditStatus] = useState<string>('PRESENT');
   const [editLeaveType, setEditLeaveType] = useState<LeaveType>(LeaveType.SICK);
   const [editLeaveStatus, setEditLeaveStatus] = useState<LeaveStatus>(LeaveStatus.APPROVED);
@@ -169,11 +171,27 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
   const [editReason, setEditReason] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
+  // Bulk Edit Modal State
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState<boolean>(false);
+  const [bulkChangeCourse, setBulkChangeCourse] = useState<boolean>(false);
+  const [bulkCourseId, setBulkCourseId] = useState<string>('');
+  const [bulkChangeWeek, setBulkChangeWeek] = useState<boolean>(false);
+  const [bulkWeekNumber, setBulkWeekNumber] = useState<number | string>(1);
+  const [bulkChangeStatus, setBulkChangeStatus] = useState<boolean>(false);
+  const [bulkStatus, setBulkStatus] = useState<string>('PRESENT');
+  const [bulkChangeMethod, setBulkChangeMethod] = useState<boolean>(false);
+  const [bulkMethod, setBulkMethod] = useState<string>('ADMIN_BULK_EDIT');
+  const [bulkChangeReason, setBulkChangeReason] = useState<boolean>(false);
+  const [bulkReason, setBulkReason] = useState<string>('');
+  const [isSavingBulkEdit, setIsSavingBulkEdit] = useState<boolean>(false);
+
   const [deletingLog, setDeletingLog] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   const handleOpenEdit = (log: any) => {
     setEditingLog(log);
+    setEditCourseId(log.courseId || (allCourses[0]?.id || ''));
+    setEditWeekNumber(log.weekNumber || 1);
     setEditStatus(log.status || 'PRESENT');
     setEditLeaveType(log.leaveType || LeaveType.SICK);
     setEditLeaveStatus(log.leaveStatus || log.leaveRequestStatus || LeaveStatus.APPROVED);
@@ -185,6 +203,14 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
     if (!editingLog) return;
     setIsSavingEdit(true);
     try {
+      const targetCourseId = editCourseId || editingLog.courseId;
+      const targetWeekNumber = Number(editWeekNumber) || Number(editingLog.weekNumber) || 1;
+      const courseObj = allCourses.find((c) => c.id === targetCourseId);
+      const sessionObj =
+        allSessions.find((s) => s.courseId === targetCourseId && Number(s.weekNumber) === targetWeekNumber) ||
+        allSessions.find((s) => s.id === editingLog.sessionId);
+      const targetSessionId = sessionObj?.id || editingLog.sessionId || '';
+
       const leaveTypeTh =
         editLeaveType === LeaveType.SICK
           ? 'ลาป่วย'
@@ -209,22 +235,20 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
           : allLeaveRequests.find(
               (l) =>
                 l.studentId === (editingLog.targetUserId || editingLog.studentId) &&
-                l.courseId === editingLog.courseId &&
-                (l.sessionId === editingLog.sessionId || Number(l.weekNumber) === Number(editingLog.weekNumber))
+                l.courseId === targetCourseId &&
+                (l.sessionId === targetSessionId || Number(l.weekNumber) === targetWeekNumber)
             );
-
-        const courseObj = allCourses.find((c) => c.id === editingLog.courseId);
-        const sessionObj = allSessions.find((s) => s.id === editingLog.sessionId);
 
         const leaveData: any = {
           id: existingLeave ? existingLeave.id : realLeaveId || `leave_admin_${Date.now()}`,
           studentId: editingLog.targetUserId || editingLog.studentId || editingLog.userId,
           studentNameTh: editingLog.displayName || 'นักศึกษา',
           studentUniversityId: editingLog.displayId || '',
-          courseId: editingLog.courseId,
+          courseId: targetCourseId,
           courseCode: courseObj?.courseCode || courseObj?.code || '',
           courseName: courseObj?.courseName || courseObj?.nameTh || '',
-          weekNumber: editingLog.weekNumber || sessionObj?.weekNumber || 1,
+          weekNumber: targetWeekNumber,
+          sessionId: targetSessionId,
           leaveType: editLeaveType,
           leaveDate: sessionObj?.date || new Date().toISOString().split('T')[0],
           reason: editReason || existingLeave?.reason || `ปรับสถานะการลาโดยแอดมิน (${leaveTypeTh})`,
@@ -240,6 +264,9 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
           if (editingLog.id && !editingLog.id.startsWith('leave_') && !editingLog.id.startsWith('att_admin_')) {
             await saveAdminDocument('attendanceRecords', {
               ...editingLog,
+              courseId: targetCourseId,
+              weekNumber: targetWeekNumber,
+              sessionId: targetSessionId,
               status: AttendanceStatus.LEAVE,
               checkinMethod: editMethod || `ใบลา (${leaveTypeTh})`,
               reason: editReason,
@@ -248,8 +275,8 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
           } else {
             await overrideAttendanceRecord({
               studentId: editingLog.targetUserId || editingLog.studentId,
-              sessionId: editingLog.sessionId || undefined,
-              courseId: editingLog.courseId || undefined,
+              sessionId: targetSessionId || undefined,
+              courseId: targetCourseId || undefined,
               status: AttendanceStatus.LEAVE,
               checkinMethod: editMethod || `ใบลา (${leaveTypeTh})`,
             });
@@ -269,14 +296,17 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
           }
           await overrideAttendanceRecord({
             studentId: editingLog.targetUserId || editingLog.studentId,
-            sessionId: editingLog.sessionId || undefined,
-            courseId: editingLog.courseId || undefined,
+            sessionId: targetSessionId || undefined,
+            courseId: targetCourseId || undefined,
             status: editStatus,
             checkinMethod: editMethod || 'ADMIN_EDIT',
           });
         } else if (editingLog.logType === 'TEACHER') {
           await saveAdminDocument('teacherAttendanceRecords', {
             ...editingLog,
+            courseId: targetCourseId,
+            weekNumber: targetWeekNumber,
+            sessionId: targetSessionId,
             status: editStatus,
             checkinMethod: editMethod,
             note: editReason,
@@ -285,6 +315,9 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
         } else {
           await saveAdminDocument('attendanceRecords', {
             ...editingLog,
+            courseId: targetCourseId,
+            weekNumber: targetWeekNumber,
+            sessionId: targetSessionId,
             status: editStatus,
             checkinMethod: editMethod,
             reason: editReason,
@@ -293,7 +326,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
         }
       }
 
-      showToast('แก้ไขข้อมูลและเชื่อมโยงระบบลาเรียบร้อยแล้ว');
+      showToast('แก้ไขข้อมูลและเชื่อมโยงระบบเรียบร้อยแล้ว');
       setEditingLog(null);
       await loadOverrideTabData(true);
       onRefreshOverview();
@@ -302,6 +335,94 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
       showToast(`เกิดข้อผิดพลาดในการแก้ไข: ${err.message || 'ไม่สามารถบันทึกได้'}`);
     } finally {
       setIsSavingEdit(false);
+    }
+  };
+
+  const handleSaveBulkEdit = async () => {
+    if (selectedLogIds.length === 0) return;
+    setIsSavingBulkEdit(true);
+    try {
+      let updatedCount = 0;
+      for (const id of selectedLogIds) {
+        const log = combinedAttendanceLogs.find((l) => l.id === id);
+        if (!log) continue;
+
+        const targetCourseId = bulkChangeCourse && bulkCourseId ? bulkCourseId : log.courseId;
+        const targetWeekNumber = bulkChangeWeek ? Number(bulkWeekNumber) : (Number(log.weekNumber) || 1);
+        const targetStatus = bulkChangeStatus ? bulkStatus : log.status;
+        const targetMethod = bulkChangeMethod ? bulkMethod : (log.checkinMethod || log.method || 'BULK_EDIT');
+        const targetReason = bulkChangeReason ? bulkReason : (log.reason || log.note || '');
+
+        const courseObj = allCourses.find((c) => c.id === targetCourseId);
+        const sessionObj =
+          allSessions.find((s) => s.courseId === targetCourseId && Number(s.weekNumber) === targetWeekNumber) ||
+          allSessions.find((s) => s.id === log.sessionId);
+        const targetSessionId = sessionObj?.id || log.sessionId || '';
+
+        if (log.isLeaveRequestRecord) {
+          const realId = log.id.startsWith('leave_') ? log.id.replace('leave_', '') : log.id;
+          const existingLeave = allLeaveRequests.find((l) => l.id === realId);
+          const leaveData: any = {
+            ...(existingLeave || log),
+            id: realId,
+            courseId: targetCourseId,
+            courseCode: courseObj?.courseCode || courseObj?.code || '',
+            courseName: courseObj?.courseName || courseObj?.nameTh || '',
+            weekNumber: targetWeekNumber,
+            sessionId: targetSessionId,
+            status: bulkChangeStatus ? (targetStatus === 'LEAVE' ? LeaveStatus.APPROVED : LeaveStatus.REJECTED) : (existingLeave?.status || LeaveStatus.APPROVED),
+            reason: targetReason || existingLeave?.reason,
+            teacherComment: targetReason || existingLeave?.teacherComment || 'แก้ไขแบบกลุ่มโดยแอดมิน',
+            updatedAt: new Date().toISOString(),
+          };
+
+          await saveAdminDocument('leaveRequests', leaveData);
+
+          if (bulkChangeStatus && targetStatus !== 'LEAVE') {
+            await overrideAttendanceRecord({
+              studentId: log.targetUserId || log.studentId,
+              courseId: targetCourseId,
+              sessionId: targetSessionId,
+              status: targetStatus,
+              checkinMethod: targetMethod,
+            });
+          }
+        } else if (log.logType === 'TEACHER') {
+          await saveAdminDocument('teacherAttendanceRecords', {
+            ...log,
+            courseId: targetCourseId,
+            weekNumber: targetWeekNumber,
+            sessionId: targetSessionId,
+            status: targetStatus,
+            checkinMethod: targetMethod,
+            note: targetReason,
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          await saveAdminDocument('attendanceRecords', {
+            ...log,
+            courseId: targetCourseId,
+            weekNumber: targetWeekNumber,
+            sessionId: targetSessionId,
+            status: targetStatus,
+            checkinMethod: targetMethod,
+            reason: targetReason,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        updatedCount++;
+      }
+
+      showToast(`แก้ไขข้อมูลแบบกลุ่มจำนวน ${updatedCount} รายการเรียบร้อยแล้ว`);
+      setIsBulkEditOpen(false);
+      setSelectedLogIds([]);
+      await loadOverrideTabData(true);
+      onRefreshOverview();
+    } catch (err: any) {
+      console.error('Failed to save bulk edit:', err);
+      showToast(`เกิดข้อผิดพลาดในการแก้ไขแบบกลุ่ม: ${err.message || 'ไม่สามารถบันทึกได้'}`);
+    } finally {
+      setIsSavingBulkEdit(false);
     }
   };
 
@@ -746,20 +867,43 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
 
   // Selection state for log table
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
 
   const allPaginatedLogsSelected = paginatedLogs.length > 0 && paginatedLogs.every((l) => selectedLogIds.includes(l.id));
 
-  const handleToggleSelectLog = (id: string) => {
-    setSelectedLogIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
+  const handleToggleSelectLog = (id: string, index?: number, e?: React.MouseEvent) => {
+    if (e?.shiftKey && lastSelectedIndex !== null && index !== undefined && lastSelectedIndex !== index) {
+      const start = Math.min(lastSelectedIndex, index);
+      const end = Math.max(lastSelectedIndex, index);
+      const rangeIds = paginatedLogs.slice(start, end + 1).map((l) => l.id);
+
+      const isTargetSelected = selectedLogIds.includes(id);
+
+      setSelectedLogIds((prev) => {
+        if (!isTargetSelected) {
+          const newSet = new Set([...prev, ...rangeIds]);
+          return Array.from(newSet);
+        } else {
+          return prev.filter((prevId) => !rangeIds.includes(prevId));
+        }
+      });
+    } else {
+      setSelectedLogIds((prev) =>
+        prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      );
+    }
+    if (index !== undefined) {
+      setLastSelectedIndex(index);
+    }
   };
 
   const handleSelectAllPaginatedLogs = () => {
     if (allPaginatedLogsSelected) {
       setSelectedLogIds([]);
+      setLastSelectedIndex(null);
     } else {
       setSelectedLogIds(paginatedLogs.map((l) => l.id));
+      setLastSelectedIndex(null);
     }
   };
 
@@ -1655,7 +1799,28 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
               <CheckSquare className="w-4 h-4" />
               <span>เลือกไว้แล้ว {selectedLogIds.length} รายการ</span>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+              {/* Bulk Edit Button */}
+              <button
+                onClick={() => {
+                  setBulkCourseId(allCourses[0]?.id || '');
+                  setBulkWeekNumber(1);
+                  setBulkStatus('PRESENT');
+                  setBulkMethod('ADMIN_BULK_EDIT');
+                  setBulkReason('');
+                  setBulkChangeCourse(false);
+                  setBulkChangeWeek(false);
+                  setBulkChangeStatus(true);
+                  setBulkChangeMethod(false);
+                  setBulkChangeReason(false);
+                  setIsBulkEditOpen(true);
+                }}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white bg-sky-600 hover:bg-sky-500 transition flex items-center space-x-1.5 cursor-pointer shadow-sm active:scale-95"
+              >
+                <Edit className="w-3.5 h-3.5" />
+                <span>แก้ไขรายการที่เลือก ({selectedLogIds.length})</span>
+              </button>
+
               <button
                 onClick={handleExportCSV}
                 className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition flex items-center space-x-1.5 cursor-pointer shadow-sm"
@@ -1663,40 +1828,47 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
                 <Download className="w-3.5 h-3.5" />
                 <span>ส่งออกรายการที่เลือก (CSV)</span>
               </button>
-              {setDeleteConfirmItem && (
-                <button
-                  onClick={() => {
+
+              <button
+                onClick={() => {
+                  const bulkDeleteAction = async () => {
+                    for (const id of selectedLogIds) {
+                      const matched = combinedAttendanceLogs.find((l) => l.id === id);
+                      if (matched) {
+                        if (matched.isLeaveRequestRecord) {
+                          const realId = matched.id.startsWith('leave_') ? matched.id.replace('leave_', '') : matched.id;
+                          await deleteAdminDocument('leaveRequests', realId);
+                        } else if (matched.logType === 'TEACHER') {
+                          await deleteAdminDocument('teacherAttendanceRecords', matched.id);
+                        } else {
+                          await deleteAdminDocument('attendanceRecords', matched.id);
+                        }
+                      }
+                    }
+                    showToast(`ลบประวัติการเข้าเรียน/ลาจำนวน ${selectedLogIds.length} รายการเรียบร้อยแล้ว`);
+                    setSelectedLogIds([]);
+                    await loadOverrideTabData(true);
+                    onRefreshOverview();
+                  };
+
+                  if (setDeleteConfirmItem) {
                     setDeleteConfirmItem({
                       type: 'bulk_attendance_logs',
                       title: `ลบรายการเช็กชื่อ/ลาแบบกลุ่ม (${selectedLogIds.length} รายการ)`,
                       subtitle: `คุณกำลังจะลบข้อมูลการเช็กชื่อและประวัติการลาจำนวน ${selectedLogIds.length} รายการออกจากระบบถาวร`,
-                      action: async () => {
-                        for (const id of selectedLogIds) {
-                          const matched = combinedAttendanceLogs.find((l) => l.id === id);
-                          if (matched) {
-                            if (matched.isLeaveRequestRecord) {
-                              const realId = matched.id.startsWith('leave_') ? matched.id.replace('leave_', '') : matched.id;
-                              await deleteAdminDocument('leaveRequests', realId);
-                            } else if (matched.logType === 'TEACHER') {
-                              await deleteAdminDocument('teacherAttendanceRecords', matched.id);
-                            } else {
-                              await deleteAdminDocument('attendanceRecords', matched.id);
-                            }
-                          }
-                        }
-                        showToast(`ลบประวัติการเข้าเรียน/ลาจำนวน ${selectedLogIds.length} รายการเรียบร้อยแล้ว`);
-                        setSelectedLogIds([]);
-                        await loadOverrideTabData(true);
-                        onRefreshOverview();
-                      },
+                      action: bulkDeleteAction,
                     });
-                  }}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white bg-rose-600 hover:bg-rose-500 transition flex items-center space-x-1.5 cursor-pointer shadow-sm"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>ลบรายการที่เลือก ({selectedLogIds.length})</span>
-                </button>
-              )}
+                  } else {
+                    if (window.confirm(`ยืนยันการลบรายการเช็กชื่อ/ลาจำนวน ${selectedLogIds.length} รายการ?`)) {
+                      bulkDeleteAction();
+                    }
+                  }
+                }}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white bg-rose-600 hover:bg-rose-500 transition flex items-center space-x-1.5 cursor-pointer shadow-sm active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>ลบรายการที่เลือก ({selectedLogIds.length})</span>
+              </button>
             </div>
           </div>
         )}
@@ -1809,7 +1981,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
                           {/* Checkbox */}
                           <td className="p-3 text-center">
                             <button
-                              onClick={() => handleToggleSelectLog(log.id)}
+                              onClick={(e) => handleToggleSelectLog(log.id, idx, e)}
                               className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
                             >
                               {isSelected ? (
@@ -1929,7 +2101,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
                   <p>ไม่พบข้อมูลสถานะการเข้าชั้นเรียนตามเงื่อนไขที่กำหนด</p>
                 </div>
               ) : (
-                paginatedLogs.map((log) => {
+                paginatedLogs.map((log, idx) => {
                   const matchedCourse = allCourses.find((c) => c.id === log.courseId);
                   const isSelected = selectedLogIds.includes(log.id);
 
@@ -1950,7 +2122,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
                       <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-700/60">
                         <div className="flex items-start space-x-2">
                           <button
-                            onClick={() => handleToggleSelectLog(log.id)}
+                            onClick={(e) => handleToggleSelectLog(log.id, idx, e)}
                             className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer mt-0.5"
                           >
                             {isSelected ? (
@@ -2355,7 +2527,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
                           {visibleCols.select && (
                             <td className="p-3.5 text-center">
                               <button
-                                onClick={() => handleToggleSelectLog(log.id)}
+                                onClick={(e) => handleToggleSelectLog(log.id, idx, e)}
                                 className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
                               >
                                 {isSelected ? (
@@ -2593,11 +2765,51 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400 font-bold">วิชา/สัปดาห์:</span>
+                  <span className="text-slate-400 font-bold">วิชา/สัปดาห์ เดิม:</span>
                   <span className="font-bold text-slate-700 dark:text-slate-200">
                     {editingLog.courseId} {editingLog.weekNumber ? `(สัปดาห์ที่ ${editingLog.weekNumber})` : ''}
                   </span>
                 </div>
+              </div>
+
+              {/* Course Selection */}
+              <div>
+                <label className="block text-xs font-extrabold mb-1.5 text-slate-700 dark:text-slate-300">
+                  รายวิชา (Course)
+                </label>
+                <select
+                  value={editCourseId}
+                  onChange={(e) => setEditCourseId(e.target.value)}
+                  className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-extrabold border transition ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  {allCourses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.courseCode || c.code} - {c.courseName || c.nameTh}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Week Number Selection */}
+              <div>
+                <label className="block text-xs font-extrabold mb-1.5 text-slate-700 dark:text-slate-300">
+                  สัปดาห์เรียน (Week Number)
+                </label>
+                <select
+                  value={editWeekNumber}
+                  onChange={(e) => setEditWeekNumber(Number(e.target.value))}
+                  className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-extrabold border transition ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
+                    <option key={w} value={w}>
+                      สัปดาห์ที่ {w}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Status Selection */}
@@ -2740,6 +2952,197 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
               >
                 <Save className="w-4 h-4" />
                 <span>{isSavingEdit ? 'กำลังบันทึก...' : 'บันทึกการแก้ไข'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Edit Modal */}
+      {isBulkEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div
+            className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl border transition-all ${
+              isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
+            }`}
+          >
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                  <Edit className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base">แก้ไขข้อมูลแบบกลุ่ม (Bulk Edit)</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    เลือกหัวข้อที่ต้องการเปลี่ยนแปลงสำหรับผู้เช็กชื่อ {selectedLogIds.length} รายการ
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsBulkEditOpen(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4 max-h-[70vh] overflow-y-auto">
+              {/* Option 1: Course */}
+              <div className={`p-3.5 rounded-2xl border space-y-2 ${isDarkMode ? 'bg-slate-800/60 border-slate-700/80' : 'bg-slate-50 border-slate-200'}`}>
+                <label className="flex items-center space-x-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={bulkChangeCourse}
+                    onChange={(e) => setBulkChangeCourse(e.target.checked)}
+                    className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+                    เปลี่ยนรายวิชา (Course)
+                  </span>
+                </label>
+                {bulkChangeCourse && (
+                  <select
+                    value={bulkCourseId}
+                    onChange={(e) => setBulkCourseId(e.target.value)}
+                    className={`w-full mt-2 px-3.5 py-2.5 rounded-xl text-xs font-extrabold border transition ${
+                      isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    {allCourses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.courseCode || c.code} - {c.courseName || c.nameTh}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Option 2: Week */}
+              <div className={`p-3.5 rounded-2xl border space-y-2 ${isDarkMode ? 'bg-slate-800/60 border-slate-700/80' : 'bg-slate-50 border-slate-200'}`}>
+                <label className="flex items-center space-x-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={bulkChangeWeek}
+                    onChange={(e) => setBulkChangeWeek(e.target.checked)}
+                    className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+                    เปลี่ยนสัปดาห์เรียน (Week Number)
+                  </span>
+                </label>
+                {bulkChangeWeek && (
+                  <select
+                    value={bulkWeekNumber}
+                    onChange={(e) => setBulkWeekNumber(Number(e.target.value))}
+                    className={`w-full mt-2 px-3.5 py-2.5 rounded-xl text-xs font-extrabold border transition ${
+                      isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
+                      <option key={w} value={w}>
+                        สัปดาห์ที่ {w}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Option 3: Status */}
+              <div className={`p-3.5 rounded-2xl border space-y-2 ${isDarkMode ? 'bg-slate-800/60 border-slate-700/80' : 'bg-slate-50 border-slate-200'}`}>
+                <label className="flex items-center space-x-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={bulkChangeStatus}
+                    onChange={(e) => setBulkChangeStatus(e.target.checked)}
+                    className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+                    เปลี่ยนสถานะการเข้าเรียน (Status)
+                  </span>
+                </label>
+                {bulkChangeStatus && (
+                  <select
+                    value={bulkStatus}
+                    onChange={(e) => setBulkStatus(e.target.value)}
+                    className={`w-full mt-2 px-3.5 py-2.5 rounded-xl text-xs font-extrabold border transition ${
+                      isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    <option value="PRESENT">🟢 มาเรียน (PRESENT)</option>
+                    <option value="LATE">🟡 สาย (LATE)</option>
+                    <option value="LEAVE">🔵 ลา (LEAVE)</option>
+                    <option value="ABSENT">🔴 ขาด (ABSENT)</option>
+                  </select>
+                )}
+              </div>
+
+              {/* Option 4: Method */}
+              <div className={`p-3.5 rounded-2xl border space-y-2 ${isDarkMode ? 'bg-slate-800/60 border-slate-700/80' : 'bg-slate-50 border-slate-200'}`}>
+                <label className="flex items-center space-x-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={bulkChangeMethod}
+                    onChange={(e) => setBulkChangeMethod(e.target.checked)}
+                    className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+                    เปลี่ยนวิธีเช็กชื่อ / ช่องทาง (Method)
+                  </span>
+                </label>
+                {bulkChangeMethod && (
+                  <input
+                    type="text"
+                    value={bulkMethod}
+                    onChange={(e) => setBulkMethod(e.target.value)}
+                    placeholder="เช่น ADMIN_BULK_EDIT, PASSCODE, QR_CODE"
+                    className={`w-full mt-2 px-3.5 py-2.5 rounded-xl text-xs font-medium border transition ${
+                      isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                    }`}
+                  />
+                )}
+              </div>
+
+              {/* Option 5: Reason */}
+              <div className={`p-3.5 rounded-2xl border space-y-2 ${isDarkMode ? 'bg-slate-800/60 border-slate-700/80' : 'bg-slate-50 border-slate-200'}`}>
+                <label className="flex items-center space-x-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={bulkChangeReason}
+                    onChange={(e) => setBulkChangeReason(e.target.checked)}
+                    className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+                    เปลี่ยนเหตุผล / หมายเหตุ (Reason / Note)
+                  </span>
+                </label>
+                {bulkChangeReason && (
+                  <textarea
+                    rows={2}
+                    value={bulkReason}
+                    onChange={(e) => setBulkReason(e.target.value)}
+                    placeholder="ระบุเหตุผลการแก้ไขแบบกลุ่ม..."
+                    className={`w-full mt-2 px-3.5 py-2.5 rounded-xl text-xs font-medium border transition ${
+                      isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                    }`}
+                  />
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-2 pt-4 border-t border-slate-200 dark:border-slate-800">
+              <button
+                onClick={() => setIsBulkEditOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={handleSaveBulkEdit}
+                disabled={isSavingBulkEdit || (!bulkChangeCourse && !bulkChangeWeek && !bulkChangeStatus && !bulkChangeMethod && !bulkChangeReason)}
+                className="px-5 py-2 rounded-xl text-xs font-extrabold bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-600/20 active:scale-95 transition flex items-center space-x-1.5 disabled:opacity-50 cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                <span>{isSavingBulkEdit ? 'กำลังบันทึก...' : `บันทึกการแก้ไข (${selectedLogIds.length} รายการ)`}</span>
               </button>
             </div>
           </div>

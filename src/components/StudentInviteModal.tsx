@@ -56,6 +56,7 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
   const [students, setStudents] = useState<UserType[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [selectedAvailableStudentIds, setSelectedAvailableStudentIds] = useState<string[]>([]);
+  const [lastSelectedAvailableStudentIndex, setLastSelectedAvailableStudentIndex] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [listSearchQuery, setListSearchQuery] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -70,6 +71,7 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
 
   // Selection & Bulk Delete state
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [lastSelectedMemberIndex, setLastSelectedMemberIndex] = useState<number | null>(null);
   const [deleteConfirmModalOpen, setDeleteConfirmModalOpen] = useState<boolean>(false);
   const [deleteTargetMembers, setDeleteTargetMembers] = useState<CourseMember[]>([]);
 
@@ -265,10 +267,29 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
     }
   };
 
-  const toggleSelectAvailableStudent = (studentId: string) => {
-    setSelectedAvailableStudentIds((prev) =>
-      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
-    );
+  const toggleSelectAvailableStudent = (studentId: string, index?: number, e?: React.MouseEvent) => {
+    if (e?.shiftKey && lastSelectedAvailableStudentIndex !== null && index !== undefined && lastSelectedAvailableStudentIndex !== index) {
+      const start = Math.min(lastSelectedAvailableStudentIndex, index);
+      const end = Math.max(lastSelectedAvailableStudentIndex, index);
+      const rangeIds = filteredAvailableStudents.slice(start, end + 1).map((s) => s.id);
+
+      const isTargetSelected = selectedAvailableStudentIds.includes(studentId);
+
+      setSelectedAvailableStudentIds((prev) => {
+        if (!isTargetSelected) {
+          return Array.from(new Set([...prev, ...rangeIds]));
+        } else {
+          return prev.filter((prevId) => !rangeIds.includes(prevId));
+        }
+      });
+    } else {
+      setSelectedAvailableStudentIds((prev) =>
+        prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
+      );
+    }
+    if (index !== undefined) {
+      setLastSelectedAvailableStudentIndex(index);
+    }
   };
 
   const filteredEnrolledStudents = studentMembersInCourse.filter((m) => {
@@ -288,15 +309,36 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
 
     if (isAllSelected) {
       setSelectedMemberIds((prev) => prev.filter((id) => !filteredIds.includes(id)));
+      setLastSelectedMemberIndex(null);
     } else {
       setSelectedMemberIds((prev) => Array.from(new Set([...prev, ...filteredIds])));
+      setLastSelectedMemberIndex(null);
     }
   };
 
-  const toggleSelectMember = (memberId: string) => {
-    setSelectedMemberIds((prev) =>
-      prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]
-    );
+  const toggleSelectMember = (memberId: string, index?: number, e?: React.MouseEvent) => {
+    if (e?.shiftKey && lastSelectedMemberIndex !== null && index !== undefined && lastSelectedMemberIndex !== index) {
+      const start = Math.min(lastSelectedMemberIndex, index);
+      const end = Math.max(lastSelectedMemberIndex, index);
+      const rangeIds = filteredEnrolledStudents.slice(start, end + 1).map((m) => m.id);
+
+      const isTargetSelected = selectedMemberIds.includes(memberId);
+
+      setSelectedMemberIds((prev) => {
+        if (!isTargetSelected) {
+          return Array.from(new Set([...prev, ...rangeIds]));
+        } else {
+          return prev.filter((prevId) => !rangeIds.includes(prevId));
+        }
+      });
+    } else {
+      setSelectedMemberIds((prev) =>
+        prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]
+      );
+    }
+    if (index !== undefined) {
+      setLastSelectedMemberIndex(index);
+    }
   };
 
   const handleRequestSingleDelete = (member: CourseMember) => {
@@ -569,14 +611,14 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
                       {searchQuery.trim() ? `ไม่พบนักศึกษาที่ตรงกับคำค้นหา "${searchQuery}"` : 'นักศึกษาทั้งหมดในระบบอยู่ในวิชานี้เรียบร้อยแล้ว'}
                     </div>
                   ) : (
-                    filteredAvailableStudents.map((s) => {
+                    filteredAvailableStudents.map((s, idx) => {
                       const isSelected = selectedAvailableStudentIds.includes(s.id);
                       const displayName = `${s.title || ''} ${s.firstNameTh || ''} ${s.lastNameTh || ''}`.trim() || s.email;
 
                       return (
                         <div
                           key={s.id}
-                          onClick={() => toggleSelectAvailableStudent(s.id)}
+                          onClick={(e) => toggleSelectAvailableStudent(s.id, idx, e)}
                           className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition select-none ${
                             isSelected
                               ? isDarkMode
@@ -954,7 +996,7 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
               </div>
             ) : (
               <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                {filteredEnrolledStudents.map((m) => {
+                {filteredEnrolledStudents.map((m, idx) => {
                   const u = m.user;
                   const displayName = u
                     ? `${u.title || ''} ${u.firstNameTh || ''} ${u.lastNameTh || ''}`.trim() || u.email
@@ -965,7 +1007,7 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
                   return (
                     <div
                       key={m.id}
-                      onClick={() => toggleSelectMember(m.id)}
+                      onClick={(e) => toggleSelectMember(m.id, idx, e)}
                       className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition select-none ${
                         isSelected
                           ? isDarkMode
@@ -981,7 +1023,7 @@ export const StudentInviteModal: React.FC<StudentInviteModalProps> = ({
                         <div
                           onClick={(e) => {
                             e.stopPropagation();
-                            toggleSelectMember(m.id);
+                            toggleSelectMember(m.id, idx, e);
                           }}
                           className="shrink-0 cursor-pointer p-0.5"
                         >

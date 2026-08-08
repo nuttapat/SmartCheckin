@@ -9,6 +9,7 @@ interface TeacherLeaveManagementModalProps {
   onClose: () => void;
   teacher: User;
   courses: Course[];
+  canManageLeave?: boolean;
   isDarkMode?: boolean;
 }
 
@@ -17,6 +18,7 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
   onClose,
   teacher,
   courses,
+  canManageLeave = true,
   isDarkMode: propIsDarkMode,
 }) => {
   const { isDarkMode: themeIsDarkMode } = useTheme();
@@ -449,7 +451,12 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
 
                   {/* Action Buttons */}
                   <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
-                    {item.status === LeaveStatus.PENDING ? (
+                    {!canManageLeave ? (
+                      <div className="text-[11px] font-bold text-slate-400 italic flex items-center justify-between">
+                        <span>สถานะ: {statusConfig.label}</span>
+                        <span>🔒 อ่านอย่างเดียว (อาจารย์ผู้สอน)</span>
+                      </div>
+                    ) : item.status === LeaveStatus.PENDING ? (
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           onClick={() => handleOpenActionModal(item, LeaveStatus.APPROVED)}

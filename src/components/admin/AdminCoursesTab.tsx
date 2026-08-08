@@ -184,7 +184,9 @@ export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
 
   // Bulk selection state
   const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([]);
+  const [lastSelectedCourseIndex, setLastSelectedCourseIndex] = useState<number | null>(null);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+  const [lastSelectedSessionIndex, setLastSelectedSessionIndex] = useState<number | null>(null);
   const [isCreateCourseModalOpen, setIsCreateCourseModalOpen] = useState<boolean>(false);
   const [isEditCourseModalOpen, setIsEditCourseModalOpen] = useState<boolean>(false);
   const [editingCourse, setEditingCourse] = useState<any | null>(null);
@@ -537,17 +539,38 @@ export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
   // Course bulk handlers
   const allVisibleCoursesSelected = filteredAndSortedCourses.length > 0 && filteredAndSortedCourses.every((c) => selectedCourseIds.includes(c.id));
 
-  const handleToggleSelectCourse = (id: string) => {
-    setSelectedCourseIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
+  const handleToggleSelectCourse = (id: string, index?: number, e?: React.MouseEvent) => {
+    if (e?.shiftKey && lastSelectedCourseIndex !== null && index !== undefined && lastSelectedCourseIndex !== index) {
+      const start = Math.min(lastSelectedCourseIndex, index);
+      const end = Math.max(lastSelectedCourseIndex, index);
+      const rangeIds = filteredAndSortedCourses.slice(start, end + 1).map((c) => c.id);
+
+      const isTargetSelected = selectedCourseIds.includes(id);
+
+      setSelectedCourseIds((prev) => {
+        if (!isTargetSelected) {
+          return Array.from(new Set([...prev, ...rangeIds]));
+        } else {
+          return prev.filter((prevId) => !rangeIds.includes(prevId));
+        }
+      });
+    } else {
+      setSelectedCourseIds((prev) =>
+        prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      );
+    }
+    if (index !== undefined) {
+      setLastSelectedCourseIndex(index);
+    }
   };
 
   const handleSelectAllVisibleCourses = () => {
     if (allVisibleCoursesSelected) {
       setSelectedCourseIds([]);
+      setLastSelectedCourseIndex(null);
     } else {
       setSelectedCourseIds(filteredAndSortedCourses.map((c) => c.id));
+      setLastSelectedCourseIndex(null);
     }
   };
 
@@ -588,17 +611,38 @@ export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
   // Session bulk handlers
   const allVisibleSessionsSelected = filteredSessions.length > 0 && filteredSessions.every((s) => selectedSessionIds.includes(s.id));
 
-  const handleToggleSelectSession = (id: string) => {
-    setSelectedSessionIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
+  const handleToggleSelectSession = (id: string, index?: number, e?: React.MouseEvent) => {
+    if (e?.shiftKey && lastSelectedSessionIndex !== null && index !== undefined && lastSelectedSessionIndex !== index) {
+      const start = Math.min(lastSelectedSessionIndex, index);
+      const end = Math.max(lastSelectedSessionIndex, index);
+      const rangeIds = filteredSessions.slice(start, end + 1).map((s) => s.id);
+
+      const isTargetSelected = selectedSessionIds.includes(id);
+
+      setSelectedSessionIds((prev) => {
+        if (!isTargetSelected) {
+          return Array.from(new Set([...prev, ...rangeIds]));
+        } else {
+          return prev.filter((prevId) => !rangeIds.includes(prevId));
+        }
+      });
+    } else {
+      setSelectedSessionIds((prev) =>
+        prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      );
+    }
+    if (index !== undefined) {
+      setLastSelectedSessionIndex(index);
+    }
   };
 
   const handleSelectAllVisibleSessions = () => {
     if (allVisibleSessionsSelected) {
       setSelectedSessionIds([]);
+      setLastSelectedSessionIndex(null);
     } else {
       setSelectedSessionIds(filteredSessions.map((s) => s.id));
+      setLastSelectedSessionIndex(null);
     }
   };
 
@@ -965,7 +1009,7 @@ export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
                         {courseVisibleCols.select && (
                           <td className="p-3.5 text-center">
                             <button
-                              onClick={() => handleToggleSelectCourse(crs.id)}
+                              onClick={(e) => handleToggleSelectCourse(crs.id, idx, e)}
                               className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
                             >
                               {isSelected ? <CheckSquare className="w-4 h-4 text-purple-500" /> : <Square className="w-4 h-4 text-slate-400" />}
@@ -1373,7 +1417,7 @@ export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
                         {sessionVisibleCols.select && (
                           <td className="p-3.5 text-center">
                             <button
-                              onClick={() => handleToggleSelectSession(ses.id)}
+                              onClick={(e) => handleToggleSelectSession(ses.id, idx, e)}
                               className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
                             >
                               {isSelected ? <CheckSquare className="w-4 h-4 text-sky-500" /> : <Square className="w-4 h-4 text-slate-400" />}
@@ -1490,6 +1534,7 @@ export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
           }}
           course={editingCourse}
           teachersList={teachersList}
+          isAdmin={true}
           onSuccess={async (updated) => {
             showToast(`แก้ไขรายวิชา ${updated.courseCode} เรียบร้อยแล้ว`);
             setIsEditCourseModalOpen(false);

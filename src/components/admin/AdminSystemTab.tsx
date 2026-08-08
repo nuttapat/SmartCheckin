@@ -122,8 +122,77 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
 
   // Master Data Sorting & Selection State
   const [selectedDeptIds, setSelectedDeptIds] = useState<string[]>([]);
+  const [lastSelectedDeptIndex, setLastSelectedDeptIndex] = useState<number | null>(null);
   const [selectedCurrIds, setSelectedCurrIds] = useState<string[]>([]);
+  const [lastSelectedCurrIndex, setLastSelectedCurrIndex] = useState<number | null>(null);
   const [selectedPrefixIds, setSelectedPrefixIds] = useState<string[]>([]);
+  const [lastSelectedPrefixIndex, setLastSelectedPrefixIndex] = useState<number | null>(null);
+
+  const handleToggleSelectDept = (id: string, index: number, e: React.MouseEvent, list: any[]) => {
+    if (e.shiftKey && lastSelectedDeptIndex !== null && lastSelectedDeptIndex !== index) {
+      const start = Math.min(lastSelectedDeptIndex, index);
+      const end = Math.max(lastSelectedDeptIndex, index);
+      const rangeIds = list.slice(start, end + 1).map((item) => item.id);
+      const isTargetSelected = selectedDeptIds.includes(id);
+
+      setSelectedDeptIds((prev) => {
+        if (!isTargetSelected) {
+          return Array.from(new Set([...prev, ...rangeIds]));
+        } else {
+          return prev.filter((prevId) => !rangeIds.includes(prevId));
+        }
+      });
+    } else {
+      setSelectedDeptIds((prev) =>
+        prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      );
+    }
+    setLastSelectedDeptIndex(index);
+  };
+
+  const handleToggleSelectCurr = (id: string, index: number, e: React.MouseEvent, list: any[]) => {
+    if (e.shiftKey && lastSelectedCurrIndex !== null && lastSelectedCurrIndex !== index) {
+      const start = Math.min(lastSelectedCurrIndex, index);
+      const end = Math.max(lastSelectedCurrIndex, index);
+      const rangeIds = list.slice(start, end + 1).map((item) => item.id);
+      const isTargetSelected = selectedCurrIds.includes(id);
+
+      setSelectedCurrIds((prev) => {
+        if (!isTargetSelected) {
+          return Array.from(new Set([...prev, ...rangeIds]));
+        } else {
+          return prev.filter((prevId) => !rangeIds.includes(prevId));
+        }
+      });
+    } else {
+      setSelectedCurrIds((prev) =>
+        prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      );
+    }
+    setLastSelectedCurrIndex(index);
+  };
+
+  const handleToggleSelectPrefix = (id: string, index: number, e: React.MouseEvent, list: any[]) => {
+    if (e.shiftKey && lastSelectedPrefixIndex !== null && lastSelectedPrefixIndex !== index) {
+      const start = Math.min(lastSelectedPrefixIndex, index);
+      const end = Math.max(lastSelectedPrefixIndex, index);
+      const rangeIds = list.slice(start, end + 1).map((item) => item.id);
+      const isTargetSelected = selectedPrefixIds.includes(id);
+
+      setSelectedPrefixIds((prev) => {
+        if (!isTargetSelected) {
+          return Array.from(new Set([...prev, ...rangeIds]));
+        } else {
+          return prev.filter((prevId) => !rangeIds.includes(prevId));
+        }
+      });
+    } else {
+      setSelectedPrefixIds((prev) =>
+        prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      );
+    }
+    setLastSelectedPrefixIndex(index);
+  };
 
   const [deptSortField, setDeptSortField] = useState<'code' | 'nameTh' | null>(null);
   const [deptSortDir, setDeptSortDir] = useState<'asc' | 'desc'>('asc');
@@ -1128,9 +1197,7 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
                         {deptVisibleCols.select && (
                           <td className="p-1.5 text-center">
                             <button
-                              onClick={() => {
-                                setSelectedDeptIds(prev => prev.includes(d.id) ? prev.filter(i => i !== d.id) : [...prev, d.id]);
-                              }}
+                              onClick={(e) => handleToggleSelectDept(d.id, idx, e, sortedDeps)}
                             >
                               {isSelected ? <CheckSquare className="w-3.5 h-3.5 text-purple-500" /> : <Square className="w-3.5 h-3.5 text-slate-400" />}
                             </button>
@@ -1348,9 +1415,7 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
                         {currVisibleCols.select && (
                           <td className="p-1.5 text-center">
                             <button
-                              onClick={() => {
-                                setSelectedCurrIds(prev => prev.includes(c.id) ? prev.filter(i => i !== c.id) : [...prev, c.id]);
-                              }}
+                              onClick={(e) => handleToggleSelectCurr(c.id, idx, e, sortedCurrs)}
                             >
                               {isSelected ? <CheckSquare className="w-3.5 h-3.5 text-purple-500" /> : <Square className="w-3.5 h-3.5 text-slate-400" />}
                             </button>
@@ -1567,9 +1632,7 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
                         {prefixVisibleCols.select && (
                           <td className="p-1.5 text-center">
                             <button
-                              onClick={() => {
-                                setSelectedPrefixIds(prev => prev.includes(p.id) ? prev.filter(i => i !== p.id) : [...prev, p.id]);
-                              }}
+                              onClick={(e) => handleToggleSelectPrefix(p.id, idx, e, sortedPrefixes)}
                             >
                               {isSelected ? <CheckSquare className="w-3.5 h-3.5 text-emerald-500" /> : <Square className="w-3.5 h-3.5 text-slate-400" />}
                             </button>
