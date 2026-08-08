@@ -704,7 +704,9 @@ function initDefaultSeedData() {
     createdAt: new Date().toISOString(),
   };
 
-  courses.set(sampleCourse.id, sampleCourse);
+  if (!deletedCourseIds.has(sampleCourse.id)) {
+    courses.set(sampleCourse.id, sampleCourse);
+  }
 
   // Seed Academic Structure Sample Courses (Faculty of Medical Technology)
   const bioinfoCourse: Course = {
@@ -787,55 +789,59 @@ function initDefaultSeedData() {
     createdAt: new Date().toISOString(),
   };
 
-  courses.set(bioinfoCourse.id, bioinfoCourse);
-  courses.set(dataMgmtCourse.id, dataMgmtCourse);
-  courses.set(commTechCourse.id, commTechCourse);
+  if (!deletedCourseIds.has(bioinfoCourse.id)) courses.set(bioinfoCourse.id, bioinfoCourse);
+  if (!deletedCourseIds.has(dataMgmtCourse.id)) courses.set(dataMgmtCourse.id, dataMgmtCourse);
+  if (!deletedCourseIds.has(commTechCourse.id)) courses.set(commTechCourse.id, commTechCourse);
 
   // Add course members
-  courseMembers.push(
-    { id: 'cm_1', courseId: sampleCourse.id, userId: teacherUser.id, role: CourseMemberRole.CO_TEACHER, joinedAt: new Date().toISOString() },
-    { id: 'cm_2', courseId: sampleCourse.id, userId: coTeacherUser.id, role: CourseMemberRole.CO_TEACHER, joinedAt: new Date().toISOString() },
-    { id: 'cm_3', courseId: sampleCourse.id, userId: studentUser1.id, role: CourseMemberRole.STUDENT, joinedAt: new Date().toISOString() },
-    { id: 'cm_4', courseId: sampleCourse.id, userId: studentUser2.id, role: CourseMemberRole.STUDENT, joinedAt: new Date().toISOString() }
-  );
+  if (!deletedCourseIds.has(sampleCourse.id)) {
+    courseMembers.push(
+      { id: 'cm_1', courseId: sampleCourse.id, userId: teacherUser.id, role: CourseMemberRole.CO_TEACHER, joinedAt: new Date().toISOString() },
+      { id: 'cm_2', courseId: sampleCourse.id, userId: coTeacherUser.id, role: CourseMemberRole.CO_TEACHER, joinedAt: new Date().toISOString() },
+      { id: 'cm_3', courseId: sampleCourse.id, userId: studentUser1.id, role: CourseMemberRole.STUDENT, joinedAt: new Date().toISOString() },
+      { id: 'cm_4', courseId: sampleCourse.id, userId: studentUser2.id, role: CourseMemberRole.STUDENT, joinedAt: new Date().toISOString() }
+    );
+  }
 
   // Seed sessions
-  const session1: Session = {
-    id: 'ses_1',
-    courseId: sampleCourse.id,
-    weekNumber: 1,
-    topic: 'Introduction & Requirements Engineering',
-    teacherLat: 13.7988363,
-    teacherLng: 100.322944,
-    isActive: false,
-    createdAt: new Date().toISOString(),
-  };
+  if (!deletedCourseIds.has(sampleCourse.id)) {
+    const session1: Session = {
+      id: 'ses_1',
+      courseId: sampleCourse.id,
+      weekNumber: 1,
+      topic: 'Introduction & Requirements Engineering',
+      teacherLat: 13.7988363,
+      teacherLng: 100.322944,
+      isActive: false,
+      createdAt: new Date().toISOString(),
+    };
 
-  const session2: Session = {
-    id: 'ses_2',
-    courseId: sampleCourse.id,
-    weekNumber: 2,
-    topic: 'Microservices & RESTful API Design',
-    teacherLat: 13.7988363,
-    teacherLng: 100.322944,
-    isActive: false,
-    createdAt: new Date().toISOString(),
-  };
+    const session2: Session = {
+      id: 'ses_2',
+      courseId: sampleCourse.id,
+      weekNumber: 2,
+      topic: 'Microservices & RESTful API Design',
+      teacherLat: 13.7988363,
+      teacherLng: 100.322944,
+      isActive: false,
+      createdAt: new Date().toISOString(),
+    };
 
-  const session3: Session = {
-    id: 'ses_3',
-    courseId: sampleCourse.id,
-    weekNumber: 3,
-    topic: 'Database Schema & Anti-Proxy Security',
-    teacherLat: 13.7988363,
-    teacherLng: 100.322944,
-    isActive: true,
-    createdAt: new Date().toISOString(),
-  };
+    const session3: Session = {
+      id: 'ses_3',
+      courseId: sampleCourse.id,
+      weekNumber: 3,
+      topic: 'Database Schema & Anti-Proxy Security',
+      teacherLat: 13.7988363,
+      teacherLng: 100.322944,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+    };
 
-  sessions.set(session1.id, session1);
-  sessions.set(session2.id, session2);
-  sessions.set(session3.id, session3);
+    sessions.set(session1.id, session1);
+    sessions.set(session2.id, session2);
+    sessions.set(session3.id, session3);
+  }
 
   // Seed initial sample leave request
   leaveRequests.push({
@@ -4908,6 +4914,10 @@ function splitThaiName(fullNameStr: string) {
 }
 
 async function importRealCsvAttendanceRecords() {
+  if (deletedCourseIds.has('crs_mtid204')) {
+    console.log('[CSV Import] crs_mtid204 is in deletedCourseIds, skipping CSV auto-import.');
+    return;
+  }
   console.log('[CSV Import] Starting import of 87 real exported attendance records...');
 
   // 1. Ensure courses exist

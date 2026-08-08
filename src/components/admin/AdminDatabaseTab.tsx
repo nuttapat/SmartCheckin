@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   fetchAdminCollection,
   saveAdminDocument,
@@ -33,6 +33,8 @@ import {
   Sparkles,
   ShieldAlert,
   History,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 interface AdminDatabaseTabProps {
@@ -448,23 +450,37 @@ export const AdminDatabaseTab: React.FC<AdminDatabaseTabProps> = ({
       return 0;
     });
 
+  // Pagination State
+  const [pageSize, setPageSize] = useState<number>(15);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
   // Selection state
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [lastSelectedDocIndex, setLastSelectedDocIndex] = useState<number | null>(null);
 
-  // Reset selection on collection change
+  // Reset selection and current page on collection or search change
   useEffect(() => {
     setSelectedDocIds([]);
     setLastSelectedDocIndex(null);
-  }, [selectedCollection]);
+    setCurrentPage(1);
+  }, [selectedCollection, searchQuery]);
 
-  const allVisibleDocsSelected = sortedAndFilteredDocs.length > 0 && sortedAndFilteredDocs.every((doc) => selectedDocIds.includes(doc.id));
+  const totalDocItems = sortedAndFilteredDocs.length;
+  const totalDocPages = pageSize === -1 ? 1 : Math.ceil(totalDocItems / pageSize) || 1;
+
+  const paginatedDocs = useMemo(() => {
+    if (pageSize === -1) return sortedAndFilteredDocs;
+    const start = (currentPage - 1) * pageSize;
+    return sortedAndFilteredDocs.slice(start, start + pageSize);
+  }, [sortedAndFilteredDocs, currentPage, pageSize]);
+
+  const allVisibleDocsSelected = paginatedDocs.length > 0 && paginatedDocs.every((doc) => selectedDocIds.includes(doc.id));
 
   const handleToggleSelectDoc = (id: string, index?: number, e?: React.MouseEvent) => {
     if (e?.shiftKey && lastSelectedDocIndex !== null && index !== undefined && lastSelectedDocIndex !== index) {
       const start = Math.min(lastSelectedDocIndex, index);
       const end = Math.max(lastSelectedDocIndex, index);
-      const rangeIds = sortedAndFilteredDocs.slice(start, end + 1).map((doc) => doc.id);
+      const rangeIds = paginatedDocs.slice(start, end + 1).map((doc) => doc.id);
 
       const isTargetSelected = selectedDocIds.includes(id);
 
@@ -487,9 +503,11 @@ export const AdminDatabaseTab: React.FC<AdminDatabaseTabProps> = ({
 
   const handleSelectAllVisibleDocs = () => {
     if (allVisibleDocsSelected) {
-      setSelectedDocIds([]);
+      const pageIds = paginatedDocs.map((doc) => doc.id);
+      setSelectedDocIds((prev) => prev.filter((id) => !pageIds.includes(id)));
     } else {
-      setSelectedDocIds(sortedAndFilteredDocs.map((doc) => doc.id));
+      const pageIds = paginatedDocs.map((doc) => doc.id);
+      setSelectedDocIds((prev) => Array.from(new Set([...prev, ...pageIds])));
     }
   };
 
@@ -955,7 +973,7 @@ export const AdminDatabaseTab: React.FC<AdminDatabaseTabProps> = ({
                   </td>
                 </tr>
               ) : (
-                sortedAndFilteredDocs.map((doc, idx) => {
+                paginatedDocs.map((doc, idx) => {
                   const isSelected = selectedDocIds.includes(doc.id);
                   return (
                     <tr
@@ -978,7 +996,7 @@ export const AdminDatabaseTab: React.FC<AdminDatabaseTabProps> = ({
                       )}
                       {dbVisibleCols.index !== false && (
                         <td className="p-3.5 text-center font-mono font-bold text-slate-400 text-xs">
-                          {idx + 1}
+                          {(currentPage - 1) * (pageSize === -1 ? 0 : pageSize) + idx + 1}
                         </td>
                       )}
                       {columns.map((col) => (
@@ -1022,6 +1040,59 @@ export const AdminDatabaseTab: React.FC<AdminDatabaseTabProps> = ({
             )}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination Footer */}
+        <div
+          className={`p-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3 ${
+            isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'
+          }`}
+        >
+          <div className="flex items-center space-x-3 text-xs text-slate-500">
+            <span>แสดงจำนวน:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className={`px-2 py-1 rounded-lg text-xs font-bold border ${
+                isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+              }`}
+            >
+              <option value={10}>10 รายการ</option>
+              <option value={15}>15 รายการ</option>
+              <option value={30}>30 รายการ</option>
+              <option value={50}>50 รายการ</option>
+              <option value={-1}>ทั้งหมด ({totalDocItems})</option>
+            </select>
+          </div>
+
+          {pageSize !== -1 && totalDocPages > 1 && (
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className={`p-1.5 rounded-xl border transition disabled:opacity-40 cursor-pointer ${
+                  isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-300 text-slate-700'
+                }`}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="text-xs font-extrabold px-2">
+                หน้า {currentPage} จาก {totalDocPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalDocPages, p + 1))}
+                disabled={currentPage === totalDocPages}
+                className={`p-1.5 rounded-xl border transition disabled:opacity-40 cursor-pointer ${
+                  isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-300 text-slate-700'
+                }`}
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

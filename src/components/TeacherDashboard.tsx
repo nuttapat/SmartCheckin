@@ -379,7 +379,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     if (filteredOverviewList.length > 0) {
       const exists = filteredOverviewList.some((item: any) => item.course.id === selectedOverviewCourseId);
       if (!exists) {
-        setSelectedOverviewCourseId(filteredOverviewList[0].course.id);
+        const nextCourse = filteredOverviewList[0].course;
+        setSelectedOverviewCourseId(nextCourse.id);
+        handleSelectCourse(nextCourse);
       }
     }
   }, [filteredOverviewList, selectedOverviewCourseId]);
@@ -387,15 +389,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   // Session Detail Modal State
   const currentOverviewItem = useMemo(() => {
     if (!overviewData?.overviewList || overviewData.overviewList.length === 0) return null;
-    const targetCourseId = selectedCourse?.id || selectedOverviewCourseId;
+    const targetCourseId = selectedOverviewCourseId || selectedCourse?.id;
     return (
       overviewData.overviewList.find((item: any) => item.course?.id === targetCourseId) ||
       overviewData.overviewList[0]
     );
-  }, [overviewData, selectedCourse?.id, selectedOverviewCourseId]);
+  }, [overviewData, selectedOverviewCourseId, selectedCourse?.id]);
 
   const gridStudentList = useMemo(() => {
-    const activeCourseId = selectedCourse?.id || selectedOverviewCourseId;
+    const activeCourseId = selectedOverviewCourseId || selectedCourse?.id;
     const overviewMatch = overviewData?.overviewList?.find((item: any) => item.course?.id === activeCourseId);
     if (overviewMatch?.studentList && overviewMatch.studentList.length > 0) {
       return overviewMatch.studentList;
@@ -418,7 +420,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           status: 'ABSENT',
         })),
       }));
-  }, [selectedCourse?.id, selectedOverviewCourseId, overviewData, currentOverviewItem, currentCourseMembers, effectiveSessions]);
+  }, [selectedOverviewCourseId, selectedCourse?.id, overviewData, currentOverviewItem, currentCourseMembers, effectiveSessions]);
 
   const [selectedSessionModal, setSelectedSessionModal] = useState<any>(null);
   const [sessionModalFilter, setSessionModalFilter] = useState<'ATTENDED' | 'ABSENT'>('ATTENDED');
@@ -2195,7 +2197,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         <button
                           key={c.id}
                           type="button"
-                          onClick={() => setSelectedOverviewCourseId(c.id)}
+                          onClick={() => {
+                            setSelectedOverviewCourseId(c.id);
+                            handleSelectCourse(c);
+                          }}
                           className={`w-full text-left p-3.5 rounded-xl border transition cursor-pointer ${
                             isSelected
                               ? (isDarkMode ? 'bg-sky-500/15 border-sky-500/50 text-white font-bold ring-1 ring-sky-500/30' : 'bg-sky-50 border-sky-300 text-sky-950 font-bold ring-1 ring-sky-400/40')

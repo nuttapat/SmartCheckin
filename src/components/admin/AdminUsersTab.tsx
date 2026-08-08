@@ -40,6 +40,8 @@ import {
   EyeOff,
   Globe,
   Mail,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 interface AdminUsersTabProps {
@@ -68,6 +70,15 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [lastSelectedUserIndex, setLastSelectedUserIndex] = useState<number | null>(null);
   const [bulkActionProcessing, setBulkActionProcessing] = useState<boolean>(false);
+
+  // Pagination State
+  const [userPageSize, setUserPageSize] = useState<number>(15);
+  const [userCurrentPage, setUserCurrentPage] = useState<number>(1);
+
+  // Reset pagination on filter change
+  useEffect(() => {
+    setUserCurrentPage(1);
+  }, [userSearchQuery, userRoleFilter, userStatusFilter, userDeptFilter, hideDemoUsers]);
 
   // Sorting
   const [userTableSortField, setUserTableSortField] = useState<'name' | 'email' | 'authProvider' | 'role' | 'department' | 'status' | 'createdAt' | null>(null);
@@ -200,7 +211,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
     if (e?.shiftKey && lastSelectedUserIndex !== null && index !== undefined && lastSelectedUserIndex !== index) {
       const start = Math.min(lastSelectedUserIndex, index);
       const end = Math.max(lastSelectedUserIndex, index);
-      const rangeIds = filteredAndSortedUsers.slice(start, end + 1).map((u) => u.id);
+      const rangeIds = paginatedUsers.slice(start, end + 1).map((u) => u.id);
 
       const isTargetSelected = selectedUserIds.includes(id);
 
@@ -442,7 +453,16 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
       });
   }, [usersList, userRoleFilter, userStatusFilter, userDeptFilter, hideDemoUsers, userSearchQuery, userTableSortField, userTableSortDir]);
 
-  const allVisibleSelected = filteredAndSortedUsers.length > 0 && filteredAndSortedUsers.every((u) => selectedUserIds.includes(u.id));
+  const totalUserItems = filteredAndSortedUsers.length;
+  const totalUserPages = userPageSize === -1 ? 1 : Math.ceil(totalUserItems / userPageSize) || 1;
+
+  const paginatedUsers = useMemo(() => {
+    if (userPageSize === -1) return filteredAndSortedUsers;
+    const start = (userCurrentPage - 1) * userPageSize;
+    return filteredAndSortedUsers.slice(start, start + userPageSize);
+  }, [filteredAndSortedUsers, userCurrentPage, userPageSize]);
+
+  const allVisibleSelected = paginatedUsers.length > 0 && paginatedUsers.every((u) => selectedUserIds.includes(u.id));
 
   const handleExportUsersCSV = () => {
     const usersToExport = selectedUserIds.length > 0
@@ -778,7 +798,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                 {userVisibleCols.select && (
                   <th className="p-3.5 text-center relative group select-none">
                     <button
-                      onClick={() => handleSelectAllVisibleUsers(filteredAndSortedUsers)}
+                      onClick={() => handleSelectAllVisibleUsers(paginatedUsers)}
                       className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
                     >
                       {allVisibleSelected ? <CheckSquare className="w-4 h-4 text-purple-500" /> : <Square className="w-4 h-4 text-slate-400" />}
@@ -956,7 +976,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredAndSortedUsers.map((user, idx) => {
+                paginatedUsers.map((user, idx) => {
                   const isSelected = selectedUserIds.includes(user.id);
                   return (
                     <tr
@@ -979,7 +999,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                       )}
                       {userVisibleCols.index && (
                         <td className="p-3.5 text-center font-mono font-bold text-slate-400 text-xs">
-                          {idx + 1}
+                          {(userCurrentPage - 1) * (userPageSize === -1 ? 0 : userPageSize) + idx + 1}
                         </td>
                       )}
                       {userVisibleCols.name && (
@@ -1138,6 +1158,59 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination Footer */}
+        <div
+          className={`p-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3 ${
+            isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'
+          }`}
+        >
+          <div className="flex items-center space-x-3 text-xs text-slate-500">
+            <span>แสดงจำนวน:</span>
+            <select
+              value={userPageSize}
+              onChange={(e) => {
+                setUserPageSize(Number(e.target.value));
+                setUserCurrentPage(1);
+              }}
+              className={`px-2 py-1 rounded-lg text-xs font-bold border ${
+                isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+              }`}
+            >
+              <option value={10}>10 รายการ</option>
+              <option value={15}>15 รายการ</option>
+              <option value={30}>30 รายการ</option>
+              <option value={50}>50 รายการ</option>
+              <option value={-1}>ทั้งหมด ({totalUserItems})</option>
+            </select>
+          </div>
+
+          {userPageSize !== -1 && totalUserPages > 1 && (
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setUserCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={userCurrentPage === 1}
+                className={`p-1.5 rounded-xl border transition disabled:opacity-40 cursor-pointer ${
+                  isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-300 text-slate-700'
+                }`}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="text-xs font-extrabold px-2">
+                หน้า {userCurrentPage} จาก {totalUserPages}
+              </span>
+              <button
+                onClick={() => setUserCurrentPage((p) => Math.min(totalUserPages, p + 1))}
+                disabled={userCurrentPage === totalUserPages}
+                className={`p-1.5 rounded-xl border transition disabled:opacity-40 cursor-pointer ${
+                  isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-300 text-slate-700'
+                }`}
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
