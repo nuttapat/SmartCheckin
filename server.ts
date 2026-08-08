@@ -1476,13 +1476,21 @@ app.get('/api/courses', (req, res) => {
       .filter((m) => m.userId === userId && m.role === CourseMemberRole.STUDENT)
       .map((m) => m.courseId);
     result = Array.from(courses.values()).filter((c) => enrolledCourseIds.includes(c.id));
+  } else if (user.role === UserRole.ADMIN) {
+    result = Array.from(courses.values());
   } else if (user.role === UserRole.TEACHER) {
     const memberCourseIds = courseMembers
       .filter((m) => m.userId === userId)
       .map((m) => m.courseId);
-    result = Array.from(courses.values()).filter(
-      (c) => c.ownerId === userId || memberCourseIds.includes(c.id)
-    );
+    result = Array.from(courses.values()).filter((c) => {
+      if (c.ownerId === userId || memberCourseIds.includes(c.id)) return true;
+      if (user.firstNameTh && (c.coordinatorName?.includes(user.firstNameTh) || c.ownerName?.includes(user.firstNameTh))) return true;
+      return false;
+    });
+    // Fallback: If teacher has no specific courses bound yet, return all courses so new teacher accounts see available courses
+    if (result.length === 0) {
+      result = Array.from(courses.values());
+    }
   } else {
     result = [];
   }
@@ -3162,9 +3170,17 @@ app.get('/api/teacher/courses-overview', (req, res) => {
     .filter((m) => m.userId === teacherId)
     .map((m) => m.courseId);
 
-  const teacherCourses = Array.from(courses.values()).filter(
-    (c) => c.ownerId === teacherId || memberCourseIds.includes(c.id)
-  );
+  let teacherCourses = Array.from(courses.values()).filter((c) => {
+    if (teacher.role === UserRole.ADMIN) return true;
+    if (c.ownerId === teacherId || memberCourseIds.includes(c.id)) return true;
+    if (teacher.firstNameTh && (c.coordinatorName?.includes(teacher.firstNameTh) || c.ownerName?.includes(teacher.firstNameTh))) return true;
+    return false;
+  });
+
+  // Fallback: If no courses found for new teacher account/login on fresh deployment, show all courses
+  if (teacherCourses.length === 0) {
+    teacherCourses = Array.from(courses.values());
+  }
 
   const overviewList = teacherCourses.map((course) => {
     const membersInCourse = courseMembers.filter((m) => m.courseId === course.id);
