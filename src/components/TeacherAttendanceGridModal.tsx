@@ -58,6 +58,25 @@ interface TeacherAttendanceGridModalProps {
   isDarkMode?: boolean;
 }
 
+const makeCellKey = (studentId: string, weekNumber: number) => `${studentId}_wk_${weekNumber}`;
+const parseCellKey = (key: string): { studentId: string; weekNumber: number } => {
+  if (key.includes('_wk_')) {
+    const idx = key.lastIndexOf('_wk_');
+    return {
+      studentId: key.substring(0, idx),
+      weekNumber: Number(key.substring(idx + 4)),
+    };
+  }
+  const lastUnderscore = key.lastIndexOf('_');
+  if (lastUnderscore !== -1) {
+    return {
+      studentId: key.substring(0, lastUnderscore),
+      weekNumber: Number(key.substring(lastUnderscore + 1)),
+    };
+  }
+  return { studentId: key, weekNumber: 0 };
+};
+
 export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProps> = ({
   isOpen,
   onClose,
@@ -100,11 +119,51 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [showUnsavedConfirm, setShowUnsavedConfirm] = useState<boolean>(false);
 
-  // Sync initial student data on modal open or prop change
+  // Sync initial student data on modal open or prop change with smart state merge
   useEffect(() => {
     if (isOpen && initialStudentList && initialStudentList.length > 0) {
       const cloned: StudentAttendanceGridItem[] = JSON.parse(JSON.stringify(initialStudentList));
-      setStudentsData(cloned);
+
+      setStudentsData((prev: StudentAttendanceGridItem[]) => {
+        if (!prev || prev.length === 0) {
+          return cloned;
+        }
+
+        const prevMap = new Map<string, StudentAttendanceGridItem>(prev.map((s) => [s.userId, s]));
+
+        return cloned.map((incoming) => {
+          const existing = prevMap.get(incoming.userId);
+          if (!existing) return incoming;
+
+          const mergedStatuses = [...(incoming.sessionStatuses || [])];
+
+          // Preserve any non-ABSENT status from existing local state if incoming is ABSENT
+          existing.sessionStatuses?.forEach((exSs) => {
+            if (exSs.status !== 'ABSENT') {
+              const idx = mergedStatuses.findIndex((m) => Number(m.weekNumber) === Number(exSs.weekNumber));
+              if (idx >= 0) {
+                if (mergedStatuses[idx].status === 'ABSENT') {
+                  mergedStatuses[idx] = { ...exSs };
+                }
+              } else {
+                mergedStatuses.push({ ...exSs });
+              }
+            }
+          });
+
+          const totalWeeks = weekList.length || 1;
+          const attendedCount = mergedStatuses.filter((s) => s.status === 'PRESENT' || s.status === 'LATE').length;
+          const attendancePercent = Math.round((attendedCount / totalWeeks) * 100);
+
+          return {
+            ...incoming,
+            sessionStatuses: mergedStatuses,
+            attendedCount,
+            totalSessionsCount: totalWeeks,
+            attendancePercent,
+          };
+        });
+      });
 
       // Snapshot original statuses
       const origMap: Record<string, 'PRESENT' | 'LATE' | 'LEAVE' | 'ABSENT'> = {};
@@ -118,14 +177,11 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
             else if (raw === 'LEAVE' || raw === 'APPROVED') norm = 'LEAVE';
             else norm = 'ABSENT';
 
-            origMap[`${st.userId}_${ss.weekNumber}`] = norm;
+            origMap[makeCellKey(st.userId, ss.weekNumber)] = norm;
           });
         }
       });
-      setOriginalStatuses(origMap);
-      setPendingChanges({});
-      setStatusMessage(null);
-      setShowUnsavedConfirm(false);
+      setOriginalStatuses((prevOrig) => (Object.keys(prevOrig).length === 0 ? origMap : prevOrig));
     } else if (!isOpen) {
       setStudentsData([]);
       setPendingChanges({});
@@ -186,7 +242,7 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
 
   // Helper to get effective status for a student cell (includes draft changes)
   const getEffectiveStatus = (studentId: string, weekNumber: number, originalStatusFromList: string): 'PRESENT' | 'LATE' | 'LEAVE' | 'ABSENT' => {
-    const key = `${studentId}_${weekNumber}`;
+    const key = makeCellKey(studentId, weekNumber);
     if (pendingChanges[key] !== undefined) {
       return pendingChanges[key];
     }
@@ -309,7 +365,7 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
       return;
     }
 
-    const key = `${studentId}_${weekNumber}`;
+    const key = makeCellKey(studentId, weekNumber);
     const orig = originalStatuses[key] || 'ABSENT';
 
     if (orig === 'LEAVE') {
@@ -354,8 +410,7 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
 
     for (let i = 0; i < pendingKeys.length; i++) {
       const key = pendingKeys[i];
-      const [studentId, weekStr] = key.split('_');
-      const weekNumber = Number(weekStr);
+      const { studentId, weekNumber } = parseCellKey(key);
       const targetStatus = pendingChanges[key];
       const targetSessionId = sessionByWeekMap.get(weekNumber);
 
@@ -363,7 +418,7 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
         await overrideAttendanceRecord({
           studentId,
           sessionId: targetSessionId,
-          courseId: course.id,
+          courseId: course?.id,
           weekNumber,
           status: targetStatus,
           checkinMethod: 'HYBRID',
@@ -383,7 +438,7 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
         let updatedStatuses = [...(st.sessionStatuses || [])];
 
         weekList.forEach((wk) => {
-          const key = `${st.userId}_${wk.weekNumber}`;
+          const key = makeCellKey(st.userId, wk.weekNumber);
           if (pendingChanges[key] !== undefined) {
             const newStatus = pendingChanges[key];
             const targetSessionId = sessionByWeekMap.get(wk.weekNumber);
@@ -966,7 +1021,7 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
                         {weekList.map((wk) => {
                           const origRaw = statusByWeek.get(wk.weekNumber) || 'ABSENT';
                           const effectiveStatus = getEffectiveStatus(student.userId, wk.weekNumber, origRaw);
-                          const cellKey = `${student.userId}_${wk.weekNumber}`;
+                          const cellKey = makeCellKey(student.userId, wk.weekNumber);
                           const isPending = pendingChanges[cellKey] !== undefined;
 
                           return (

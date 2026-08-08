@@ -387,11 +387,38 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   // Session Detail Modal State
   const currentOverviewItem = useMemo(() => {
     if (!overviewData?.overviewList || overviewData.overviewList.length === 0) return null;
+    const targetCourseId = selectedCourse?.id || selectedOverviewCourseId;
     return (
-      overviewData.overviewList.find((item: any) => item.course?.id === selectedOverviewCourseId) ||
+      overviewData.overviewList.find((item: any) => item.course?.id === targetCourseId) ||
       overviewData.overviewList[0]
     );
-  }, [overviewData, selectedOverviewCourseId]);
+  }, [overviewData, selectedCourse?.id, selectedOverviewCourseId]);
+
+  const gridStudentList = useMemo(() => {
+    const activeCourseId = selectedCourse?.id || selectedOverviewCourseId;
+    const overviewMatch = overviewData?.overviewList?.find((item: any) => item.course?.id === activeCourseId);
+    if (overviewMatch?.studentList && overviewMatch.studentList.length > 0) {
+      return overviewMatch.studentList;
+    }
+    if (currentOverviewItem?.course?.id === activeCourseId && currentOverviewItem?.studentList) {
+      return currentOverviewItem.studentList;
+    }
+    return (currentCourseMembers || [])
+      .filter((m) => m.role === CourseMemberRole.STUDENT)
+      .map((m) => ({
+        userId: m.userId,
+        studentName: m.user ? `${m.user.title || ''}${m.user.firstNameTh} ${m.user.lastNameTh}`.trim() : 'นักศึกษา',
+        studentIdNum: m.user?.universityId || '-',
+        email: m.user?.email || '',
+        avatarUrl: m.user?.avatarUrl,
+        sessionStatuses: effectiveSessions.map((s) => ({
+          sessionId: s.id,
+          weekNumber: s.weekNumber,
+          topic: s.topic,
+          status: 'ABSENT',
+        })),
+      }));
+  }, [selectedCourse?.id, selectedOverviewCourseId, overviewData, currentOverviewItem, currentCourseMembers, effectiveSessions]);
 
   const [selectedSessionModal, setSelectedSessionModal] = useState<any>(null);
   const [sessionModalFilter, setSessionModalFilter] = useState<'ATTENDED' | 'ABSENT'>('ATTENDED');
@@ -413,10 +440,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   };
 
   useEffect(() => {
-    if (dashboardTab === 'COURSE_OVERVIEW') {
+    if (teacher?.id) {
       loadOverviewData();
     }
-  }, [dashboardTab, teacher.id]);
+  }, [teacher?.id]);
 
   const exportCourseOverviewCSV = (courseOverviewItem: any) => {
     if (!courseOverviewItem) return;
@@ -849,6 +876,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   const handleSelectCourse = async (course: Course) => {
     setSelectedCourse(course);
+    setSelectedOverviewCourseId(course.id);
     if (course.defaultLat && course.defaultLng) {
       updateTeacherCoords({ lat: course.defaultLat, lng: course.defaultLng });
     }
@@ -3433,24 +3461,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           isOpen={isAttendanceGridModalOpen}
           onClose={() => setIsAttendanceGridModalOpen(false)}
           course={selectedCourse || currentOverviewItem?.course}
-          studentList={
-            currentOverviewItem?.studentList ||
-            (currentCourseMembers || [])
-              .filter((m) => m.role === CourseMemberRole.STUDENT)
-              .map((m) => ({
-                userId: m.userId,
-                studentName: m.user ? `${m.user.title || ''}${m.user.firstNameTh} ${m.user.lastNameTh}`.trim() : 'นักศึกษา',
-                studentIdNum: m.user?.universityId || '-',
-                email: m.user?.email || '',
-                avatarUrl: m.user?.avatarUrl,
-                sessionStatuses: effectiveSessions.map((s) => ({
-                  sessionId: s.id,
-                  weekNumber: s.weekNumber,
-                  topic: s.topic,
-                  status: 'ABSENT',
-                })),
-              }))
-          }
+          studentList={gridStudentList}
           sessions={effectiveSessions.length > 0 ? effectiveSessions : currentOverviewItem?.sessionDetailsList || []}
           canEditAttendance={teacherRoleInfo.canEditAttendance}
           onRefresh={() => {

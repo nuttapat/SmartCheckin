@@ -4590,8 +4590,21 @@ app.post('/api/admin/attendance/override', async (req, res) => {
     return res.status(404).json({ error: 'ไม่พบข้อมูลผู้ใช้ในระบบ (กรุณาเลือกผู้ใช้ที่มีอยู่จริง)' });
   }
 
-  // Auto-resolve session ID if missing
+  // Auto-resolve session ID canonically using courseId and weekNumber
   let sessionId = rawSessionId;
+  if (courseId && weekNumber) {
+    const courseObj = courses.get(courseId);
+    if (courseObj) {
+      ensureCourseSessions(courseObj);
+      const matchedSession = Array.from(sessions.values()).find(
+        (s) => s.courseId === courseId && Number(s.weekNumber) === Number(weekNumber)
+      );
+      if (matchedSession) {
+        sessionId = matchedSession.id;
+      }
+    }
+  }
+
   if (!sessionId && courseId && weekNumber) {
     let matchedSession = Array.from(sessions.values()).find(
       (s) => s.courseId === courseId && Number(s.weekNumber) === Number(weekNumber)
