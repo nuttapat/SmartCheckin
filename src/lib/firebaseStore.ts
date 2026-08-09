@@ -45,6 +45,7 @@ export const COLLECTIONS = {
   MASTER_DEPARTMENTS: 'masterDepartments',
   MASTER_PREFIXES: 'masterPrefixes',
   MASTER_CURRICULUMS: 'masterCurriculums',
+  NOTIFICATIONS: 'notifications',
 };
 
 /**

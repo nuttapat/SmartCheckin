@@ -29,6 +29,7 @@ import {
   MasterFaculty,
   MasterMajor,
   MasterDegreeLevel,
+  NotificationItem,
 } from './src/types.js';
 import { saveToFirestore, batchSaveToFirestore, getAllFromFirestore, deleteFromFirestore, COLLECTIONS } from './src/lib/firebaseStore.js';
 
@@ -57,6 +58,7 @@ const leaveRequests: LeaveRequest[] = [];
 const masterDepartments: Map<string, MasterDepartment> = new Map();
 const masterCurriculums: Map<string, MasterCurriculum> = new Map();
 const masterPrefixes: Map<string, MasterPrefix> = new Map();
+const notifications: Map<string, NotificationItem> = new Map();
 
 // --- LOCAL PERSISTENCE & TOMBSTONE TRACKING ENGINE ---
 const LOCAL_CACHE_PATH = path.join(process.cwd(), 'local_db_cache.json');
@@ -80,6 +82,7 @@ export function saveLocalCache() {
       masterDepartments: Array.from(masterDepartments.values()),
       masterCurriculums: Array.from(masterCurriculums.values()),
       masterPrefixes: Array.from(masterPrefixes.values()),
+      notifications: Array.from(notifications.values()),
       systemSettings,
       deletedCourseIds: Array.from(deletedCourseIds),
       deletedMemberIds: Array.from(deletedMemberIds),
@@ -185,6 +188,10 @@ export function loadLocalCache(): boolean {
     if (Array.isArray(data.masterPrefixes)) {
       masterPrefixes.clear();
       data.masterPrefixes.forEach((p: MasterPrefix) => masterPrefixes.set(p.id, p));
+    }
+    if (Array.isArray(data.notifications)) {
+      notifications.clear();
+      data.notifications.forEach((n: NotificationItem) => notifications.set(n.id, n));
     }
     if (data.systemSettings) {
       systemSettings = { ...systemSettings, ...data.systemSettings };
@@ -3013,6 +3020,44 @@ app.post('/api/leave-requests', (req, res) => {
   leaveRequests.unshift(newLeave);
   saveToFirestore(COLLECTIONS.LEAVE_REQUESTS, newLeave);
 
+  // Send Notification to responsible teachers & course coordinators
+  try {
+    const teacherIds = new Set<string>();
+    if (course.ownerId) teacherIds.add(course.ownerId);
+    courseMembers.forEach((cm) => {
+      if (cm.courseId === course.id && (cm.role === CourseMemberRole.CO_TEACHER || cm.role === CourseMemberRole.COORDINATOR || (cm.role as string) === 'TEACHER')) {
+        teacherIds.add(cm.userId);
+      }
+    });
+    if (teacherIds.size === 0) {
+      Array.from(users.values()).forEach((u) => {
+        if (u.role === 'TEACHER' || u.role === 'ADMIN') teacherIds.add(u.id);
+      });
+    }
+
+    const leaveTypeTh = leaveType === LeaveType.SICK ? 'ลาป่วย' : leaveType === LeaveType.PERSONAL ? 'ลากิจ' : 'ลาอื่นๆ';
+    teacherIds.forEach((tId) => {
+      const notif: NotificationItem = {
+        id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}_${tId.substring(0, 4)}`,
+        recipientUserId: tId,
+        title: `คำขอลางานใหม่: ${course.courseCode}`,
+        message: `${newLeave.studentNameTh} (${student.universityId || ''}) ยื่นคำขอ${leaveTypeTh} สัปดาห์ที่ ${newLeave.weekNumber || 1} [${newLeave.leaveDate}]`,
+        type: 'LEAVE_REQUEST',
+        relatedId: newLeave.id,
+        courseId: course.id,
+        courseCode: course.courseCode,
+        senderName: newLeave.studentNameTh,
+        isRead: false,
+        createdAt: new Date().toISOString(),
+      };
+      notifications.set(notif.id, notif);
+      saveToFirestore(COLLECTIONS.NOTIFICATIONS, notif);
+    });
+    saveLocalCache();
+  } catch (err) {
+    console.error('Error creating leave request notifications:', err);
+  }
+
   res.json({
     message: 'ส่งใบลาเรียนเรียบร้อยแล้ว รออาจารย์ผู้สอนพิจารณาอนุมัติ',
     leaveRequest: newLeave,
@@ -3071,10 +3116,70 @@ app.put('/api/leave-requests/:id/status', (req, res) => {
   const updated = leaveRequests[itemIndex];
   saveToFirestore(COLLECTIONS.LEAVE_REQUESTS, updated);
 
+  // Send Notification to student
+  try {
+    const statusLabel = status === LeaveStatus.APPROVED ? 'อนุมัติเรียบร้อย' : status === LeaveStatus.REJECTED ? 'ถูกปฏิเสธ' : 'ปรับสถานะ';
+    const notif: NotificationItem = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      recipientUserId: updated.studentId,
+      title: `ผลการพิจารณาใบลา: ${updated.courseCode || 'รายวิชา'}`,
+      message: `คำขอลาของคุณวันที่ ${updated.leaveDate} ได้รับการ${statusLabel} ${teacherComment ? `(หมายเหตุ: ${teacherComment})` : ''}`,
+      type: 'LEAVE_STATUS_UPDATE',
+      relatedId: updated.id,
+      courseId: updated.courseId,
+      courseCode: updated.courseCode,
+      isRead: false,
+      createdAt: new Date().toISOString(),
+    };
+    notifications.set(notif.id, notif);
+    saveToFirestore(COLLECTIONS.NOTIFICATIONS, notif);
+    saveLocalCache();
+  } catch (err) {
+    console.error('Error sending leave status notification to student:', err);
+  }
+
   res.json({
     message: status === LeaveStatus.APPROVED ? 'อนุมัติการลาเรียนเรียบร้อยแล้ว' : 'ปฏิเสธใบลาเรียนเรียบร้อยแล้ว',
     leaveRequest: updated,
   });
+});
+
+// 8. NOTIFICATION ENDPOINTS
+// Get notifications for user
+app.get('/api/notifications/:userId', (req, res) => {
+  const { userId } = req.params;
+  const userNotifs = Array.from(notifications.values())
+    .filter((n) => n.recipientUserId === userId)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  res.json(userNotifs);
+});
+
+// Mark single notification as read
+app.put('/api/notifications/:id/read', (req, res) => {
+  const { id } = req.params;
+  const notif = notifications.get(id);
+  if (notif) {
+    notif.isRead = true;
+    saveToFirestore(COLLECTIONS.NOTIFICATIONS, notif);
+    saveLocalCache();
+    return res.json({ success: true, notification: notif });
+  }
+  res.status(404).json({ error: 'Notification not found' });
+});
+
+// Mark all notifications as read for user
+app.put('/api/notifications/mark-all-read/:userId', (req, res) => {
+  const { userId } = req.params;
+  let count = 0;
+  notifications.forEach((n) => {
+    if (n.recipientUserId === userId && !n.isRead) {
+      n.isRead = true;
+      saveToFirestore(COLLECTIONS.NOTIFICATIONS, n);
+      count++;
+    }
+  });
+  saveLocalCache();
+  res.json({ success: true, updatedCount: count });
 });
 
 // Cancel leave request (นักศึกษายกเลิกใบลาที่ยังรอดำเนินการ)
@@ -5413,6 +5518,14 @@ async function syncFromFirestore() {
     if (fsPrefixes !== null && fsPrefixes.length > 0) {
       for (const p of fsPrefixes) {
         if (p && p.id) masterPrefixes.set(p.id, p);
+      }
+    }
+
+    // Sync Notifications
+    const fsNotifs = await getAllFromFirestore<NotificationItem>(COLLECTIONS.NOTIFICATIONS);
+    if (fsNotifs !== null && fsNotifs.length > 0) {
+      for (const n of fsNotifs) {
+        if (n && n.id) notifications.set(n.id, n);
       }
     }
 

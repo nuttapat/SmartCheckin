@@ -339,3 +339,18 @@ export interface MasterPrefix {
   titleEn: string; // e.g., 'Mr.', 'Miss', 'Dr.'
   category: 'STUDENT' | 'TEACHER' | 'BOTH';
 }
+
+export interface NotificationItem {
+  id: string;
+  recipientUserId: string;
+  title: string;
+  message: string;
+  type: 'LEAVE_REQUEST' | 'LEAVE_STATUS_UPDATE' | 'SYSTEM';
+  relatedId?: string; // e.g. leaveRequestId
+  courseId?: string;
+  courseCode?: string;
+  senderName?: string;
+  isRead: boolean;
+  createdAt: string;
+}
+

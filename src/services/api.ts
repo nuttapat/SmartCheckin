@@ -8,6 +8,7 @@ import {
   LeaveRequest,
   LeaveType,
   LeaveStatus,
+  NotificationItem,
 } from '../types';
 
 export const API_BASE = '/api';
@@ -834,6 +835,27 @@ export async function triggerAutoHealDatabase() {
   });
   return parseResponse(res);
 }
+
+// Notification API
+export async function fetchUserNotifications(userId: string): Promise<NotificationItem[]> {
+  const res = await fetch(`${API_BASE}/notifications/${userId}`);
+  return parseResponse<NotificationItem[]>(res);
+}
+
+export async function markNotificationAsRead(id: string) {
+  const res = await fetch(`${API_BASE}/notifications/${id}/read`, {
+    method: 'PUT',
+  });
+  return parseResponse(res);
+}
+
+export async function markAllNotificationsAsRead(userId: string) {
+  const res = await fetch(`${API_BASE}/notifications/mark-all-read/${userId}`, {
+    method: 'PUT',
+  });
+  return parseResponse(res);
+}
+
 
 
 
