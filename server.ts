@@ -3075,20 +3075,41 @@ app.get('/api/leave-requests/student/:studentId', (req, res) => {
 app.get('/api/leave-requests/teacher/:teacherId', (req, res) => {
   const { teacherId } = req.params;
 
-  // Find courses where teacher is owner or co-teacher
+  // Find courses where teacher is owner or member with instructor/coordinator/co-teacher role
   const teacherCourseIds = new Set(
     Array.from(courses.values())
       .filter((c) => c.ownerId === teacherId)
       .map((c) => c.id)
   );
 
+  const teacherCourseCodes = new Set(
+    Array.from(courses.values())
+      .filter((c) => c.ownerId === teacherId && c.courseCode)
+      .map((c) => c.courseCode.trim().toLowerCase())
+  );
+
   courseMembers.forEach((cm) => {
-    if (cm.userId === teacherId && cm.role === CourseMemberRole.CO_TEACHER) {
+    if (cm.userId === teacherId && cm.role !== CourseMemberRole.STUDENT && (cm.role as string) !== 'STUDENT') {
       teacherCourseIds.add(cm.courseId);
+      const matchedCourse = courses.get(cm.courseId);
+      if (matchedCourse && matchedCourse.courseCode) {
+        teacherCourseCodes.add(matchedCourse.courseCode.trim().toLowerCase());
+      }
     }
   });
 
-  const list = leaveRequests.filter((l) => teacherCourseIds.has(l.courseId));
+  const user = users.get(teacherId);
+  let list = leaveRequests.filter((l) => {
+    if (teacherCourseIds.has(l.courseId)) return true;
+    if (l.courseCode && teacherCourseCodes.has(l.courseCode.trim().toLowerCase())) return true;
+    return false;
+  });
+
+  // Fallback for ADMIN or teachers when teacherCourseIds is empty or no direct match found
+  if (user && (user.role === UserRole.ADMIN || (list.length === 0 && (user.role === UserRole.TEACHER || (user.role as string) === 'BOTH')))) {
+    list = leaveRequests;
+  }
+
   res.json(list);
 });
 

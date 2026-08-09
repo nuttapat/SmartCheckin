@@ -4,7 +4,6 @@ import { fetchStudentStats, fetchActiveSessions } from '../services/api';
 import { QrCode, Camera, AlertTriangle, MapPin, Clock, Award, ChevronRight, RefreshCw, X, Sparkles, Plus, FileText, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { StudentLeaveModal } from './StudentLeaveModal';
 import { StudentCheckinModal } from './StudentCheckinModal';
-import { NotificationPopover } from './NotificationPopover';
 import { useTheme } from '../context/ThemeContext';
 
 interface StudentDashboardProps {
@@ -114,14 +113,6 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
 
           {/* Action Buttons in Welcome Banner */}
           <div className="flex flex-col items-stretch gap-3 w-full md:w-auto md:ml-auto shrink-0">
-            <div className="flex items-center justify-end">
-              <NotificationPopover
-                userId={student.id}
-                isDarkMode={isDarkMode}
-                onOpenLeaveModal={() => setIsLeaveModalOpen(true)}
-              />
-            </div>
-
             <button
               onClick={() => setIsLeaveModalOpen(true)}
               className="px-5 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs flex items-center justify-start space-x-3 shadow-md shadow-amber-500/20 active:scale-95 transition border border-amber-500/30 w-full cursor-pointer"
