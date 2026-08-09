@@ -92,6 +92,21 @@ export function saveLocalCache() {
   }
 }
 
+export async function saveTombstonesToFirestore() {
+  try {
+    await saveToFirestore(COLLECTIONS.SYSTEM_SETTINGS, {
+      id: 'tombstones',
+      deletedCourseIds: Array.from(deletedCourseIds),
+      deletedMemberIds: Array.from(deletedMemberIds),
+      deletedSessionIds: Array.from(deletedSessionIds),
+      deletedUserIds: Array.from(deletedUserIds),
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[Save Tombstones Error]', err);
+  }
+}
+
 export function loadLocalCache(): boolean {
   try {
     if (!fs.existsSync(LOCAL_CACHE_PATH)) {
@@ -1846,6 +1861,7 @@ app.delete('/api/courses/:id', async (req, res) => {
   }
 
   saveLocalCache();
+  await saveTombstonesToFirestore();
 
   res.json({ message: 'ลบรายวิชาสำเร็จ โดยประวัติการเช็กชื่อของนักศึกษาจะถูกเก็บรักษาไว้อย่างปลอดภัย', courseId });
 });
@@ -2887,7 +2903,7 @@ app.get('/api/export-csv/:courseId', (req, res) => {
             : 'ลาอื่นๆ';
         weekCols += `,"ลาเรียน (${leaveTypeLabel})"`;
       } else {
-        const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === st.id);
+        const rec = findStudentAttendanceRecord(st.id, course.id, s);
         if (rec) {
           attendedCount++;
           const checkinTimeBkk = formatBangkokTime(rec.timestamp);
@@ -3083,10 +3099,51 @@ app.delete('/api/leave-requests/:id', (req, res) => {
   });
 });
 
+// Helper to find a student's attendance record for a specific course session
+function findStudentAttendanceRecord(studentId: string, courseId: string, session: Session): AttendanceRecord | undefined {
+  const stdUser = users.get(studentId);
+  const uniId = stdUser?.universityId;
+  return attendanceRecords.find((r) => {
+    // 1. Check student identity match
+    const isStudentMatch =
+      r.studentId === studentId ||
+      (stdUser && r.studentId === stdUser.id) ||
+      (uniId && (
+        r.studentUniversityId === uniId ||
+        r.studentId === uniId ||
+        r.studentId === `usr_std_${uniId}`
+      ));
+    if (!isStudentMatch) return false;
+
+    // 2. Check session / course / week match
+    if (session.id && r.sessionId === session.id) return true;
+    if (r.courseId && r.courseId === courseId && Number(r.weekNumber) === Number(session.weekNumber)) return true;
+
+    if (r.sessionId) {
+      const recSession = sessions.get(r.sessionId);
+      if (recSession && recSession.courseId === courseId && Number(recSession.weekNumber) === Number(session.weekNumber)) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+}
+
 // Helper to check if a student has an APPROVED leave request for a given session
 function getApprovedLeaveForSession(studentId: string, courseId: string, session: Session): LeaveRequest | undefined {
+  const stdUser = users.get(studentId);
+  const uniId = stdUser?.universityId;
   return leaveRequests.find((lr) => {
-    if (lr.studentId !== studentId || lr.courseId !== courseId || lr.status !== LeaveStatus.APPROVED) {
+    const isStudentMatch =
+      lr.studentId === studentId ||
+      (stdUser && lr.studentId === stdUser.id) ||
+      (uniId && (
+        lr.studentUniversityId === uniId ||
+        lr.studentId === uniId ||
+        lr.studentId === `usr_std_${uniId}`
+      ));
+    if (!isStudentMatch || lr.courseId !== courseId || (lr.status !== LeaveStatus.APPROVED && (lr.status as string) !== 'APPROVED')) {
       return false;
     }
     if (lr.weekNumber && session.weekNumber && Number(lr.weekNumber) === Number(session.weekNumber)) {
@@ -3123,7 +3180,7 @@ app.get('/api/student/:studentId/stats', (req, res) => {
       if (approvedLeave) {
         approvedLeaveCount++;
       } else {
-        const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === studentId);
+        const rec = findStudentAttendanceRecord(studentId, c.id, s);
         if (rec) attendedCount++;
       }
     });
@@ -3136,7 +3193,7 @@ app.get('/api/student/:studentId/stats', (req, res) => {
     else if (percentage <= 84) statusColor = 'YELLOW';
 
     const pastCheckins = attendanceRecords.filter((r) =>
-      cSessions.some((s) => s.id === r.sessionId) && r.studentId === studentId
+      cSessions.some((s) => findStudentAttendanceRecord(studentId, c.id, s)?.id === r.id)
     );
 
     return {
@@ -3223,7 +3280,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
             checkinTimeBangkok: null,
           };
         } else {
-          const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === m.userId);
+          const rec = findStudentAttendanceRecord(m.userId, course.id, s);
           if (rec) {
             const timeBkk = formatBangkokTime(rec.timestamp);
             const recStatus = rec.status as string;
@@ -3373,7 +3430,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
             leaveReason: matchingLeave.reason || '',
           });
         } else {
-          const rec = recordsForSession.find((r) => r.studentId === m.userId);
+          const rec = findStudentAttendanceRecord(m.userId, course.id, s);
           if (rec) {
             attendedStudents.push({
               userId: m.userId,
@@ -3427,7 +3484,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
       studentMembers.forEach((m) => {
         const approvedLeave = getApprovedLeaveForSession(m.userId, course.id, s);
         if (!approvedLeave) {
-          const rec = attendanceRecords.find((r) => r.sessionId === s.id && r.studentId === m.userId);
+          const rec = findStudentAttendanceRecord(m.userId, course.id, s);
           if (rec) totalActualCheckins++;
         }
       });
@@ -3776,27 +3833,31 @@ app.delete('/api/admin/database/document/:collectionName/:docId', async (req, re
     switch (collectionName) {
       case 'users':
         users.delete(docId);
+        deletedUserIds.add(docId);
         await deleteFromFirestore(COLLECTIONS.USERS, docId);
         break;
       case 'courses': {
         courses.delete(docId);
+        deletedCourseIds.add(docId);
         await deleteFromFirestore(COLLECTIONS.COURSES, docId);
 
         // Cascade delete course members
         for (let i = courseMembers.length - 1; i >= 0; i--) {
           if (courseMembers[i].courseId === docId) {
             const member = courseMembers[i];
+            deletedMemberIds.add(member.id);
             courseMembers.splice(i, 1);
             await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, member.id);
           }
         }
 
         // Cascade delete sessions associated with this course
-        const deletedSessionIds = new Set<string>();
+        const cascadeSesIds = new Set<string>();
         for (const [sesId, ses] of Array.from(sessions.entries())) {
           if (ses.courseId === docId) {
             sessions.delete(sesId);
             deletedSessionIds.add(sesId);
+            cascadeSesIds.add(sesId);
             await deleteFromFirestore(COLLECTIONS.SESSIONS, sesId);
           }
         }
@@ -3804,7 +3865,7 @@ app.delete('/api/admin/database/document/:collectionName/:docId', async (req, re
         // NOTE: DATA PROTECTION POLICY
         // Attendance records are NEVER cascade-deleted when deleting a course.
         for (const att of attendanceRecords) {
-          if (deletedSessionIds.has(att.sessionId)) {
+          if (cascadeSesIds.has(att.sessionId)) {
             (att as any).detachedCourse = true;
           }
         }
@@ -3822,11 +3883,13 @@ app.delete('/api/admin/database/document/:collectionName/:docId', async (req, re
       case 'courseMembers': {
         const idx = courseMembers.findIndex((m) => m.id === docId);
         if (idx >= 0) courseMembers.splice(idx, 1);
+        deletedMemberIds.add(docId);
         await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, docId);
         break;
       }
       case 'sessions':
         sessions.delete(docId);
+        deletedSessionIds.add(docId);
         await deleteFromFirestore(COLLECTIONS.SESSIONS, docId);
         break;
       case 'attendanceRecords': {
@@ -3854,6 +3917,9 @@ app.delete('/api/admin/database/document/:collectionName/:docId', async (req, re
       default:
         return res.status(400).json({ error: 'Collection ไม่รองรับการลบโดยตรง' });
     }
+
+    saveLocalCache();
+    await saveTombstonesToFirestore();
 
     res.json({ message: `ลบเอกสาร ${docId} จาก ${collectionName} เรียบร้อยแล้ว`, docId });
   } catch (err: any) {
@@ -4698,20 +4764,30 @@ app.post('/api/admin/attendance/override', async (req, res) => {
   }
 
   // Handle Student Attendance Override
-  let record = attendanceRecords.find(
-    (ar) =>
-      ar.studentId === targetUser!.id &&
-      ((sessionId && ar.sessionId === sessionId) || (eventId && ar.eventId === eventId))
-  );
+  const sesObj = sessionId ? sessions.get(sessionId) : undefined;
+  let record = findStudentAttendanceRecord(targetUser.id, courseId || sesObj?.courseId || '', sesObj || { id: sessionId, courseId: courseId || '', weekNumber: Number(weekNumber) || 1 } as Session);
+  if (!record && (sessionId || eventId)) {
+    record = attendanceRecords.find(
+      (ar) =>
+        (ar.studentId === targetUser!.id || (targetUser!.universityId && ar.studentUniversityId === targetUser!.universityId)) &&
+        ((sessionId && ar.sessionId === sessionId) || (eventId && ar.eventId === eventId))
+    );
+  }
 
   if (record) {
     record.status = status as AttendanceStatus;
     record.timestamp = new Date().toISOString();
+    if (sessionId) record.sessionId = sessionId;
+    if (courseId) record.courseId = courseId;
+    if (weekNumber) record.weekNumber = Number(weekNumber);
+    if (checkinMethod) record.checkinMethod = checkinMethod as any;
   } else {
     record = {
       id: `att_admin_override_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       sessionId,
       eventId,
+      courseId,
+      weekNumber: weekNumber ? Number(weekNumber) : undefined,
       studentId: targetUser.id,
       studentNameTh: `${targetUser.title || ''}${targetUser.firstNameTh} ${targetUser.lastNameTh}`.trim(),
       studentNameEn: `${targetUser.firstNameEn || ''} ${targetUser.lastNameEn || ''}`.trim(),
@@ -4930,95 +5006,107 @@ function splitThaiName(fullNameStr: string) {
 }
 
 async function importRealCsvAttendanceRecords() {
-  if (deletedCourseIds.has('crs_mtid204')) {
-    console.log('[CSV Import] crs_mtid204 is in deletedCourseIds, skipping CSV auto-import.');
-    return;
-  }
   console.log('[CSV Import] Starting import of 87 real exported attendance records...');
 
-  // 1. Ensure courses exist
-  const mtid204: Course = {
-    id: 'crs_mtid204',
-    courseCode: 'MTID204',
-    courseName: 'Basic Data Management with Computer',
-    academicYear: 2569,
-    semester: Semester.FIRST,
-    coordinatorName: 'ผศ.ดร. วนิดา เรียนดี',
-    ownerId: 'usr_t2',
-    ownerName: 'ผศ.ดร. วนิดา เรียนดี',
-    facultyCode: 'MT',
-    departmentCode: 'ID',
-    majorCode: 'MTMT',
-    degreeLevel: 'ปริญญาตรี',
-    curriculums: ['วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)'],
-    defaultLat: 13.7988363,
-    defaultLng: 100.322944,
-    allowedGpsRadius: 200,
-    weeks: [
-      { weekNumber: 1, topic: 'Basic Data Management with Computer - Lecture 1', date: '2026-08-03' },
-      { weekNumber: 2, topic: 'Basic Data Management with Computer - Lecture 2', date: '2026-07-31' },
-    ],
-    createdAt: new Date().toISOString(),
-  };
-  courses.set(mtid204.id, mtid204);
-  await saveToFirestore(COLLECTIONS.COURSES, mtid204);
-
-  const test101 = courses.get('crs_test101');
-  if (test101) {
-    test101.courseName = 'Basic Data Management with Computer';
-    await saveToFirestore(COLLECTIONS.COURSES, test101);
+  // 1. Ensure courses exist if not deleted
+  if (!deletedCourseIds.has('crs_mtid204')) {
+    const mtid204: Course = {
+      id: 'crs_mtid204',
+      courseCode: 'MTID204',
+      courseName: 'Basic Data Management with Computer',
+      academicYear: 2569,
+      semester: Semester.FIRST,
+      coordinatorName: 'ผศ.ดร. วนิดา เรียนดี',
+      ownerId: 'usr_t2',
+      ownerName: 'ผศ.ดร. วนิดา เรียนดี',
+      facultyCode: 'MT',
+      departmentCode: 'ID',
+      majorCode: 'MTMT',
+      degreeLevel: 'ปริญญาตรี',
+      curriculums: ['วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)'],
+      defaultLat: 13.7988363,
+      defaultLng: 100.322944,
+      allowedGpsRadius: 200,
+      weeks: [
+        { weekNumber: 1, topic: 'Basic Data Management with Computer - Lecture 1', date: '2026-08-03' },
+        { weekNumber: 2, topic: 'Basic Data Management with Computer - Lecture 2', date: '2026-07-31' },
+      ],
+      createdAt: new Date().toISOString(),
+    };
+    courses.set(mtid204.id, mtid204);
+    await saveToFirestore(COLLECTIONS.COURSES, mtid204);
   }
 
-  // 2. Ensure Sessions exist
-  const sesMtid204W1: Session = {
-    id: 'ses_mtid204_w1',
-    courseId: 'crs_mtid204',
-    weekNumber: 1,
-    topic: 'Basic Data Management with Computer - Lecture 1',
-    teacherLat: 13.7988363,
-    teacherLng: 100.322944,
-    isActive: false,
-    createdAt: new Date().toISOString(),
-  };
-  const sesMtid204W2: Session = {
-    id: 'ses_mtid204_w2',
-    courseId: 'crs_mtid204',
-    weekNumber: 2,
-    topic: 'Basic Data Management with Computer - Lecture 2',
-    teacherLat: 13.7988363,
-    teacherLng: 100.322944,
-    isActive: false,
-    createdAt: new Date().toISOString(),
-  };
-  sessions.set(sesMtid204W1.id, sesMtid204W1);
-  sessions.set(sesMtid204W2.id, sesMtid204W2);
-  await saveToFirestore(COLLECTIONS.SESSIONS, sesMtid204W1);
-  await saveToFirestore(COLLECTIONS.SESSIONS, sesMtid204W2);
+  if (!deletedCourseIds.has('crs_test101')) {
+    const test101 = courses.get('crs_test101');
+    if (test101) {
+      test101.courseName = 'Basic Data Management with Computer';
+      await saveToFirestore(COLLECTIONS.COURSES, test101);
+    }
+  }
 
-  const sesTest101W1: Session = {
-    id: 'ses_1',
-    courseId: 'crs_test101',
-    weekNumber: 1,
-    topic: 'Basic Data Management with Computer - Lecture 1',
-    teacherLat: 13.7988363,
-    teacherLng: 100.322944,
-    isActive: false,
-    createdAt: new Date().toISOString(),
-  };
-  const sesTest101W2: Session = {
-    id: 'ses_2',
-    courseId: 'crs_test101',
-    weekNumber: 2,
-    topic: 'Basic Data Management with Computer - Lecture 2',
-    teacherLat: 13.7988363,
-    teacherLng: 100.322944,
-    isActive: false,
-    createdAt: new Date().toISOString(),
-  };
-  sessions.set(sesTest101W1.id, sesTest101W1);
-  sessions.set(sesTest101W2.id, sesTest101W2);
-  await saveToFirestore(COLLECTIONS.SESSIONS, sesTest101W1);
-  await saveToFirestore(COLLECTIONS.SESSIONS, sesTest101W2);
+  // 2. Ensure Sessions exist if not deleted
+  if (!deletedCourseIds.has('crs_mtid204')) {
+    const sesMtid204W1: Session = {
+      id: 'ses_mtid204_w1',
+      courseId: 'crs_mtid204',
+      weekNumber: 1,
+      topic: 'Basic Data Management with Computer - Lecture 1',
+      teacherLat: 13.7988363,
+      teacherLng: 100.322944,
+      isActive: false,
+      createdAt: new Date().toISOString(),
+    };
+    const sesMtid204W2: Session = {
+      id: 'ses_mtid204_w2',
+      courseId: 'crs_mtid204',
+      weekNumber: 2,
+      topic: 'Basic Data Management with Computer - Lecture 2',
+      teacherLat: 13.7988363,
+      teacherLng: 100.322944,
+      isActive: false,
+      createdAt: new Date().toISOString(),
+    };
+    if (!deletedSessionIds.has('ses_mtid204_w1')) {
+      sessions.set(sesMtid204W1.id, sesMtid204W1);
+      await saveToFirestore(COLLECTIONS.SESSIONS, sesMtid204W1);
+    }
+    if (!deletedSessionIds.has('ses_mtid204_w2')) {
+      sessions.set(sesMtid204W2.id, sesMtid204W2);
+      await saveToFirestore(COLLECTIONS.SESSIONS, sesMtid204W2);
+    }
+  }
+
+  if (!deletedCourseIds.has('crs_test101')) {
+    const sesTest101W1: Session = {
+      id: 'ses_1',
+      courseId: 'crs_test101',
+      weekNumber: 1,
+      topic: 'Basic Data Management with Computer - Lecture 1',
+      teacherLat: 13.7988363,
+      teacherLng: 100.322944,
+      isActive: false,
+      createdAt: new Date().toISOString(),
+    };
+    const sesTest101W2: Session = {
+      id: 'ses_2',
+      courseId: 'crs_test101',
+      weekNumber: 2,
+      topic: 'Basic Data Management with Computer - Lecture 2',
+      teacherLat: 13.7988363,
+      teacherLng: 100.322944,
+      isActive: false,
+      createdAt: new Date().toISOString(),
+    };
+    if (!deletedSessionIds.has('ses_1')) {
+      sessions.set(sesTest101W1.id, sesTest101W1);
+      await saveToFirestore(COLLECTIONS.SESSIONS, sesTest101W1);
+    }
+    if (!deletedSessionIds.has('ses_2')) {
+      sessions.set(sesTest101W2.id, sesTest101W2);
+      await saveToFirestore(COLLECTIONS.SESSIONS, sesTest101W2);
+    }
+  }
 
   // 3. Import Students, Members & Attendance Records
   const usersToSave: User[] = [];
@@ -5165,8 +5253,24 @@ async function syncFromFirestore() {
     const hasInitializedConfig = Boolean(fsSettings && fsSettings.length > 0);
 
     if (fsSettings && fsSettings.length > 0) {
+      const tombstoneDoc = fsSettings.find((s: any) => s.id === 'tombstones') as any;
+      if (tombstoneDoc) {
+        if (Array.isArray(tombstoneDoc.deletedCourseIds)) {
+          tombstoneDoc.deletedCourseIds.forEach((id: string) => deletedCourseIds.add(id));
+        }
+        if (Array.isArray(tombstoneDoc.deletedMemberIds)) {
+          tombstoneDoc.deletedMemberIds.forEach((id: string) => deletedMemberIds.add(id));
+        }
+        if (Array.isArray(tombstoneDoc.deletedSessionIds)) {
+          tombstoneDoc.deletedSessionIds.forEach((id: string) => deletedSessionIds.add(id));
+        }
+        if (Array.isArray(tombstoneDoc.deletedUserIds)) {
+          tombstoneDoc.deletedUserIds.forEach((id: string) => deletedUserIds.add(id));
+        }
+      }
+
       const config = fsSettings.find((s) => s.id === 'global_config') || fsSettings[0];
-      if (config) {
+      if (config && config.id === 'global_config') {
         systemSettings = { ...systemSettings, ...config };
       }
     } else if (fsSettings !== null && !hasInitializedConfig) {
@@ -5313,7 +5417,7 @@ async function syncFromFirestore() {
     }
 
     // Ensure base CSV exported attendance records are present if database is empty or missing records
-    if (attendanceRecords.length < 87) {
+    if (attendanceRecords.length < 87 && !deletedCourseIds.has('crs_mtid204') && !deletedCourseIds.has('crs_test101')) {
       await importRealCsvAttendanceRecords();
     }
 

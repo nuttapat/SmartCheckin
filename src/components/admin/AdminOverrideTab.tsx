@@ -277,6 +277,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
               studentId: editingLog.targetUserId || editingLog.studentId,
               sessionId: targetSessionId || undefined,
               courseId: targetCourseId || undefined,
+              weekNumber: targetWeekNumber,
               status: AttendanceStatus.LEAVE,
               checkinMethod: editMethod || `ใบลา (${leaveTypeTh})`,
             });
@@ -298,6 +299,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
             studentId: editingLog.targetUserId || editingLog.studentId,
             sessionId: targetSessionId || undefined,
             courseId: targetCourseId || undefined,
+            weekNumber: targetWeekNumber,
             status: editStatus,
             checkinMethod: editMethod || 'ADMIN_EDIT',
           });
@@ -382,7 +384,8 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
             await overrideAttendanceRecord({
               studentId: log.targetUserId || log.studentId,
               courseId: targetCourseId,
-              sessionId: targetSessionId,
+              sessionId: targetSessionId || undefined,
+              weekNumber: targetWeekNumber,
               status: targetStatus,
               checkinMethod: targetMethod,
             });
@@ -521,10 +524,10 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
 
     setIsSubmittingOverride(true);
     try {
-      if (overrideStatus === AttendanceStatus.LEAVE || overrideStatus === 'LEAVE') {
-        const sessionObj = allSessions.find((s) => s.id === overrideSessionId);
-        const courseObj = allCourses.find((c) => c.id === overrideCourseId);
+      const sessionObj = allSessions.find((s) => s.id === overrideSessionId);
+      const courseObj = allCourses.find((c) => c.id === overrideCourseId);
 
+      if (overrideStatus === AttendanceStatus.LEAVE || overrideStatus === 'LEAVE') {
         const leaveTypeTh =
           overrideLeaveType === LeaveType.SICK
             ? 'ลาป่วย'
@@ -552,11 +555,11 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
           studentNameTh: `${overrideSelectedUser.title || ''}${overrideSelectedUser.firstNameTh} ${overrideSelectedUser.lastNameTh}`.trim(),
           studentUniversityId: overrideSelectedUser.universityId || '',
           courseId: overrideCourseId,
-          courseCode: courseObj?.courseCode || courseObj?.code || '',
-          courseName: courseObj?.courseName || courseObj?.nameTh || '',
+          courseCode: courseObj?.courseCode || (courseObj as any)?.code || '',
+          courseName: courseObj?.courseName || (courseObj as any)?.nameTh || '',
           weekNumber: sessionObj?.weekNumber || 1,
           leaveType: overrideLeaveType,
-          leaveDate: sessionObj?.date || sessionObj?.createdAt?.split('T')[0] || new Date().toISOString().split('T')[0],
+          leaveDate: sessionObj?.createdAt?.split('T')[0] || new Date().toISOString().split('T')[0],
           reason: overrideReason || `ปรับสถานะการลาโดยแอดมิน (${leaveTypeTh})`,
           status: overrideLeaveStatus,
           teacherComment: `ปรับสถานะโดยแอดมิน (Admin Override) - สถานะ: ${leaveStatusTh}`,
@@ -570,7 +573,8 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
           await overrideAttendanceRecord({
             studentId: overrideSelectedUser.id,
             courseId: overrideCourseId,
-            sessionId: overrideSessionId,
+            sessionId: overrideSessionId || undefined,
+            weekNumber: sessionObj?.weekNumber || 1,
             status: AttendanceStatus.LEAVE,
             checkinMethod: `ใบลา (${leaveTypeTh})`,
           });
@@ -579,13 +583,13 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
         await overrideAttendanceRecord({
           studentId: overrideSelectedUser.id,
           courseId: overrideCourseId,
-          sessionId: overrideSessionId,
+          sessionId: overrideSessionId || undefined,
+          weekNumber: sessionObj?.weekNumber || 1,
           status: overrideStatus,
           checkinMethod: 'ADMIN_OVERRIDE',
         });
 
         // Sync existing leave request if present
-        const sessionObj = allSessions.find((s) => s.id === overrideSessionId);
         const existingLeave = allLeaveRequests.find(
           (l) =>
             l.studentId === overrideSelectedUser.id &&

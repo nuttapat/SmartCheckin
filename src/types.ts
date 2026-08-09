@@ -158,6 +158,8 @@ export interface AttendanceRecord {
   id: string;
   sessionId?: string; // Optional if quick check-in event
   eventId?: string; // For Quick Check-in event
+  courseId?: string;
+  weekNumber?: number;
   studentId: string;
   studentNameTh: string;
   studentNameEn: string;
