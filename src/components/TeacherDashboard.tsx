@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { User, UserRole, Course, Session, AttendanceRecord, TeacherAttendanceRecord, InviteLink, CourseMember, CourseMemberRole } from '../types';
-import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck, toggleQrMode, updateQrInterval, fetchSystemSettings } from '../services/api';
+import { fetchCourses, fetchCourseDetails, activateSession, deactivateSession, generateInviteLink, submitTeacherCheckin, fetchTeacherCheckinRecords, fetchSessionRecords, fetchTeacherCoursesOverview, fetchTeacherLeaveRequests, toggleGpsCheck, toggleQrMode, updateQrInterval, fetchSystemSettings } from '../services/api';
 import { QrCode, Users, Download, Plus, Play, Square, RefreshCw, CheckCircle2, Clock, Share2, Copy, Link, MapPin, ShieldCheck, ArrowRight, UserCheck, Edit3, Navigation, Building, FileText, CheckCircle, AlertCircle, KeyRound, Camera, X, ShieldX, Image, BarChart3, PieChart, TrendingUp, Search, FileSpreadsheet, BookOpen, Award, Calendar, Trash2, UserPlus, ShieldAlert, Crown, EyeOff, Eye, Lock, Maximize2, Minimize2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
@@ -261,11 +261,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   const loadPendingLeaveCount = async () => {
     try {
+      if (!teacher?.id) return;
       const leaves = await fetchTeacherLeaveRequests(teacher.id);
-      const pending = leaves.filter((l) => l.status === 'PENDING').length;
-      setPendingLeaveCount(pending);
-    } catch (e) {
-      console.error('Failed to load pending leave count:', e);
+      if (Array.isArray(leaves)) {
+        const pending = leaves.filter((l) => l && l.status === 'PENDING').length;
+        setPendingLeaveCount(pending);
+      }
+    } catch {
+      // Ignore transient background fetch errors
     }
   };
 
@@ -937,11 +940,36 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           setQrDataUrl(url);
         } else if (payload.type === 'CHECKIN_NEW') {
           // Live checkin event received!
-          setLiveCheckins(payload.records || []);
+          const newRecords = payload.records || (payload.record ? [payload.record] : []);
+          if (newRecords.length > 0) {
+            setLiveCheckins((prev) => {
+              const recordMap = new Map<string, AttendanceRecord>();
+              prev.forEach((r) => recordMap.set(r.id, r));
+              newRecords.forEach((r: AttendanceRecord) => recordMap.set(r.id, r));
+              return Array.from(recordMap.values()).sort(
+                (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+              );
+            });
+          }
+          // Real-time synchronization across summary cards, course details, and overview tables
+          loadOverviewData();
+          if (selectedCourse?.id) {
+            fetchCourseDetails(selectedCourse.id).then((updated) => {
+              if (updated) setSelectedCourse(updated);
+            });
+          }
         }
       } catch (err) {
         console.error(err);
       }
+    };
+
+    ws.onclose = () => {
+      setTimeout(() => {
+        if (wsRef.current === ws) {
+          connectWebSocket(targetId, isEvent);
+        }
+      }, 3000);
     };
 
     wsRef.current = ws;
@@ -956,7 +984,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     try {
       setActiveSession(session);
       setIsQrModalOpen(true);
-      setLiveCheckins([]);
+      
+      // Load existing session checkin records immediately
+      const existingRecords = await fetchSessionRecords(session.id);
+      setLiveCheckins(existingRecords);
 
       const initialInterval = session.qrRefreshIntervalSeconds || qrInterval || 30;
       setQrInterval(initialInterval);

@@ -409,6 +409,19 @@ export async function fetchTeacherCheckinRecords(teacherId: string) {
   return res.json();
 }
 
+export async function fetchSessionRecords(sessionId: string): Promise<AttendanceRecord[]> {
+  try {
+    if (!sessionId) return [];
+    const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/records`);
+    if (!res.ok) return [];
+    const data = await parseResponse<AttendanceRecord[]>(res);
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.warn('fetchSessionRecords failed:', err);
+    return [];
+  }
+}
+
 export async function fetchStudentStats(studentId: string) {
   const res = await fetch(`${API_BASE}/student/${studentId}/stats`);
   if (!res.ok) throw new Error('Failed to fetch student stats');
@@ -444,15 +457,29 @@ export async function submitLeaveRequest(params: {
 }
 
 export async function fetchStudentLeaveRequests(studentId: string): Promise<LeaveRequest[]> {
-  const res = await fetch(`${API_BASE}/leave-requests/student/${studentId}`);
-  if (!res.ok) throw new Error('Failed to fetch student leave requests');
-  return res.json();
+  try {
+    if (!studentId) return [];
+    const res = await fetch(`${API_BASE}/leave-requests/student/${encodeURIComponent(studentId)}`);
+    if (!res.ok) return [];
+    const data = await parseResponse<LeaveRequest[]>(res);
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.warn('fetchStudentLeaveRequests failed:', err);
+    return [];
+  }
 }
 
 export async function fetchTeacherLeaveRequests(teacherId: string): Promise<LeaveRequest[]> {
-  const res = await fetch(`${API_BASE}/leave-requests/teacher/${teacherId}`);
-  if (!res.ok) throw new Error('Failed to fetch teacher leave requests');
-  return res.json();
+  try {
+    if (!teacherId) return [];
+    const res = await fetch(`${API_BASE}/leave-requests/teacher/${encodeURIComponent(teacherId)}`);
+    if (!res.ok) return [];
+    const data = await parseResponse<LeaveRequest[]>(res);
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.warn('fetchTeacherLeaveRequests failed:', err);
+    return [];
+  }
 }
 
 export async function updateLeaveRequestStatus(

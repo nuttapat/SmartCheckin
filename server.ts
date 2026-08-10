@@ -689,8 +689,72 @@ interface ActiveQR {
   lng: number;
   isGpsCheckEnabled?: boolean;
   isStatic?: boolean;
+  previousTokens?: Array<{ token: string; expiresAt: number }>;
 }
 const activeQRCodes: Map<string, ActiveQR> = new Map();
+
+function getGraceBufferMs(intervalSec: number): number {
+  if (intervalSec <= 10) return 10000;  // 10s cycle -> 10s buffer (total 20s window)
+  if (intervalSec <= 15) return 12000;  // 15s cycle -> 12s buffer (total 27s window)
+  if (intervalSec <= 30) return 20000;  // 30s cycle -> 20s buffer (total 50s window)
+  if (intervalSec <= 60) return 30000;  // 1m cycle  -> 30s buffer (total 90s window)
+  return 40000;                         // 2m+ cycle -> 40s buffer (total 160s window)
+}
+
+function parseCleanToken(rawInput: string): string {
+  if (!rawInput) return '';
+  let inputToken = rawInput.trim();
+  
+  // Clean URL params if present
+  if (inputToken.includes('checkin=')) {
+    const match = inputToken.match(/checkin=([^&]+)/);
+    if (match && match[1]) {
+      inputToken = decodeURIComponent(match[1]).trim();
+    }
+  }
+  if (inputToken.includes('token=')) {
+    const match = inputToken.match(/token=([^&]+)/);
+    if (match && match[1]) {
+      inputToken = decodeURIComponent(match[1]).trim();
+    }
+  }
+  // Strip SES:sessionId: or EVT:eventId: prefix
+  if (inputToken.includes(':')) {
+    const parts = inputToken.split(':');
+    inputToken = parts[parts.length - 1].trim();
+  }
+  // Strip trailing URL paths if raw URL was passed
+  if (inputToken.includes('/')) {
+    const parts = inputToken.split('/');
+    const lastPart = parts[parts.length - 1].split('?')[0].trim();
+    if (lastPart) inputToken = lastPart;
+  }
+
+  // Normalize ambiguous characters if manually typed (0 -> O, 1 -> I etc if needed, uppercase)
+  return inputToken.toUpperCase();
+}
+
+function isValidActiveToken(activeQR: ActiveQR | undefined, rawInputToken: string): boolean {
+  if (!activeQR) return false;
+  const cleanInput = parseCleanToken(rawInputToken);
+  if (!cleanInput) return false;
+
+  // 1. Check current active token
+  if (activeQR.token.toUpperCase() === cleanInput) {
+    return true;
+  }
+
+  // 2. Check previous tokens buffer (40s grace period for scanner delay & GPS acquisition)
+  if (activeQR.previousTokens && Array.isArray(activeQR.previousTokens)) {
+    const now = Date.now();
+    const found = activeQR.previousTokens.find(
+      (pt) => pt.token.toUpperCase() === cleanInput && pt.expiresAt > now
+    );
+    if (found) return true;
+  }
+
+  return false;
+}
 
 // Helper: Haversine distance in meters
 function getHaversineDistance(
@@ -1116,11 +1180,23 @@ wss.on('connection', (ws: WSClient, req) => {
   ws.role = role || undefined;
   activeWsClients.add(ws);
 
-  // Send current active state immediately
+  // Send current active state & attendance records immediately
   const targetId = sessionId || eventId;
-  if (targetId && activeQRCodes.has(targetId)) {
-    const qrData = activeQRCodes.get(targetId);
-    ws.send(JSON.stringify({ type: 'QR_REFRESH', data: qrData }));
+  if (targetId) {
+    if (activeQRCodes.has(targetId)) {
+      const qrData = activeQRCodes.get(targetId);
+      ws.send(JSON.stringify({ type: 'QR_REFRESH', data: qrData }));
+    }
+    const currentRecords = attendanceRecords.filter(
+      (r) => r.sessionId === targetId || r.eventId === targetId
+    );
+    ws.send(
+      JSON.stringify({
+        type: 'CHECKIN_NEW',
+        records: currentRecords,
+        totalCount: currentRecords.length,
+      })
+    );
   }
 
   ws.on('close', () => {
@@ -1169,6 +1245,18 @@ setInterval(() => {
       const expiresAt = now + (intervalSec * 1000) + 5000; // 5s grace period for latency
       const nextRefreshAt = now + (intervalSec * 1000);
 
+      const bufferMs = getGraceBufferMs(intervalSec);
+      const previousTokens = existingQR?.previousTokens ? [...existingQR.previousTokens] : [];
+      if (existingQR?.token) {
+        previousTokens.push({
+          token: existingQR.token,
+          expiresAt: now + bufferMs, // dynamic grace period based on refresh cycle
+        });
+      }
+      const validPrevious = previousTokens
+        .filter((pt) => pt.expiresAt > now)
+        .slice(-10);
+
       const qrData: ActiveQR = {
         token: newToken,
         expiresAt,
@@ -1178,6 +1266,7 @@ setInterval(() => {
         lng,
         isGpsCheckEnabled,
         isStatic: false,
+        previousTokens: validPrevious,
       };
       activeQRCodes.set(targetId, qrData);
 
@@ -2658,26 +2747,32 @@ app.post('/api/checkin', (req, res) => {
     return res.status(400).json({ error: 'Check-in session is not active or has been closed by teacher.' });
   }
 
-  const activeQR = activeQRCodes.get(sessionId);
+  let activeQR = activeQRCodes.get(sessionId);
+  if (!activeQR && session && session.isActive) {
+    // Auto-rehydrate activeQR for active session if server memory was reset/restarted
+    const intervalSec = session.qrRefreshIntervalSeconds || 30;
+    const bufferMs = getGraceBufferMs(intervalSec);
+    const token = generate6CharToken();
+    activeQR = {
+      token,
+      expiresAt: Date.now() + (intervalSec * 1000) + bufferMs,
+      refreshIntervalSeconds: intervalSec,
+      nextRefreshAt: Date.now() + (intervalSec * 1000),
+      lat: session.teacherLat,
+      lng: session.teacherLng,
+      isGpsCheckEnabled: session.isGpsCheckEnabled,
+      isStatic: false,
+      previousTokens: [],
+    };
+    activeQRCodes.set(sessionId, activeQR);
+  }
 
   // Mode validation: QR_ONLY, HYBRID, or TOKEN requires valid active token
   if (checkinMode === 'QR_ONLY' || checkinMode === 'HYBRID' || checkinMode === 'TOKEN') {
     if (!qrToken) {
       return res.status(400).json({ error: 'กรุณากรอกรหัส Token 6 หลักจากหน้าจออาจารย์' });
     }
-    let inputToken = qrToken.trim();
-    if (inputToken.includes('checkin=')) {
-      const match = inputToken.match(/checkin=([^&]+)/);
-      if (match && match[1]) {
-        inputToken = decodeURIComponent(match[1]).trim();
-      }
-    }
-    if (inputToken.includes(':')) {
-      const parts = inputToken.split(':');
-      inputToken = parts[parts.length - 1];
-    }
-
-    if (!activeQR || (activeQR.token.toUpperCase() !== inputToken.toUpperCase() && activeQR.token !== inputToken)) {
+    if (!activeQR || !isValidActiveToken(activeQR, qrToken)) {
       return res.status(400).json({ error: 'รหัส Token / QR Code หมดอายุหรือไม่อยู่ในระบบ! กรุณาสแกนหรือกรอกรหัส 6 หลักล่าสุดจากหน้าจออาจารย์' });
     }
   }
@@ -2855,18 +2950,10 @@ app.post('/api/teacher/checkin', (req, res) => {
 
   // Token Validation if provided or in TOKEN/HYBRID mode
   if (checkinMethod === 'TOKEN' || checkinMethod === 'HYBRID' || checkinMethod === 'QR_ONLY') {
-    if (qrToken) {
-      let inputToken = qrToken.trim();
-      if (inputToken.includes(':')) {
-        const parts = inputToken.split(':');
-        inputToken = parts[parts.length - 1];
-      }
-
-      if (sessionId) {
-        const activeQR = activeQRCodes.get(sessionId);
-        if (activeQR && activeQR.token.toUpperCase() !== inputToken.toUpperCase() && activeQR.token !== inputToken) {
-          return res.status(400).json({ error: 'รหัส Token / QR Code หมดอายุหรือไม่อยู่ในระบบ! กรุณาสแกนหรือกรอกรหัส 6 หลักล่าสุด' });
-        }
+    if (qrToken && sessionId) {
+      const activeQR = activeQRCodes.get(sessionId);
+      if (activeQR && !isValidActiveToken(activeQR, qrToken)) {
+        return res.status(400).json({ error: 'รหัส Token / QR Code หมดอายุหรือไม่อยู่ในระบบ! กรุณาสแกนหรือกรอกรหัส 6 หลักล่าสุด' });
       }
     }
   }
@@ -3021,13 +3108,7 @@ app.post('/api/checkin/quick', (req, res) => {
   const activeQR = activeQRCodes.get(eventId);
 
   if (checkinMode === 'QR_ONLY' || checkinMode === 'HYBRID' || checkinMode === 'TOKEN') {
-    let inputToken = qrToken ? qrToken.trim() : '';
-    if (inputToken.includes(':')) {
-      const parts = inputToken.split(':');
-      inputToken = parts[parts.length - 1];
-    }
-
-    if (!activeQR || (activeQR.token.toUpperCase() !== inputToken.toUpperCase() && activeQR.token !== inputToken)) {
+    if (!activeQR || !isValidActiveToken(activeQR, qrToken || '')) {
       return res.status(400).json({ error: 'Invalid or expired event QR code.' });
     }
   }
@@ -3309,44 +3390,51 @@ app.get('/api/leave-requests/student/:studentId', (req, res) => {
 
 // Get teacher's leave requests for courses taught by teacher (รายการแจ้งลาสำหรับอาจารย์)
 app.get('/api/leave-requests/teacher/:teacherId', (req, res) => {
-  const { teacherId } = req.params;
+  try {
+    const { teacherId } = req.params;
+    if (!teacherId) return res.json([]);
 
-  // Find courses where teacher is owner or member with instructor/coordinator/co-teacher role
-  const teacherCourseIds = new Set(
-    Array.from(courses.values())
-      .filter((c) => c.ownerId === teacherId)
-      .map((c) => c.id)
-  );
+    // Find courses where teacher is owner or member with instructor/coordinator/co-teacher role
+    const teacherCourseIds = new Set(
+      Array.from(courses.values())
+        .filter((c) => c && c.ownerId === teacherId)
+        .map((c) => c.id)
+    );
 
-  const teacherCourseCodes = new Set(
-    Array.from(courses.values())
-      .filter((c) => c.ownerId === teacherId && c.courseCode)
-      .map((c) => c.courseCode.trim().toLowerCase())
-  );
+    const teacherCourseCodes = new Set(
+      Array.from(courses.values())
+        .filter((c) => c && c.ownerId === teacherId && c.courseCode)
+        .map((c) => c.courseCode.trim().toLowerCase())
+    );
 
-  courseMembers.forEach((cm) => {
-    if (cm.userId === teacherId && cm.role !== CourseMemberRole.STUDENT && (cm.role as string) !== 'STUDENT') {
-      teacherCourseIds.add(cm.courseId);
-      const matchedCourse = courses.get(cm.courseId);
-      if (matchedCourse && matchedCourse.courseCode) {
-        teacherCourseCodes.add(matchedCourse.courseCode.trim().toLowerCase());
+    courseMembers.forEach((cm) => {
+      if (cm && cm.userId === teacherId && cm.role !== CourseMemberRole.STUDENT && (cm.role as string) !== 'STUDENT') {
+        teacherCourseIds.add(cm.courseId);
+        const matchedCourse = courses.get(cm.courseId);
+        if (matchedCourse && matchedCourse.courseCode) {
+          teacherCourseCodes.add(matchedCourse.courseCode.trim().toLowerCase());
+        }
       }
+    });
+
+    const user = users.get(teacherId);
+    let list = leaveRequests.filter((l) => {
+      if (!l) return false;
+      if (l.courseId && teacherCourseIds.has(l.courseId)) return true;
+      if (l.courseCode && typeof l.courseCode === 'string' && teacherCourseCodes.has(l.courseCode.trim().toLowerCase())) return true;
+      return false;
+    });
+
+    // Fallback for ADMIN or teachers when teacherCourseIds is empty or no direct match found
+    if (user && (user.role === UserRole.ADMIN || (list.length === 0 && (user.role === UserRole.TEACHER || (user.role as string) === 'BOTH')))) {
+      list = leaveRequests;
     }
-  });
 
-  const user = users.get(teacherId);
-  let list = leaveRequests.filter((l) => {
-    if (teacherCourseIds.has(l.courseId)) return true;
-    if (l.courseCode && teacherCourseCodes.has(l.courseCode.trim().toLowerCase())) return true;
-    return false;
-  });
-
-  // Fallback for ADMIN or teachers when teacherCourseIds is empty or no direct match found
-  if (user && (user.role === UserRole.ADMIN || (list.length === 0 && (user.role === UserRole.TEACHER || (user.role as string) === 'BOTH')))) {
-    list = leaveRequests;
+    res.json(list || []);
+  } catch (err) {
+    console.error('Error fetching teacher leave requests:', err);
+    res.json([]);
   }
-
-  res.json(list);
 });
 
 // Update leave request status (อาจารย์อนุมัติ/ปฏิเสธใบลา)
@@ -5359,6 +5447,11 @@ app.post('/api/admin/attendance/override', async (req, res) => {
   }
 
   await saveToFirestore(COLLECTIONS.ATTENDANCE, record);
+  if (record.sessionId) {
+    broadcastCheckinEvent(record.sessionId, record);
+  } else if (record.eventId) {
+    broadcastCheckinEvent(record.eventId, record);
+  }
 
   res.json({ message: 'ปรับแก้ไขข้อมูลการเช็กชื่อของนักศึกษาสำเร็จเรียบร้อยแล้ว', record });
 });
