@@ -1,8 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MasterDepartment, MasterCurriculum, MasterPrefix } from '../../types';
+import { MasterUniversity, MasterFaculty, MasterDepartment, MasterCurriculum, MasterPrefix } from '../../types';
 import {
   fetchSystemSettings,
   updateSystemSettings,
+  fetchMasterUniversities,
+  saveMasterUniversity,
+  deleteMasterUniversity,
+  fetchMasterFaculties,
+  saveMasterFaculty,
+  deleteMasterFaculty,
+  seedDefaultMasterDataApi,
   fetchMasterDepartments,
   saveMasterDepartment,
   deleteMasterDepartment,
@@ -33,6 +40,14 @@ import {
   ToggleRight,
   PlusCircle,
   X,
+  Edit3,
+  Download,
+  SlidersHorizontal,
+  GraduationCap,
+  Sparkles,
+  School,
+  Award,
+  Search,
   FileText,
   UserPlus,
   Pencil,
@@ -40,7 +55,6 @@ import {
   ShieldCheck,
   CheckSquare,
   Square,
-  Download,
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
@@ -115,10 +129,13 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
   const [newStudentDomainInput, setNewStudentDomainInput] = useState<string>('');
 
   // Master Data State
+  const [masterUnivs, setMasterUnivs] = useState<MasterUniversity[]>([]);
+  const [masterFacs, setMasterFacs] = useState<MasterFaculty[]>([]);
   const [masterDeps, setMasterDeps] = useState<MasterDepartment[]>([]);
   const [masterCurrs, setMasterCurrs] = useState<MasterCurriculum[]>([]);
   const [masterPrefixes, setMasterPrefixes] = useState<MasterPrefix[]>([]);
   const [loadingMasterData, setLoadingMasterData] = useState<boolean>(false);
+  const [seedingMasterData, setSeedingMasterData] = useState<boolean>(false);
 
   // Master Data Sorting & Selection State
   const [selectedDeptIds, setSelectedDeptIds] = useState<string[]>([]);
@@ -398,14 +415,42 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
   }, [masterPrefixes, prefixSortField, prefixSortDir]);
 
   // Export handlers
+  const handleExportUnivCSV = () => {
+    if (masterUnivs.length === 0) return showToast('ไม่มีข้อมูลมหาวิทยาลัยที่จะส่งออก');
+    const headers = ['ลำดับ', 'ID', 'รหัสมหาวิทยาลัย', 'ชื่อมหาวิทยาลัย (TH)', 'ชื่อมหาวิทยาลัย (EN)', 'ประเทศ'];
+    const rows = masterUnivs.map((u, idx) => [idx + 1, u.id, u.code, u.nameTh, u.nameEn || '', u.country || '']);
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `master_universities_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    showToast(`ส่งออก CSV มหาวิทยาลัยสำเร็จ (${masterUnivs.length} รายการ)`);
+  };
+
+  const handleExportFacCSV = () => {
+    if (masterFacs.length === 0) return showToast('ไม่มีข้อมูลคณะที่จะส่งออก');
+    const headers = ['ลำดับ', 'ID', 'รหัสคณะ', 'ชื่อคณะ (TH)', 'ชื่อคณะ (EN)', 'รหัสมหาวิทยาลัย'];
+    const rows = masterFacs.map((f, idx) => [idx + 1, f.id, f.code, f.nameTh, f.nameEn || '', f.universityCode || '']);
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `master_faculties_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    showToast(`ส่งออก CSV คณะสำเร็จ (${masterFacs.length} รายการ)`);
+  };
+
   const handleExportDeptCSV = () => {
     const depsToExport = selectedDeptIds.length > 0
       ? sortedDeps.filter((d) => selectedDeptIds.includes(d.id))
       : sortedDeps;
     if (depsToExport.length === 0) return showToast('ไม่มีข้อมูลสาขาที่จะส่งออก');
 
-    const headers = ['ลำดับ', 'ID', 'รหัสสาขา', 'ชื่อสาขา (TH)', 'ชื่อสาขา (EN)'];
-    const rows = depsToExport.map((d, idx) => [idx + 1, d.id, d.code, d.nameTh, d.nameEn || '']);
+    const headers = ['ลำดับ', 'ID', 'รหัสสาขา', 'ชื่อสาขา (TH)', 'ชื่อสาขา (EN)', 'คณะ/หน่วยงาน', 'มหาวิทยาลัย'];
+    const rows = depsToExport.map((d, idx) => [idx + 1, d.id, d.code, d.nameTh, d.nameEn || '', d.facultyTh || d.facultyCode || '', d.universityTh || d.universityCode || '']);
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -422,8 +467,8 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
       : sortedCurrs;
     if (currsToExport.length === 0) return showToast('ไม่มีข้อมูลหลักสูตรที่จะส่งออก');
 
-    const headers = ['ลำดับ', 'ID', 'รหัสหลักสูตร', 'ชื่อหลักสูตร (TH)'];
-    const rows = currsToExport.map((c, idx) => [idx + 1, c.id, c.code, c.nameTh || c.titleTh || c.code]);
+    const headers = ['ลำดับ', 'ID', 'รหัสหลักสูตร', 'ชื่อหลักสูตร (TH)', 'คณะ/หน่วยงาน', 'มหาวิทยาลัย'];
+    const rows = currsToExport.map((c, idx) => [idx + 1, c.id, c.code, c.nameTh || c.titleTh || c.code, c.facultyTh || c.facultyCode || '', c.universityTh || c.universityCode || '']);
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -453,6 +498,8 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
   };
 
   // Modals / New Item Forms for Master Data
+  const [editingUniv, setEditingUniv] = useState<Partial<MasterUniversity> | null>(null);
+  const [editingFac, setEditingFac] = useState<Partial<MasterFaculty> | null>(null);
   const [editingDept, setEditingDept] = useState<Partial<MasterDepartment> | null>(null);
   const [editingCurr, setEditingCurr] = useState<Partial<MasterCurriculum> | null>(null);
   const [editingPrefix, setEditingPrefix] = useState<Partial<MasterPrefix> | null>(null);
@@ -463,8 +510,10 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
         setLoadingSystemSettings(true);
         setLoadingMasterData(true);
       }
-      const [sysRes, depsData, currsData, prefixesData] = await Promise.all([
+      const [sysRes, univsRes, facsRes, depsData, currsData, prefixesData] = await Promise.all([
         fetchSystemSettings().catch(() => ({})),
+        fetchMasterUniversities().catch(() => []),
+        fetchMasterFaculties().catch(() => []),
         fetchMasterDepartments().catch(() => []),
         fetchMasterCurriculums().catch(() => []),
         fetchMasterPrefixes().catch(() => []),
@@ -488,6 +537,8 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
         });
       }
 
+      setMasterUnivs(Array.isArray(univsRes) ? univsRes : (univsRes.universities || []));
+      setMasterFacs(Array.isArray(facsRes) ? facsRes : (facsRes.faculties || []));
       setMasterDeps(depsData);
       setMasterCurrs(currsData);
       setMasterPrefixes(prefixesData);
@@ -498,6 +549,20 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
         setLoadingSystemSettings(false);
         setLoadingMasterData(false);
       }
+    }
+  };
+
+  const handleSeedDefaultMasterData = async () => {
+    if (!confirm('คุณต้องการรีเซ็ต/สร้างข้อมูลโครงสร้างองค์กรมาตรฐาน (มหาวิทยาลัยมหิดล, คณะเทคนิคการแพทย์, ภาควิชา, หลักสูตร ป.ตรี/ป.โท/ป.เอก และคำนำหน้าชื่อ) ใช่หรือไม่?')) return;
+    try {
+      setSeedingMasterData(true);
+      await seedDefaultMasterDataApi();
+      showToast('โหลดข้อมูลโครงสร้างองค์กรและหลักสูตรมาตรฐานเรียบร้อยแล้ว');
+      await loadSystemSettingsData(true);
+    } catch (err: any) {
+      alert(err.message || 'เกิดข้อผิดพลาดในการโหลดข้อมูลมาตรฐาน');
+    } finally {
+      setSeedingMasterData(false);
     }
   };
 
@@ -562,6 +627,76 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
     });
   };
 
+  // Master University CRUD
+  const handleSaveUnivSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUniv?.code || !editingUniv?.nameTh) {
+      alert('กรุณากรอกรหัสมหาวิทยาลัยและชื่อมหาวิทยาลัยภาษาไทย');
+      return;
+    }
+    try {
+      await saveMasterUniversity({
+        id: editingUniv.id || `univ_${Date.now()}`,
+        code: editingUniv.code.trim(),
+        nameTh: editingUniv.nameTh.trim(),
+        nameEn: editingUniv.nameEn?.trim() || '',
+        country: editingUniv.country?.trim() || 'Thailand',
+      });
+      showToast('บันทึกมหาวิทยาลัยสำเร็จ');
+      setEditingUniv(null);
+      loadSystemSettingsData(true);
+    } catch (err: any) {
+      alert(err.message || 'เกิดข้อผิดพลาดในการบันทึกมหาวิทยาลัย');
+    }
+  };
+
+  const handleDeleteUnivSubmit = (id: string, name: string) => {
+    setDeleteConfirmItem({
+      title: `ลบมหาวิทยาลัย "${name}"`,
+      subtitle: 'การลบมหาวิทยาลัยนี้จะลบรายการออกจากระบบ',
+      action: async () => {
+        await deleteMasterUniversity(id);
+        showToast(`ลบมหาวิทยาลัย ${name} เรียบร้อยแล้ว`);
+        loadSystemSettingsData(true);
+      },
+    });
+  };
+
+  // Master Faculty CRUD
+  const handleSaveFacSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingFac?.code || !editingFac?.nameTh) {
+      alert('กรุณากรอกรหัสคณะและชื่อคณะภาษาไทย');
+      return;
+    }
+    try {
+      await saveMasterFaculty({
+        id: editingFac.id || `fac_${Date.now()}`,
+        code: editingFac.code.trim(),
+        nameTh: editingFac.nameTh.trim(),
+        nameEn: editingFac.nameEn?.trim() || '',
+        universityCode: editingFac.universityCode || 'MU',
+      });
+      showToast('บันทึกคณะ/หน่วยงานสำเร็จ');
+      setEditingFac(null);
+      loadSystemSettingsData(true);
+    } catch (err: any) {
+      alert(err.message || 'เกิดข้อผิดพลาดในการบันทึกคณะ/หน่วยงาน');
+    }
+  };
+
+  const handleDeleteFacSubmit = (id: string, name: string) => {
+    setDeleteConfirmItem({
+      title: `ลบคณะ/หน่วยงาน "${name}"`,
+      subtitle: 'การลบคณะนี้จะลบรายการออกจากระบบ',
+      action: async () => {
+        await deleteMasterFaculty(id);
+        showToast(`ลบคณะ ${name} เรียบร้อยแล้ว`);
+        loadSystemSettingsData(true);
+      },
+    });
+  };
+
   // Master Department CRUD
   const handleSaveDeptSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -569,12 +704,19 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
       alert('กรุณากรอกรหัสสาขาและชื่อสาขาภาษาไทย');
       return;
     }
+    const selectedUniv = masterUnivs.find((u) => u.code === editingDept.universityCode);
+    const selectedFac = masterFacs.find((f) => f.code === editingDept.facultyCode);
+
     try {
       await saveMasterDepartment({
         id: editingDept.id || `dept_${Date.now()}`,
         code: editingDept.code.trim(),
         nameTh: editingDept.nameTh.trim(),
         nameEn: editingDept.nameEn?.trim() || '',
+        universityCode: editingDept.universityCode || selectedUniv?.code || 'MU',
+        universityTh: selectedUniv?.nameTh || editingDept.universityTh || 'มหาวิทยาลัยมหิดล',
+        facultyCode: editingDept.facultyCode || selectedFac?.code || 'MT',
+        facultyTh: selectedFac?.nameTh || editingDept.facultyTh || 'คณะเทคนิคการแพทย์',
       });
       showToast('บันทึกสาขา/ภาควิชาสำเร็จ');
       setEditingDept(null);
@@ -604,12 +746,19 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
       alert('กรุณากรอกรหัสหลักสูตรและชื่อหลักสูตรภาษาไทย');
       return;
     }
+    const selectedUniv = masterUnivs.find((u) => u.code === editingCurr.universityCode);
+    const selectedFac = masterFacs.find((f) => f.code === editingCurr.facultyCode);
+
     try {
       await saveMasterCurriculum({
         id: editingCurr.id || `curr_${Date.now()}`,
         code: editingCurr.code.trim(),
         titleTh: currTitle,
         nameTh: currTitle,
+        universityCode: editingCurr.universityCode || selectedUniv?.code || 'MU',
+        universityTh: selectedUniv?.nameTh || editingCurr.universityTh || 'มหาวิทยาลัยมหิดล',
+        facultyCode: editingCurr.facultyCode || selectedFac?.code || 'MT',
+        facultyTh: selectedFac?.nameTh || editingCurr.facultyTh || 'คณะเทคนิคการแพทย์',
         departmentCode: editingCurr.departmentCode || '',
         academicYears: editingCurr.academicYears || [2567, 2568, 2569],
       });
@@ -1000,25 +1149,183 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
         </div>
       </form>
 
-      {/* SECTION 2: MASTER DATA MANAGEMENT */}
+      {/* SECTION 2: ORGANIZATIONAL & ACADEMIC STRUCTURE */}
       <div className={`p-6 rounded-3xl border shadow-xl space-y-6 ${
         isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
       }`}>
-        <div className="flex items-center space-x-3 pb-6 border-b border-slate-200 dark:border-slate-800">
-          <div className="w-10 h-10 rounded-2xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-500 shrink-0">
-            <Building2 className="w-5 h-5 stroke-[2.2]" />
-          </div>
-          <div>
-            <h2 className={`text-base font-extrabold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-              ส่วนที่ 2: จัดการ Master Data (สาขา, หลักสูตร, คำนำหน้าชื่อ)
-            </h2>
-            <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-              กำหนดข้อมูลมาตรฐานของสถาบัน เพื่อให้ผู้ใช้นำไปเลือกใช้งานในระบบ
-            </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-2xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-500 shrink-0">
+              <Building2 className="w-5 h-5 stroke-[2.2]" />
+            </div>
+            <div>
+              <h2 className={`text-base font-extrabold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                ส่วนที่ 2: จัดการโครงสร้างองค์กรและการศึกษา (มหาวิทยาลัย, คณะ, ภาควิชา, หลักสูตร)
+              </h2>
+              <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                กำหนดและจัดการโครงสร้างระดับสถาบัน คณะ ภาควิชา และหลักสูตรวิชาการของระบบ
+              </p>
+            </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* TOP ROW: UNIVERSITIES & FACULTIES */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* 2.0 Master Universities */}
+          <div className={`p-4 rounded-2xl border space-y-3 ${
+            isDarkMode ? 'bg-slate-800/40 border-slate-700/60' : 'bg-slate-50 border-slate-200'
+          }`}>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className={`font-extrabold text-xs flex items-center space-x-1.5 ${isDarkMode ? 'text-sky-400' : 'text-sky-700'}`}>
+                <Building2 className="w-4 h-4 text-sky-500" />
+                <span>🏛️ มหาวิทยาลัย ({masterUnivs.length})</span>
+              </span>
+              <div className="flex items-center space-x-1">
+                <button
+                  onClick={handleExportUnivCSV}
+                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+                  title="ส่งออก CSV มหาวิทยาลัย"
+                >
+                  <Download className="w-3 h-3" />
+                  <span>CSV</span>
+                </button>
+                <button
+                  onClick={() => setEditingUniv({ code: '', nameTh: '', nameEn: '', country: 'Thailand' })}
+                  className="px-2 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>เพิ่มมหาวิทยาลัย</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto max-h-56 overflow-y-auto">
+              <table className="w-full text-left text-[11px] border-collapse">
+                <thead>
+                  <tr className={`border-b ${isDarkMode ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700'}`}>
+                    <th className="p-1.5 text-center w-8">#</th>
+                    <th className="p-1.5 font-bold w-16">รหัส</th>
+                    <th className="p-1.5 font-bold">ชื่อมหาวิทยาลัย</th>
+                    <th className="p-1.5 text-right w-16">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${isDarkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
+                  {masterUnivs.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="p-4 text-center text-slate-400 text-xs">
+                        ยังไม่มีข้อมูลมหาวิทยาลัย กดปุ่ม "เพิ่มมหาวิทยาลัย" หรือ "โหลดข้อมูลองค์กรเริ่มต้น"
+                      </td>
+                    </tr>
+                  ) : (
+                    masterUnivs.map((u, idx) => (
+                      <tr key={u.id} className="hover:bg-slate-500/5 transition">
+                        <td className="p-1.5 text-center font-mono text-slate-400">{idx + 1}</td>
+                        <td className="p-1.5 font-mono font-bold text-sky-500">{u.code}</td>
+                        <td className={`p-1.5 font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+                          {u.nameTh}
+                          {u.nameEn && <span className="block text-[10px] font-normal text-slate-400">{u.nameEn}</span>}
+                        </td>
+                        <td className="p-1.5 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => setEditingUniv(u)}
+                            className="p-1 rounded text-sky-600 hover:bg-sky-500/10 cursor-pointer mr-1"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUnivSubmit(u.id, u.nameTh)}
+                            className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 2.01 Master Faculties */}
+          <div className={`p-4 rounded-2xl border space-y-3 ${
+            isDarkMode ? 'bg-slate-800/40 border-slate-700/60' : 'bg-slate-50 border-slate-200'
+          }`}>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className={`font-extrabold text-xs flex items-center space-x-1.5 ${isDarkMode ? 'text-indigo-400' : 'text-indigo-700'}`}>
+                <School className="w-4 h-4 text-indigo-500" />
+                <span>🎓 คณะ / หน่วยงาน ({masterFacs.length})</span>
+              </span>
+              <div className="flex items-center space-x-1">
+                <button
+                  onClick={handleExportFacCSV}
+                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+                  title="ส่งออก CSV คณะ"
+                >
+                  <Download className="w-3 h-3" />
+                  <span>CSV</span>
+                </button>
+                <button
+                  onClick={() => setEditingFac({ code: '', nameTh: '', nameEn: '', universityCode: 'MU' })}
+                  className="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>เพิ่มคณะ</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto max-h-56 overflow-y-auto">
+              <table className="w-full text-left text-[11px] border-collapse">
+                <thead>
+                  <tr className={`border-b ${isDarkMode ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700'}`}>
+                    <th className="p-1.5 text-center w-8">#</th>
+                    <th className="p-1.5 font-bold w-16">รหัส</th>
+                    <th className="p-1.5 font-bold">ชื่อคณะ / หน่วยงาน</th>
+                    <th className="p-1.5 text-right w-16">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${isDarkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
+                  {masterFacs.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="p-4 text-center text-slate-400 text-xs">
+                        ยังไม่มีข้อมูลคณะ กดปุ่ม "เพิ่มคณะ" หรือ "โหลดข้อมูลองค์กรเริ่มต้น"
+                      </td>
+                    </tr>
+                  ) : (
+                    masterFacs.map((f, idx) => (
+                      <tr key={f.id} className="hover:bg-slate-500/5 transition">
+                        <td className="p-1.5 text-center font-mono text-slate-400">{idx + 1}</td>
+                        <td className="p-1.5 font-mono font-bold text-indigo-500">{f.code}</td>
+                        <td className={`p-1.5 font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+                          {f.nameTh}
+                          {f.nameEn && <span className="block text-[10px] font-normal text-slate-400">{f.nameEn}</span>}
+                        </td>
+                        <td className="p-1.5 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => setEditingFac(f)}
+                            className="p-1 rounded text-indigo-600 hover:bg-indigo-500/10 cursor-pointer mr-1"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteFacSubmit(f.id, f.nameTh)}
+                            className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* BOTTOM ROW: DEPARTMENTS & CURRICULUMS */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* 2.1 Master Departments */}
           <div className={`p-4 rounded-2xl border space-y-3 ${
             isDarkMode ? 'bg-slate-800/40 border-slate-700/60' : 'bg-slate-50 border-slate-200'
@@ -1099,7 +1406,7 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
                   <span>CSV</span>
                 </button>
                 <button
-                  onClick={() => setEditingDept({ code: '', nameTh: '', nameEn: '' })}
+                  onClick={() => setEditingDept({ code: '', nameTh: '', nameEn: '', universityCode: masterUnivs[0]?.code || 'MU', facultyCode: masterFacs[0]?.code || 'MT' })}
                   className="px-2 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -1210,12 +1517,19 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
                           <td className="p-1.5 font-mono font-bold text-purple-500">{d.code}</td>
                         )}
                         {deptVisibleCols.nameTh && (
-                          <td className={`p-1.5 font-bold truncate max-w-[120px] ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{d.nameTh}</td>
+                          <td className={`p-1.5 font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+                            <div className="truncate">{d.nameTh}</div>
+                            {(d.facultyCode || d.facultyTh) && (
+                              <div className="text-[9px] font-medium text-slate-400 truncate">
+                                {d.facultyTh || d.facultyCode} {d.universityCode ? `(${d.universityCode})` : ''}
+                              </div>
+                            )}
+                          </td>
                         )}
                         {deptVisibleCols.actions && (
                           <td className="p-1.5 text-right whitespace-nowrap">
                             <button
-                              onClick={() => setEditingDept({ id: d.id, code: d.code, nameTh: d.nameTh, nameEn: d.nameEn })}
+                              onClick={() => setEditingDept({ id: d.id, code: d.code, nameTh: d.nameTh, nameEn: d.nameEn, universityCode: d.universityCode || 'MU', facultyCode: d.facultyCode || 'MT' })}
                               className="p-1 rounded text-purple-600 hover:bg-purple-500/10 cursor-pointer"
                             >
                               <Pencil className="w-3 h-3" />
@@ -1316,7 +1630,7 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
                   <span>CSV</span>
                 </button>
                 <button
-                  onClick={() => setEditingCurr({ code: '', titleTh: '', departmentCode: '' })}
+                  onClick={() => setEditingCurr({ code: '', titleTh: '', nameTh: '', universityCode: masterUnivs[0]?.code || 'MU', facultyCode: masterFacs[0]?.code || 'MT' })}
                   className="px-2 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -1428,12 +1742,19 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
                           <td className="p-1.5 font-mono font-bold text-purple-500">{c.code}</td>
                         )}
                         {currVisibleCols.titleTh && (
-                          <td className={`p-1.5 font-bold truncate max-w-[120px] ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{title}</td>
+                          <td className={`p-1.5 font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+                            <div className="truncate">{title}</div>
+                            {(c.facultyCode || c.facultyTh) && (
+                              <div className="text-[9px] font-medium text-slate-400 truncate">
+                                {c.facultyTh || c.facultyCode} {c.universityCode ? `(${c.universityCode})` : ''}
+                              </div>
+                            )}
+                          </td>
                         )}
                         {currVisibleCols.actions && (
                           <td className="p-1.5 text-right whitespace-nowrap">
                             <button
-                              onClick={() => setEditingCurr({ id: c.id, code: c.code, titleTh: title, nameTh: title })}
+                              onClick={() => setEditingCurr({ id: c.id, code: c.code, titleTh: title, nameTh: title, universityCode: c.universityCode || 'MU', facultyCode: c.facultyCode || 'MT' })}
                               className="p-1 rounded text-purple-600 hover:bg-purple-500/10 cursor-pointer"
                             >
                               <Pencil className="w-3 h-3" />
@@ -1453,225 +1774,418 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
               </table>
             </div>
           </div>
+        </div>
+      </div>
 
-          {/* 2.3 Master Prefixes */}
-          <div className={`p-4 rounded-2xl border space-y-3 ${
-            isDarkMode ? 'bg-slate-800/40 border-slate-700/60' : 'bg-slate-50 border-slate-200'
-          }`}>
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className={`font-extrabold text-xs flex items-center space-x-1.5 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
-                <UserCheck className="w-4 h-4" />
-                <span>คำนำหน้าชื่อ ({sortedPrefixes.length})</span>
-              </span>
-              <div className="flex items-center space-x-1">
-                {/* Column Settings Button for Prefixes */}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowPrefixColPicker(!showPrefixColPicker)}
-                    className={`p-1 rounded-lg border text-[10px] font-bold transition cursor-pointer flex items-center space-x-1 ${
-                      showPrefixColPicker
-                        ? 'bg-emerald-600 text-white border-emerald-600'
-                        : isDarkMode
-                        ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                        : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
-                    }`}
-                    title="ตั้งค่าคอลัมน์"
-                  >
-                    <Sliders className="w-3 h-3" />
-                  </button>
-
-                  {showPrefixColPicker && (
-                    <div
-                      className={`absolute right-0 mt-2 w-52 p-2.5 rounded-xl shadow-xl border z-30 transition-all ${
-                        isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between pb-1.5 border-b border-slate-200 dark:border-slate-800 mb-2">
-                        <span className="text-[11px] font-black flex items-center space-x-1">
-                          <Sliders className="w-3 h-3 text-emerald-500" />
-                          <span>คอลัมน์คำนำหน้าชื่อ</span>
-                        </span>
-                        <button
-                          onClick={() => setShowPrefixColPicker(false)}
-                          className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-400"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-
-                      <div className="space-y-1">
-                        {PREFIX_COLUMN_CONFIG.map((col) => (
-                          <label
-                            key={col.key}
-                            className="flex items-center justify-between p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/60 cursor-pointer text-[11px] font-bold"
-                          >
-                            <span>{col.label}</span>
-                            <input
-                              type="checkbox"
-                              checked={!!prefixVisibleCols[col.key]}
-                              onChange={(e) =>
-                                setPrefixVisibleCols((prev) => ({
-                                  ...prev,
-                                  [col.key]: e.target.checked,
-                                }))
-                              }
-                              className="w-3.5 h-3.5 rounded text-emerald-600"
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  onClick={handleExportPrefixCSV}
-                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
-                  title="ส่งออก CSV คำนำหน้าชื่อ"
-                >
-                  <Download className="w-3 h-3" />
-                  <span>CSV</span>
-                </button>
-                <button
-                  onClick={() => setEditingPrefix({ titleTh: '', titleEn: '', category: 'ACADEMIC' })}
-                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>เพิ่ม</span>
-                </button>
-              </div>
+      {/* SECTION 3: PERSONAL MASTER DATA (PREFIXES / TITLES) */}
+      <div className={`p-6 rounded-3xl border shadow-xl space-y-6 ${
+        isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
+      }`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-500 shrink-0">
+              <UserCheck className="w-5 h-5 stroke-[2.2]" />
             </div>
-
-            <div className="overflow-x-auto max-h-72 overflow-y-auto">
-              <table className="w-full table-fixed text-left text-[11px] border-collapse">
-                <colgroup>
-                  {prefixVisibleCols.select && <col style={{ width: `${prefixColWidths.select}px` }} />}
-                  {prefixVisibleCols.index && <col style={{ width: `${prefixColWidths.index}px` }} />}
-                  {prefixVisibleCols.prefixTh && <col style={{ width: `${prefixColWidths.prefixTh}px` }} />}
-                  {prefixVisibleCols.prefixEn && <col style={{ width: `${prefixColWidths.prefixEn}px` }} />}
-                  {prefixVisibleCols.actions && <col style={{ width: `${prefixColWidths.actions}px` }} />}
-                </colgroup>
-                <thead>
-                  <tr className={`border-b ${isDarkMode ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700'}`}>
-                    {prefixVisibleCols.select && (
-                      <th className="p-1.5 text-center relative group select-none">
-                        <button
-                          onClick={() => {
-                            if (selectedPrefixIds.length === sortedPrefixes.length) setSelectedPrefixIds([]);
-                            else setSelectedPrefixIds(sortedPrefixes.map(p => p.id));
-                          }}
-                        >
-                          {selectedPrefixIds.length > 0 && selectedPrefixIds.length === sortedPrefixes.length ? (
-                            <CheckSquare className="w-3.5 h-3.5 text-emerald-500" />
-                          ) : (
-                            <Square className="w-3.5 h-3.5 text-slate-400" />
-                          )}
-                        </button>
-                        <div
-                          onMouseDown={(e) => handleMouseDownResizePrefix('select', e)}
-                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10"
-                        />
-                      </th>
-                    )}
-                    {prefixVisibleCols.index && (
-                      <th className="p-1.5 text-center font-bold text-slate-400 relative group select-none">
-                        #
-                        <div
-                          onMouseDown={(e) => handleMouseDownResizePrefix('index', e)}
-                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10"
-                        />
-                      </th>
-                    )}
-                    {prefixVisibleCols.prefixTh && (
-                      <th
-                        onClick={() => {
-                          if (prefixSortField === 'titleTh') setPrefixSortDir(prefixSortDir === 'asc' ? 'desc' : 'asc');
-                          else { setPrefixSortField('titleTh'); setPrefixSortDir('asc'); }
-                        }}
-                        className="p-1.5 font-extrabold cursor-pointer hover:opacity-80 select-none relative group pr-2 truncate"
-                      >
-                        ชื่อ (TH)
-                        <div
-                          onMouseDown={(e) => handleMouseDownResizePrefix('prefixTh', e)}
-                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10"
-                        />
-                      </th>
-                    )}
-                    {prefixVisibleCols.prefixEn && (
-                      <th
-                        onClick={() => {
-                          if (prefixSortField === 'category') setPrefixSortDir(prefixSortDir === 'asc' ? 'desc' : 'asc');
-                          else { setPrefixSortField('category'); setPrefixSortDir('asc'); }
-                        }}
-                        className="p-1.5 font-extrabold cursor-pointer hover:opacity-80 select-none relative group pr-2 truncate"
-                      >
-                        หมวด
-                        <div
-                          onMouseDown={(e) => handleMouseDownResizePrefix('prefixEn', e)}
-                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10"
-                        />
-                      </th>
-                    )}
-                    {prefixVisibleCols.actions && (
-                      <th className="p-1.5 text-right font-extrabold relative group select-none">
-                        จัดการ
-                        <div
-                          onMouseDown={(e) => handleMouseDownResizePrefix('actions', e)}
-                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10"
-                        />
-                      </th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className={`divide-y ${isDarkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
-                  {sortedPrefixes.map((p, idx) => {
-                    const isSelected = selectedPrefixIds.includes(p.id);
-                    return (
-                      <tr key={p.id} className={isSelected ? (isDarkMode ? 'bg-emerald-950/20' : 'bg-emerald-50') : ''}>
-                        {prefixVisibleCols.select && (
-                          <td className="p-1.5 text-center">
-                            <button
-                              onClick={(e) => handleToggleSelectPrefix(p.id, idx, e, sortedPrefixes)}
-                            >
-                              {isSelected ? <CheckSquare className="w-3.5 h-3.5 text-emerald-500" /> : <Square className="w-3.5 h-3.5 text-slate-400" />}
-                            </button>
-                          </td>
-                        )}
-                        {prefixVisibleCols.index && (
-                          <td className="p-1.5 text-center font-mono text-slate-400">{idx + 1}</td>
-                        )}
-                        {prefixVisibleCols.prefixTh && (
-                          <td className={`p-1.5 font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{p.titleTh}</td>
-                        )}
-                        {prefixVisibleCols.prefixEn && (
-                          <td className="p-1.5 font-mono text-[10px] text-slate-400">{p.category}</td>
-                        )}
-                        {prefixVisibleCols.actions && (
-                          <td className="p-1.5 text-right whitespace-nowrap">
-                            <button
-                              onClick={() => setEditingPrefix({ id: p.id, titleTh: p.titleTh, titleEn: p.titleEn, category: p.category })}
-                              className="p-1 rounded text-emerald-600 hover:bg-emerald-500/10 cursor-pointer"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                            <button
-                              onClick={() => handleDeletePrefixSubmit(p.id, p.titleTh)}
-                              className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div>
+              <h2 className={`text-base font-extrabold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                ส่วนที่ 3: จัดการ Master Data ข้อมูลส่วนบุคคล (คำนำหน้าชื่อ / ยศ / ตำแหน่งทางวิชาการ)
+              </h2>
+              <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                กำหนดและจัดการรายการคำนำหน้าชื่อ ยศ และตำแหน่งทางวิชาการมาตรฐานสำหรับใช้งานในระบบ
+              </p>
             </div>
           </div>
         </div>
+
+        {/* 3.1 Master Prefixes Card */}
+        <div className={`p-4 rounded-2xl border space-y-3 ${
+          isDarkMode ? 'bg-slate-800/40 border-slate-700/60' : 'bg-slate-50 border-slate-200'
+        }`}>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className={`font-extrabold text-xs flex items-center space-x-1.5 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
+              <UserCheck className="w-4 h-4" />
+              <span>คำนำหน้าชื่อ / ยศ / ตำแหน่งวิชาการ ({sortedPrefixes.length})</span>
+            </span>
+            <div className="flex items-center space-x-1">
+              {/* Column Settings Button for Prefixes */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowPrefixColPicker(!showPrefixColPicker)}
+                  className={`p-1 rounded-lg border text-[10px] font-bold transition cursor-pointer flex items-center space-x-1 ${
+                    showPrefixColPicker
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : isDarkMode
+                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                      : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                  }`}
+                  title="ตั้งค่าคอลัมน์"
+                >
+                  <Sliders className="w-3 h-3" />
+                </button>
+
+                {showPrefixColPicker && (
+                  <div
+                    className={`absolute right-0 mt-2 w-52 p-2.5 rounded-xl shadow-xl border z-30 transition-all ${
+                      isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between pb-1.5 border-b border-slate-200 dark:border-slate-800 mb-2">
+                      <span className="text-[11px] font-black flex items-center space-x-1">
+                        <Sliders className="w-3 h-3 text-emerald-500" />
+                        <span>คอลัมน์คำนำหน้าชื่อ</span>
+                      </span>
+                      <button
+                        onClick={() => setShowPrefixColPicker(false)}
+                        className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-400"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-1">
+                      {PREFIX_COLUMN_CONFIG.map((col) => (
+                        <label
+                          key={col.key}
+                          className="flex items-center justify-between p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/60 cursor-pointer text-[11px] font-bold"
+                        >
+                          <span>{col.label}</span>
+                          <input
+                            type="checkbox"
+                            checked={!!prefixVisibleCols[col.key]}
+                            onChange={(e) =>
+                              setPrefixVisibleCols((prev) => ({
+                                ...prev,
+                                [col.key]: e.target.checked,
+                              }))
+                            }
+                            className="w-3.5 h-3.5 rounded text-emerald-600"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={handleExportPrefixCSV}
+                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+                title="ส่งออก CSV คำนำหน้าชื่อ"
+              >
+                <Download className="w-3 h-3" />
+                <span>ส่งออก CSV</span>
+              </button>
+              <button
+                onClick={() => setEditingPrefix({ titleTh: '', titleEn: '', category: 'ACADEMIC' })}
+                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>เพิ่มคำนำหน้าชื่อ</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto max-h-80 overflow-y-auto">
+            <table className="w-full table-fixed text-left text-[11px] border-collapse">
+              <colgroup>
+                {prefixVisibleCols.select && <col style={{ width: `${prefixColWidths.select}px` }} />}
+                {prefixVisibleCols.index && <col style={{ width: `${prefixColWidths.index}px` }} />}
+                {prefixVisibleCols.prefixTh && <col style={{ width: `${prefixColWidths.prefixTh}px` }} />}
+                {prefixVisibleCols.prefixEn && <col style={{ width: `${prefixColWidths.prefixEn}px` }} />}
+                {prefixVisibleCols.actions && <col style={{ width: `${prefixColWidths.actions}px` }} />}
+              </colgroup>
+              <thead>
+                <tr className={`border-b ${isDarkMode ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700'}`}>
+                  {prefixVisibleCols.select && (
+                    <th className="p-1.5 text-center relative group select-none">
+                      <button
+                        onClick={() => {
+                          if (selectedPrefixIds.length === sortedPrefixes.length) setSelectedPrefixIds([]);
+                          else setSelectedPrefixIds(sortedPrefixes.map(p => p.id));
+                        }}
+                      >
+                        {selectedPrefixIds.length > 0 && selectedPrefixIds.length === sortedPrefixes.length ? (
+                          <CheckSquare className="w-3.5 h-3.5 text-emerald-500" />
+                        ) : (
+                          <Square className="w-3.5 h-3.5 text-slate-400" />
+                        )}
+                      </button>
+                      <div
+                        onMouseDown={(e) => handleMouseDownResizePrefix('select', e)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10"
+                      />
+                    </th>
+                  )}
+                  {prefixVisibleCols.index && (
+                    <th className="p-1.5 text-center font-bold text-slate-400 relative group select-none">
+                      #
+                      <div
+                        onMouseDown={(e) => handleMouseDownResizePrefix('index', e)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10"
+                      />
+                    </th>
+                  )}
+                  {prefixVisibleCols.prefixTh && (
+                    <th
+                      onClick={() => {
+                        if (prefixSortField === 'titleTh') setPrefixSortDir(prefixSortDir === 'asc' ? 'desc' : 'asc');
+                        else { setPrefixSortField('titleTh'); setPrefixSortDir('asc'); }
+                      }}
+                      className="p-1.5 font-extrabold cursor-pointer hover:opacity-80 select-none relative group pr-2 truncate"
+                    >
+                      คำนำหน้าชื่อ / ยศ (TH)
+                      <div
+                        onMouseDown={(e) => handleMouseDownResizePrefix('prefixTh', e)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10"
+                      />
+                    </th>
+                  )}
+                  {prefixVisibleCols.prefixEn && (
+                    <th
+                      onClick={() => {
+                        if (prefixSortField === 'category') setPrefixSortDir(prefixSortDir === 'asc' ? 'desc' : 'asc');
+                        else { setPrefixSortField('category'); setPrefixSortDir('asc'); }
+                      }}
+                      className="p-1.5 font-extrabold cursor-pointer hover:opacity-80 select-none relative group pr-2 truncate"
+                    >
+                      หมวดหมู่
+                      <div
+                        onMouseDown={(e) => handleMouseDownResizePrefix('prefixEn', e)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10"
+                      />
+                    </th>
+                  )}
+                  {prefixVisibleCols.actions && (
+                    <th className="p-1.5 text-right font-extrabold relative group select-none">
+                      จัดการ
+                      <div
+                        onMouseDown={(e) => handleMouseDownResizePrefix('actions', e)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group-hover:bg-sky-500/30 hover:!bg-sky-500 transition-colors z-10"
+                      />
+                    </th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${isDarkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
+                {sortedPrefixes.map((p, idx) => {
+                  const isSelected = selectedPrefixIds.includes(p.id);
+                  return (
+                    <tr key={p.id} className={isSelected ? (isDarkMode ? 'bg-emerald-950/20' : 'bg-emerald-50') : ''}>
+                      {prefixVisibleCols.select && (
+                        <td className="p-1.5 text-center">
+                          <button
+                            onClick={(e) => handleToggleSelectPrefix(p.id, idx, e, sortedPrefixes)}
+                          >
+                            {isSelected ? <CheckSquare className="w-3.5 h-3.5 text-emerald-500" /> : <Square className="w-3.5 h-3.5 text-slate-400" />}
+                          </button>
+                        </td>
+                      )}
+                      {prefixVisibleCols.index && (
+                        <td className="p-1.5 text-center font-mono text-slate-400">{idx + 1}</td>
+                      )}
+                      {prefixVisibleCols.prefixTh && (
+                        <td className={`p-1.5 font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{p.titleTh}</td>
+                      )}
+                      {prefixVisibleCols.prefixEn && (
+                        <td className="p-1.5 font-mono text-[10px] text-slate-400">{p.category}</td>
+                      )}
+                      {prefixVisibleCols.actions && (
+                        <td className="p-1.5 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => setEditingPrefix({ id: p.id, titleTh: p.titleTh, titleEn: p.titleEn, category: p.category })}
+                            className="p-1 rounded text-emerald-600 hover:bg-emerald-500/10 cursor-pointer"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => handleDeletePrefixSubmit(p.id, p.titleTh)}
+                            className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
+
+      {/* EDIT/ADD UNIV MODAL */}
+      {editingUniv && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className={`border rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl relative ${
+            isDarkMode ? 'bg-slate-900 border-sky-500/30 text-slate-100' : 'bg-white border-sky-200 text-slate-900'
+          }`}>
+            <h3 className={`text-base font-extrabold ${isDarkMode ? 'text-sky-400' : 'text-sky-700'}`}>
+              เพิ่ม/แก้ไข มหาวิทยาลัย
+            </h3>
+            <form onSubmit={handleSaveUnivSubmit} className="space-y-3 text-xs">
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>รหัสมหาวิทยาลัย (Code) *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingUniv.code || ''}
+                  onChange={(e) => setEditingUniv({ ...editingUniv, code: e.target.value })}
+                  placeholder="เช่น MU, KMUTT, CU"
+                  className={`w-full p-2.5 rounded-xl border font-mono ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>ชื่อมหาวิทยาลัย (ภาษาไทย) *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingUniv.nameTh || ''}
+                  onChange={(e) => setEditingUniv({ ...editingUniv, nameTh: e.target.value })}
+                  placeholder="เช่น มหาวิทยาลัยมหิดล"
+                  className={`w-full p-2.5 rounded-xl border ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>ชื่อมหาวิทยาลัย (ภาษาอังกฤษ)</label>
+                <input
+                  type="text"
+                  value={editingUniv.nameEn || ''}
+                  onChange={(e) => setEditingUniv({ ...editingUniv, nameEn: e.target.value })}
+                  placeholder="เช่น Mahidol University"
+                  className={`w-full p-2.5 rounded-xl border ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>ประเทศ</label>
+                <input
+                  type="text"
+                  value={editingUniv.country || 'Thailand'}
+                  onChange={(e) => setEditingUniv({ ...editingUniv, country: e.target.value })}
+                  placeholder="Thailand"
+                  className={`w-full p-2.5 rounded-xl border ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                  }`}
+                />
+              </div>
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingUniv(null)}
+                  className={`px-4 py-2 rounded-xl font-bold border cursor-pointer ${
+                    isDarkMode ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
+                  }`}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl font-extrabold text-white bg-sky-600 hover:bg-sky-500 cursor-pointer shadow-md shadow-sky-600/20"
+                >
+                  บันทึก
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT/ADD FAC MODAL */}
+      {editingFac && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className={`border rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl relative ${
+            isDarkMode ? 'bg-slate-900 border-indigo-500/30 text-slate-100' : 'bg-white border-indigo-200 text-slate-900'
+          }`}>
+            <h3 className={`text-base font-extrabold ${isDarkMode ? 'text-indigo-400' : 'text-indigo-700'}`}>
+              เพิ่ม/แก้ไข คณะ/หน่วยงาน
+            </h3>
+            <form onSubmit={handleSaveFacSubmit} className="space-y-3 text-xs">
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>สังกัดมหาวิทยาลัย</label>
+                <select
+                  value={editingFac.universityCode || 'MU'}
+                  onChange={(e) => setEditingFac({ ...editingFac, universityCode: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border font-bold ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  {masterUnivs.length > 0 ? (
+                    masterUnivs.map((u) => (
+                      <option key={u.id} value={u.code}>
+                        {u.nameTh} ({u.code})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="MU">มหาวิทยาลัยมหิดล (MU)</option>
+                  )}
+                </select>
+              </div>
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>รหัสคณะ/หน่วยงาน (Code) *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingFac.code || ''}
+                  onChange={(e) => setEditingFac({ ...editingFac, code: e.target.value })}
+                  placeholder="เช่น MT, ENG, SC"
+                  className={`w-full p-2.5 rounded-xl border font-mono ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>ชื่อคณะ/หน่วยงาน (ภาษาไทย) *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingFac.nameTh || ''}
+                  onChange={(e) => setEditingFac({ ...editingFac, nameTh: e.target.value })}
+                  placeholder="เช่น คณะเทคนิคการแพทย์"
+                  className={`w-full p-2.5 rounded-xl border ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>ชื่อคณะ/หน่วยงาน (ภาษาอังกฤษ)</label>
+                <input
+                  type="text"
+                  value={editingFac.nameEn || ''}
+                  onChange={(e) => setEditingFac({ ...editingFac, nameEn: e.target.value })}
+                  placeholder="เช่น Faculty of Medical Technology"
+                  className={`w-full p-2.5 rounded-xl border ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                  }`}
+                />
+              </div>
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingFac(null)}
+                  className={`px-4 py-2 rounded-xl font-bold border cursor-pointer ${
+                    isDarkMode ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
+                  }`}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl font-extrabold text-white bg-indigo-600 hover:bg-indigo-500 cursor-pointer shadow-md shadow-indigo-600/20"
+                >
+                  บันทึก
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* EDIT/ADD DEPT MODAL */}
       {editingDept && (
@@ -1684,26 +2198,101 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
             </h3>
             <form onSubmit={handleSaveDeptSubmit} className="space-y-3 text-xs">
               <div>
-                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>รหัสสาขา (Code) *</label>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>สังกัดมหาวิทยาลัย</label>
+                <select
+                  value={editingDept.universityCode || 'MU'}
+                  onChange={(e) => {
+                    const uCode = e.target.value;
+                    const uObj = masterUnivs.find((u) => u.code === uCode);
+                    const matchingFacs = masterFacs.filter((f) => !f.universityCode || f.universityCode === uCode);
+                    const defaultFac = matchingFacs[0]?.code || masterFacs[0]?.code || 'MT';
+                    setEditingDept({
+                      ...editingDept,
+                      universityCode: uCode,
+                      universityTh: uObj?.nameTh,
+                      facultyCode: defaultFac,
+                    });
+                  }}
+                  className={`w-full p-2.5 rounded-xl border font-bold ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  {masterUnivs.length > 0 ? (
+                    masterUnivs.map((u) => (
+                      <option key={u.id} value={u.code}>
+                        {u.nameTh} ({u.code})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="MU">มหาวิทยาลัยมหิดล (MU)</option>
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>สังกัดคณะ / หน่วยงาน</label>
+                <select
+                  value={editingDept.facultyCode || 'MT'}
+                  onChange={(e) => {
+                    const fCode = e.target.value;
+                    const fObj = masterFacs.find((f) => f.code === fCode);
+                    setEditingDept({
+                      ...editingDept,
+                      facultyCode: fCode,
+                      facultyTh: fObj?.nameTh,
+                    });
+                  }}
+                  className={`w-full p-2.5 rounded-xl border font-bold ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  {masterFacs.length > 0 ? (
+                    masterFacs.map((f) => (
+                      <option key={f.id} value={f.code}>
+                        {f.nameTh} ({f.code})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="MT">คณะเทคนิคการแพทย์ (MT)</option>
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>รหัสสาขา/ภาควิชา (Code) *</label>
                 <input
                   type="text"
                   required
                   value={editingDept.code || ''}
                   onChange={(e) => setEditingDept({ ...editingDept, code: e.target.value })}
-                  placeholder="เช่น CPE"
+                  placeholder="เช่น CH, CM, RT, MI, MS"
                   className={`w-full p-2.5 rounded-xl border font-mono ${
                     isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
                   }`}
                 />
               </div>
+
               <div>
-                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>ชื่อสาขา (ภาษาไทย) *</label>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>ชื่อสาขา / ภาควิชา (ภาษาไทย) *</label>
                 <input
                   type="text"
                   required
                   value={editingDept.nameTh || ''}
                   onChange={(e) => setEditingDept({ ...editingDept, nameTh: e.target.value })}
-                  placeholder="เช่น วิศวกรรมคอมพิวเตอร์"
+                  placeholder="เช่น ภาควิชาเคมีคลินิก"
+                  className={`w-full p-2.5 rounded-xl border ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>ชื่อสาขา / ภาควิชา (ภาษาอังกฤษ)</label>
+                <input
+                  type="text"
+                  value={editingDept.nameEn || ''}
+                  onChange={(e) => setEditingDept({ ...editingDept, nameEn: e.target.value })}
+                  placeholder="เช่น Department of Clinical Chemistry"
                   className={`w-full p-2.5 rounded-xl border ${
                     isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
                   }`}
@@ -1747,6 +2336,67 @@ export const AdminSystemTab: React.FC<AdminSystemTabProps> = ({
               เพิ่ม/แก้ไข หลักสูตร
             </h3>
             <form onSubmit={handleSaveCurrSubmit} className="space-y-3 text-xs">
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>สังกัดมหาวิทยาลัย</label>
+                <select
+                  value={editingCurr.universityCode || 'MU'}
+                  onChange={(e) => {
+                    const uCode = e.target.value;
+                    const uObj = masterUnivs.find((u) => u.code === uCode);
+                    const matchingFacs = masterFacs.filter((f) => !f.universityCode || f.universityCode === uCode);
+                    const defaultFac = matchingFacs[0]?.code || masterFacs[0]?.code || 'MT';
+                    setEditingCurr({
+                      ...editingCurr,
+                      universityCode: uCode,
+                      universityTh: uObj?.nameTh,
+                      facultyCode: defaultFac,
+                    });
+                  }}
+                  className={`w-full p-2.5 rounded-xl border font-bold ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  {masterUnivs.length > 0 ? (
+                    masterUnivs.map((u) => (
+                      <option key={u.id} value={u.code}>
+                        {u.nameTh} ({u.code})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="MU">มหาวิทยาลัยมหิดล (MU)</option>
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>สังกัดคณะ / หน่วยงาน</label>
+                <select
+                  value={editingCurr.facultyCode || 'MT'}
+                  onChange={(e) => {
+                    const fCode = e.target.value;
+                    const fObj = masterFacs.find((f) => f.code === fCode);
+                    setEditingCurr({
+                      ...editingCurr,
+                      facultyCode: fCode,
+                      facultyTh: fObj?.nameTh,
+                    });
+                  }}
+                  className={`w-full p-2.5 rounded-xl border font-bold ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  {masterFacs.length > 0 ? (
+                    masterFacs.map((f) => (
+                      <option key={f.id} value={f.code}>
+                        {f.nameTh} ({f.code})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="MT">คณะเทคนิคการแพทย์ (MT)</option>
+                  )}
+                </select>
+              </div>
+
               <div>
                 <label className={`block font-bold mb-1 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>รหัสหลักสูตร (Code) *</label>
                 <input

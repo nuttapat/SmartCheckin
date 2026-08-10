@@ -161,9 +161,31 @@ export const TeacherInviteModal: React.FC<TeacherInviteModalProps> = ({
     setTimeout(() => setCopied(false), 2500);
   };
 
-  const currentTeacherMembers = (courseMembers || []).filter(
+  const rawTeacherMembers = (courseMembers || []).filter(
     (m) => m && m.role !== CourseMemberRole.STUDENT && m.userId !== course.ownerId
   );
+
+  const teacherMap = new Map<string, CourseMember>();
+  const rolePriority: Record<string, number> = {
+    [CourseMemberRole.COORDINATOR]: 4,
+    [CourseMemberRole.CO_TEACHER]: 3,
+    [CourseMemberRole.CO_COORDINATOR]: 3,
+    [CourseMemberRole.INSTRUCTOR]: 2,
+  };
+
+  for (const m of rawTeacherMembers) {
+    const key = m.userId || (m.user ? `${m.user.firstNameTh}_${m.user.lastNameTh}` : m.id);
+    if (!teacherMap.has(key)) {
+      teacherMap.set(key, m);
+    } else {
+      const existing = teacherMap.get(key)!;
+      if ((rolePriority[m.role] || 0) > (rolePriority[existing.role] || 0)) {
+        teacherMap.set(key, m);
+      }
+    }
+  }
+
+  const currentTeacherMembers = Array.from(teacherMap.values());
 
   const filteredTeachers = teachers.filter((t) => {
     const fullName = `${t.title || ''} ${t.firstNameTh} ${t.lastNameTh} ${t.email}`.toLowerCase();
@@ -527,96 +549,103 @@ export const TeacherInviteModal: React.FC<TeacherInviteModalProps> = ({
             </div>
           )}
 
+          {/* Course Creator Banner */}
+          {(course.ownerName || course.coordinatorName) && (
+            <div className={`p-3.5 rounded-2xl border flex items-center justify-between ${
+              isDarkMode ? 'bg-sky-950/40 border-sky-800/80 text-sky-200' : 'bg-sky-50/90 border-sky-200 text-sky-900'
+            }`}>
+              <div className="flex items-center space-x-3">
+                <div className="w-9 h-9 rounded-xl bg-sky-600 text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-xs">
+                  🛠️
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-bold flex items-center space-x-2">
+                    <span>{course.ownerName || course.coordinatorName}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-md font-extrabold bg-sky-600 text-white">
+                      🛠️ ผู้สร้างรายวิชา (Course Creator)
+                    </span>
+                  </div>
+                  <p className={`text-xs font-medium ${isDarkMode ? 'text-sky-300/80' : 'text-sky-700'}`}>
+                    ผู้สร้างรายวิชาในระบบ (อำนาจจัดการคอร์สสิทธิ์สูงสุด)
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Current Instructors List */}
           <div className={`pt-3 border-t space-y-3 ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
             <h3 className={`text-xs font-extrabold flex items-center justify-between uppercase tracking-wider ${
               isDarkMode ? 'text-slate-300' : 'text-slate-700'
             }`}>
-              <span>อาจารย์ผู้สอนทั้งหมดในรายวิชา ({currentTeacherMembers.length + 1} ท่าน)</span>
+              <span>อาจารย์ผู้สอนทั้งหมดในรายวิชา ({currentTeacherMembers.length} ท่าน)</span>
             </h3>
 
             <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-              {/* Owner */}
-              <div className={`p-3 rounded-xl border flex items-center justify-between ${
-                isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-sky-50 border-sky-200'
-              }`}>
-                <div className="flex items-center space-x-3">
-                  <div className="w-9 h-9 rounded-xl bg-sky-600 text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-xs">
-                    👑
-                  </div>
-                  <div>
-                    <div className={`text-xs sm:text-sm font-bold flex items-center space-x-2 ${
-                      isDarkMode ? 'text-white' : 'text-slate-900'
-                    }`}>
-                      <span>{course.coordinatorName || course.ownerName}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-md font-extrabold bg-sky-600 text-white">
-                        👑 ผู้สร้างรายวิชา (Course Creator)
-                      </span>
-                    </div>
-                    <p className={`text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                      อำนาจจัดการคอร์สทั้งหมด (ไม่สามารถโอนย้ายได้ยกเว้นโดย Admin)
-                    </p>
-                  </div>
+              {currentTeacherMembers.length === 0 ? (
+                <div className={`p-4 rounded-xl border text-center text-xs font-medium ${
+                  isDarkMode ? 'bg-slate-800/30 border-slate-700/60 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'
+                }`}>
+                  ยังไม่มีการเชิญอาจารย์ผู้สอนเพิ่มเติมในรายวิชา
                 </div>
-              </div>
+              ) : (
+                currentTeacherMembers.map((m) => {
+                  const teacherName = m.user
+                    ? `${m.user.title || ''} ${m.user.firstNameTh} ${m.user.lastNameTh}`
+                    : `อาจารย์ (${m.userId})`;
+                  const roleMeta = getRoleLabel(m.role);
 
-              {/* Other Teaching Members */}
-              {currentTeacherMembers.map((m) => {
-                const teacherName = m.user
-                  ? `${m.user.title || ''} ${m.user.firstNameTh} ${m.user.lastNameTh}`
-                  : `อาจารย์ (${m.userId})`;
-                const roleMeta = getRoleLabel(m.role);
-
-                return (
-                  <div
-                    key={m.id}
-                    className={`p-3 rounded-xl border flex items-center justify-between ${
-                      isDarkMode ? 'bg-slate-800/60 border-slate-700/80' : 'bg-slate-50 border-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-3 min-w-0">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm shrink-0 border ${
-                        isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
-                      }`}>
-                        {roleMeta.icon}
-                      </div>
-                      <div className="min-w-0">
-                        <div className={`text-xs sm:text-sm font-bold truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                          {teacherName}
+                  return (
+                    <div
+                      key={m.id}
+                      className={`p-3 rounded-xl border flex items-center justify-between ${
+                        isDarkMode ? 'bg-slate-800/60 border-slate-700/80' : 'bg-slate-50 border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm shrink-0 border ${
+                          isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
+                        }`}>
+                          {roleMeta.icon}
                         </div>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-md font-extrabold border inline-block mt-0.5 ${roleMeta.color}`}>
-                          {roleMeta.label}
-                        </span>
+                        <div className="min-w-0">
+                          <div className={`text-xs sm:text-sm font-bold truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                            {teacherName}
+                          </div>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-md font-extrabold border inline-block mt-0.5 ${roleMeta.color}`}>
+                            {roleMeta.label}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Actions if current user is owner or coordinator */}
+                      <div className="flex items-center space-x-2 shrink-0">
+                        <select
+                          value={m.role}
+                          onChange={(e) => handleRoleChange(m.id, e.target.value as CourseMemberRole)}
+                          className={`text-xs font-bold p-1.5 rounded-lg border focus:outline-none focus:border-sky-500 ${
+                            isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                          }`}
+                        >
+                          <option value={CourseMemberRole.COORDINATOR}>👑 ผู้รับผิดชอบรายวิชา</option>
+                          <option value={CourseMemberRole.CO_COORDINATOR}>🤝 ผู้ร่วมรับผิดชอบรายวิชา</option>
+                          <option value={CourseMemberRole.INSTRUCTOR}>👨‍🏫 อาจารย์ผู้สอน</option>
+                        </select>
+
+                        <button
+                          onClick={() => handleRemoveMember(m.id, teacherName)}
+                          className={`p-1.5 rounded-lg transition cursor-pointer shrink-0 ${
+                            isDarkMode ? 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/20' : 'text-slate-500 hover:text-rose-600 hover:bg-rose-50'
+                          }`}
+                          title="ลบออกจากรายวิชา"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
-
-                    {/* Actions if current user is owner or coordinator */}
-                    <div className="flex items-center space-x-2 shrink-0">
-                      <select
-                        value={m.role}
-                        onChange={(e) => handleRoleChange(m.id, e.target.value as CourseMemberRole)}
-                        className={`text-xs font-bold p-1.5 rounded-lg border focus:outline-none focus:border-sky-500 ${
-                          isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                        }`}
-                      >
-                        <option value={CourseMemberRole.COORDINATOR}>👑 ผู้รับผิดชอบรายวิชา</option>
-                        <option value={CourseMemberRole.CO_COORDINATOR}>🤝 ผู้ร่วมรับผิดชอบรายวิชา</option>
-                        <option value={CourseMemberRole.INSTRUCTOR}>👨‍🏫 อาจารย์ผู้สอน</option>
-                      </select>
-
-                      <button
-                        onClick={() => handleRemoveMember(m.id, teacherName)}
-                        className={`p-1.5 rounded-lg transition cursor-pointer shrink-0 ${
-                          isDarkMode ? 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/20' : 'text-slate-500 hover:text-rose-600 hover:bg-rose-50'
-                        }`}
-                        title="ลบออกจากรายวิชา"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
         </div>

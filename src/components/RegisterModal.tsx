@@ -1,9 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { UserRole, User } from '../types';
-import { registerUser, googleLogin, fetchSystemSettings } from '../services/api';
+import { UserRole, User, MasterUniversity, MasterFaculty, MasterDepartment, MasterCurriculum } from '../types';
+import {
+  registerUser,
+  googleLogin,
+  fetchSystemSettings,
+  fetchMasterUniversities,
+  fetchMasterFaculties,
+  fetchMasterDepartments,
+  fetchMasterCurriculums,
+} from '../services/api';
 import { signInWithGooglePopup } from '../lib/firebaseStore';
 import { getDeviceInfo } from '../utils/deviceHelper';
-import { X, UserCheck, Mail, ShieldAlert, Smartphone, CheckCircle2, Lock, Eye, EyeOff } from 'lucide-react';
+import { X, UserCheck, Mail, ShieldAlert, Smartphone, CheckCircle2, Lock, Eye, EyeOff, Building2, GraduationCap, BookOpen, Layers } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 interface RegisterModalProps {
@@ -34,9 +42,48 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
   const [googleLoading, setGoogleLoading] = useState<boolean>(false);
   const [sysSettings, setSysSettings] = useState<any>(null);
 
+  // Master Data State
+  const [universities, setUniversities] = useState<MasterUniversity[]>([]);
+  const [faculties, setFaculties] = useState<MasterFaculty[]>([]);
+  const [departments, setDepartments] = useState<MasterDepartment[]>([]);
+  const [curriculums, setCurriculums] = useState<MasterCurriculum[]>([]);
+
+  // Selected Organization Hierarchy State
+  const [universityCode, setUniversityCode] = useState<string>('MU');
+  const [facultyCode, setFacultyCode] = useState<string>('MT');
+  const [departmentCode, setDepartmentCode] = useState<string>('');
+  const [programCode, setProgramCode] = useState<string>('');
+  const [branchName, setBranchName] = useState<string>('');
+  const [affiliatedPrograms, setAffiliatedPrograms] = useState<string[]>([]);
+
   useEffect(() => {
     if (isOpen) {
       fetchSystemSettings().then(setSysSettings).catch(() => {});
+      
+      // Load master data
+      Promise.all([
+        fetchMasterUniversities().catch(() => []),
+        fetchMasterFaculties().catch(() => []),
+        fetchMasterDepartments().catch(() => []),
+        fetchMasterCurriculums().catch(() => []),
+      ]).then(([univRes, facRes, depRes, currRes]) => {
+        const uList = Array.isArray(univRes) ? univRes : (univRes.universities || []);
+        const fList = Array.isArray(facRes) ? facRes : (facRes.faculties || []);
+        const dList = Array.isArray(depRes) ? depRes : (depRes.departments || []);
+        const cList = Array.isArray(currRes) ? currRes : (currRes.curriculums || []);
+
+        setUniversities(uList);
+        setFaculties(fList);
+        setDepartments(dList);
+        setCurriculums(cList);
+
+        if (uList.length > 0 && !uList.some((u: any) => u.code === universityCode)) {
+          setUniversityCode(uList[0].code);
+        }
+        if (fList.length > 0 && !fList.some((f: any) => f.code === facultyCode)) {
+          setFacultyCode(fList[0].code);
+        }
+      });
     }
   }, [isOpen]);
 
@@ -191,9 +238,15 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
       return;
     }
 
-    if (role === UserRole.STUDENT && !universityId.trim()) {
-      setErrorMsg('กรุณากรอกรหัสนักศึกษา');
-      return;
+    if (role === UserRole.STUDENT) {
+      if (!universityId.trim()) {
+        setErrorMsg('กรุณากรอกรหัสนักศึกษา');
+        return;
+      }
+      if (!programCode) {
+        setErrorMsg('กรุณาเลือกหลักสูตรการศึกษาจากรายการในระบบ');
+        return;
+      }
     }
 
     const cleanEmail = email.trim().toLowerCase();
@@ -228,6 +281,12 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
     const finalFirstNameEn = firstNameEn.trim() || firstNameTh.trim();
     const finalLastNameEn = lastNameEn.trim() || lastNameTh.trim();
 
+    // Resolve Names from Master Lists
+    const currentUnivObj = universities.find((u) => u.code === universityCode);
+    const currentFacultyObj = faculties.find((f) => f.code === facultyCode);
+    const currentDeptObj = departments.find((d) => d.code === departmentCode);
+    const currentProgObj = curriculums.find((c) => c.code === programCode);
+
     try {
       setLoading(true);
       const res = await registerUser({
@@ -241,6 +300,16 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
         email: cleanEmail,
         password: password,
         deviceId: deviceFingerprint,
+        universityCode,
+        universityName: currentUnivObj ? currentUnivObj.nameTh : 'มหาวิทยาลัยมหิดล',
+        facultyCode,
+        facultyName: currentFacultyObj ? currentFacultyObj.nameTh : 'คณะเทคนิคการแพทย์',
+        departmentCode,
+        departmentName: currentDeptObj ? currentDeptObj.nameTh : '',
+        branchName: branchName.trim(),
+        programCode: role === UserRole.STUDENT ? programCode : '',
+        programName: role === UserRole.STUDENT && currentProgObj ? currentProgObj.nameTh : '',
+        affiliatedPrograms: role === UserRole.TEACHER ? affiliatedPrograms : [],
       });
 
       onSuccess(res.user);
@@ -503,6 +572,181 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
                 }`}
               />
             </div>
+          </div>
+
+          {/* Organization Hierarchy Section */}
+          <div className={`p-3.5 border rounded-2xl space-y-3 ${
+            isDarkMode ? 'bg-slate-800/40 border-slate-700/80' : 'bg-slate-50 border-slate-200'
+          }`}>
+            <div className="flex items-center space-x-2 text-xs font-bold text-sky-500">
+              <Building2 className="w-4 h-4" />
+              <span>
+                {role === UserRole.STUDENT
+                  ? 'ข้อมูลสังกัดและหลักสูตรการศึกษา (บังคับเลือกจากรายการในระบบ)'
+                  : 'ข้อมูลการทำงานและสังกัดอาจารย์'}
+              </span>
+            </div>
+
+            {/* University & Faculty */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  1. มหาวิทยาลัย (University) <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={universityCode}
+                  onChange={(e) => {
+                    setUniversityCode(e.target.value);
+                  }}
+                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                  }`}
+                >
+                  {universities.map((u) => (
+                    <option key={u.id || u.code} value={u.code}>
+                      {u.nameTh} ({u.code})
+                    </option>
+                  ))}
+                  {universities.length === 0 && (
+                    <option value="MU">มหาวิทยาลัยมหิดล (MU)</option>
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  2. คณะ / หน่วยงาน (Faculty) <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={facultyCode}
+                  onChange={(e) => {
+                    setFacultyCode(e.target.value);
+                  }}
+                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                  }`}
+                >
+                  {faculties
+                    .filter((f) => !f.universityCode || f.universityCode === universityCode)
+                    .map((f) => (
+                      <option key={f.id || f.code} value={f.code}>
+                        {f.nameTh} ({f.code})
+                      </option>
+                    ))}
+                  {faculties.length === 0 && (
+                    <option value="MT">คณะเทคนิคการแพทย์ (MT)</option>
+                  )}
+                </select>
+              </div>
+            </div>
+
+            {/* Department */}
+            <div>
+              <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                3. ภาควิชา (Department)
+              </label>
+              <select
+                value={departmentCode}
+                onChange={(e) => setDepartmentCode(e.target.value)}
+                className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                  isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                }`}
+              >
+                <option value="">-- ไม่ระบุ / ไม่สังกัดภาควิชา --</option>
+                {departments
+                  .filter((d) => !d.facultyCode || d.facultyCode === facultyCode)
+                  .map((d) => (
+                    <option key={d.id || d.code} value={d.code}>
+                      {d.nameTh} ({d.code})
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {/* Role-Specific Selection */}
+            {role === UserRole.STUDENT ? (
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  4. หลักสูตรการศึกษา (Curriculum / Program) <span className="text-rose-500">* (ต้องเลือกจากรายการในระบบ)</span>
+                </label>
+                <select
+                  value={programCode}
+                  onChange={(e) => setProgramCode(e.target.value)}
+                  required
+                  className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 font-medium ${
+                    isDarkMode ? 'bg-slate-800 border-slate-700 text-sky-300' : 'bg-white border-slate-300 text-sky-800 shadow-sm'
+                  }`}
+                >
+                  <option value="">-- กรุณาเลือกหลักสูตรที่กำลังศึกษา --</option>
+                  {curriculums
+                    .filter((c) => !facultyCode || !c.facultyCode || c.facultyCode === facultyCode)
+                    .map((c) => (
+                      <option key={c.id || c.code} value={c.code}>
+                        {c.nameTh} ({c.code}) - {c.degreeLevel || 'ปริญญาตรี'}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    4. แขนงวิชา (Branch / Major - optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="เช่น เทคนิคการแพทย์, รังสีเทคนิค"
+                    value={branchName}
+                    onChange={(e) => setBranchName(e.target.value)}
+                    className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className={`block text-xs font-semibold mb-1.5 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    5. หลักสูตรที่สังกัด / รับผิดชอบ (เลือกได้มากกว่า 1 หลักสูตร)
+                  </label>
+                  <div className={`p-2.5 border rounded-xl max-h-36 overflow-y-auto space-y-1.5 ${
+                    isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
+                  }`}>
+                    {curriculums.map((c) => {
+                      const isChecked = affiliatedPrograms.includes(c.code) || affiliatedPrograms.includes(c.nameTh);
+                      return (
+                        <label
+                          key={c.id || c.code}
+                          className={`flex items-center space-x-2 text-xs p-1.5 rounded-lg cursor-pointer transition ${
+                            isChecked
+                              ? isDarkMode ? 'bg-sky-500/20 text-sky-300' : 'bg-sky-50 text-sky-900 font-bold'
+                              : isDarkMode ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setAffiliatedPrograms([...affiliatedPrograms, c.code]);
+                              } else {
+                                setAffiliatedPrograms(affiliatedPrograms.filter((p) => p !== c.code && p !== c.nameTh));
+                              }
+                            }}
+                            className="rounded border-slate-400 text-sky-600 focus:ring-sky-500"
+                          />
+                          <span>{c.nameTh} ({c.code})</span>
+                        </label>
+                      );
+                    })}
+                    {curriculums.length === 0 && (
+                      <p className={`text-[11px] italic p-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                        ไม่พบรายการหลักสูตรในระบบ (ผู้ดูแลระบบสามารถเพิ่มหลักสูตรได้ใน Admin Settings)
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Personal Email */}

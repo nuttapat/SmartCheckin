@@ -1,8 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { User, UserRole, UserDevice } from '../types';
-import { updateUserProfile, getUserDevices, bindUserDeviceApi, deleteUserDeviceApi, resetUserDevice } from '../services/api';
+import { User, UserRole, UserDevice, MasterUniversity, MasterFaculty, MasterDepartment, MasterCurriculum } from '../types';
+import {
+  updateUserProfile,
+  getUserDevices,
+  bindUserDeviceApi,
+  deleteUserDeviceApi,
+  resetUserDevice,
+  fetchMasterUniversities,
+  fetchMasterFaculties,
+  fetchMasterDepartments,
+  fetchMasterCurriculums,
+} from '../services/api';
 import { getDeviceInfo, DeviceInfo } from '../utils/deviceHelper';
-import { X, User as UserIcon, Lock, Shield, ShieldCheck, CheckCircle2, ShieldAlert, Eye, EyeOff, KeyRound, Smartphone, Mail, MapPin, Globe, Tablet, Monitor, Sun, Moon, Trash2, Plus, RefreshCw, AlertCircle, Check, Info, Maximize2, Minimize2 } from 'lucide-react';
+import { X, User as UserIcon, Lock, Shield, ShieldCheck, CheckCircle2, ShieldAlert, Eye, EyeOff, KeyRound, Smartphone, Mail, MapPin, Globe, Tablet, Monitor, Sun, Moon, Trash2, Plus, RefreshCw, AlertCircle, Check, Info, Maximize2, Minimize2, Building2 } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { useTheme } from '../context/ThemeContext';
 
@@ -42,6 +52,20 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   const [firstNameEn, setFirstNameEn] = useState<string>(currentUser.firstNameEn || '');
   const [lastNameEn, setLastNameEn] = useState<string>(currentUser.lastNameEn || '');
   const [universityId, setUniversityId] = useState<string>(currentUser.universityId || '');
+
+  // Master Data State
+  const [universities, setUniversities] = useState<MasterUniversity[]>([]);
+  const [faculties, setFaculties] = useState<MasterFaculty[]>([]);
+  const [departments, setDepartments] = useState<MasterDepartment[]>([]);
+  const [curriculums, setCurriculums] = useState<MasterCurriculum[]>([]);
+
+  // Selected Organization Hierarchy State
+  const [universityCode, setUniversityCode] = useState<string>(currentUser.universityCode || 'MU');
+  const [facultyCode, setFacultyCode] = useState<string>(currentUser.facultyCode || 'MT');
+  const [departmentCode, setDepartmentCode] = useState<string>(currentUser.departmentCode || '');
+  const [programCode, setProgramCode] = useState<string>(currentUser.programCode || '');
+  const [branchName, setBranchName] = useState<string>(currentUser.branchName || '');
+  const [affiliatedPrograms, setAffiliatedPrograms] = useState<string[]>(currentUser.affiliatedPrograms || []);
 
   // GPS state
   const [userLat, setUserLat] = useState<number>(13.7988363);
@@ -100,6 +124,20 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
 
     if (isOpen && currentUser) {
       setCurrentDevInfo(getDeviceInfo());
+
+      // Fetch Master Lists
+      Promise.all([
+        fetchMasterUniversities().catch(() => []),
+        fetchMasterFaculties().catch(() => []),
+        fetchMasterDepartments().catch(() => []),
+        fetchMasterCurriculums().catch(() => []),
+      ]).then(([univRes, facRes, depRes, currRes]) => {
+        setUniversities(Array.isArray(univRes) ? univRes : (univRes.universities || []));
+        setFaculties(Array.isArray(facRes) ? facRes : (facRes.faculties || []));
+        setDepartments(Array.isArray(depRes) ? depRes : (depRes.departments || []));
+        setCurriculums(Array.isArray(currRes) ? currRes : (currRes.curriculums || []));
+      });
+
       const knownTitles = currentUser.role === UserRole.STUDENT 
         ? ['นาย', 'นางสาว', 'นาง'] 
         : ['อ.', 'ดร.', 'ผศ.', 'ผศ.ดร.', 'รศ.', 'รศ.ดร.', 'ศ.', 'ศ.ดร.', 'นาย', 'นางสาว'];
@@ -118,9 +156,18 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
       setLastNameEn(currentUser.lastNameEn || '');
       setUniversityId(currentUser.universityId || '');
 
+      setUniversityCode(currentUser.universityCode || 'MU');
+      setFacultyCode(currentUser.facultyCode || 'MT');
+      setDepartmentCode(currentUser.departmentCode || '');
+      setProgramCode(currentUser.programCode || '');
+      setBranchName(currentUser.branchName || '');
+      setAffiliatedPrograms(currentUser.affiliatedPrograms || []);
+
       loadDevices();
     }
   }, [currentUser, isOpen]);
+
+  const modalBodyRef = React.useRef<HTMLDivElement>(null);
 
   if (!isOpen) return null;
 
@@ -132,18 +179,34 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     const finalTitle = titleOption === 'OTHER' ? customTitle.trim() : titleOption;
     if (!finalTitle) {
       setErrorMsg('กรุณาระบุคำนำหน้าชื่อ');
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
     if (!firstNameTh.trim() || !lastNameTh.trim()) {
       setErrorMsg('กรุณากรอกชื่อและนามสกุลภาษาไทย');
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
-    if (currentUser.role === UserRole.STUDENT && !universityId.trim()) {
-      setErrorMsg('กรุณากรอกรหัสนักศึกษา');
-      return;
+    if (currentUser.role === UserRole.STUDENT) {
+      if (!universityId.trim()) {
+        setErrorMsg('กรุณากรอกรหัสนักศึกษา');
+        modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      if (!programCode) {
+        setErrorMsg('กรุณาเลือกหลักสูตรการศึกษาจากรายการในระบบ');
+        modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
     }
+
+    // Resolve Names from Master Lists
+    const currentUnivObj = universities.find((u) => u.code === universityCode);
+    const currentFacultyObj = faculties.find((f) => f.code === facultyCode);
+    const currentDeptObj = departments.find((d) => d.code === departmentCode);
+    const currentProgObj = curriculums.find((c) => c.code === programCode);
 
     try {
       setLoading(true);
@@ -154,13 +217,25 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
         firstNameEn: firstNameEn.trim() || firstNameTh.trim(),
         lastNameEn: lastNameEn.trim() || lastNameTh.trim(),
         universityId: universityId.trim(),
+        universityCode,
+        universityName: currentUnivObj ? currentUnivObj.nameTh : (currentUser.universityName || 'มหาวิทยาลัยมหิดล'),
+        facultyCode,
+        facultyName: currentFacultyObj ? currentFacultyObj.nameTh : (currentUser.facultyName || 'คณะเทคนิคการแพทย์'),
+        departmentCode,
+        departmentName: currentDeptObj ? currentDeptObj.nameTh : '',
+        branchName: branchName.trim(),
+        programCode: currentUser.role === UserRole.STUDENT ? programCode : '',
+        programName: currentUser.role === UserRole.STUDENT && currentProgObj ? currentProgObj.nameTh : '',
+        affiliatedPrograms: isTeacherOrAdmin ? affiliatedPrograms : [],
       });
 
       onUpdateUser(res.user);
       setSuccessMsg('อัปเดตข้อมูลส่วนตัวเรียบร้อยแล้ว');
-      setTimeout(() => setSuccessMsg(''), 4000);
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err: any) {
       setErrorMsg(err.message || 'ไม่สามารถบันทึกข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setLoading(false);
     }
@@ -175,16 +250,19 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
 
     if (!isPasswordNotRequired && !currentPassword) {
       setErrorMsg('กรุณากรอกรหัสผ่านปัจจุบัน');
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
     if (!newPassword || newPassword.length < 6) {
       setErrorMsg('รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร');
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
     if (newPassword !== confirmNewPassword) {
       setErrorMsg('รหัสผ่านใหม่และยืนยันรหัสผ่านใหม่ไม่ตรงกัน');
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
@@ -201,9 +279,11 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       setTimeout(() => setSuccessMsg(''), 6000);
     } catch (err: any) {
       setErrorMsg(err.message || 'เปลี่ยนรหัสผ่านไม่สำเร็จ กรุณาตรวจสอบรหัสผ่านปัจจุบัน');
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setLoading(false);
     }
@@ -287,14 +367,14 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
         isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
       }`}>
         {/* Header */}
-        <div className={`p-5 border-b flex items-center justify-between ${isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'}`}>
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold">
+        <div className={`p-4 sm:p-5 border-b flex items-center justify-between gap-3 shrink-0 ${isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'}`}>
+          <div className="flex items-center space-x-3 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold shrink-0">
               <UserIcon className="w-5 h-5" />
             </div>
-            <div>
-              <h3 className="text-base font-bold">ตั้งค่าบัญชีผู้ใช้ (User Settings)</h3>
-              <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+            <div className="min-w-0">
+              <h3 className="text-sm sm:text-base font-bold truncate">ตั้งค่าบัญชีผู้ใช้ (User Settings)</h3>
+              <p className={`text-[11px] sm:text-xs truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                 {currentUser.title} {currentUser.firstNameTh} {currentUser.lastNameTh} ({currentUser.email})
               </p>
             </div>
@@ -322,55 +402,55 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className={`flex border-b px-5 pt-3 gap-1 sm:gap-2 overflow-x-auto ${isDarkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-100 bg-white'}`}>
+        <div className={`flex items-center border-b px-2 sm:px-4 pt-2.5 gap-1 shrink-0 ${isDarkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-100 bg-white'}`}>
           <button
             onClick={() => { setActiveTab('profile'); setErrorMsg(''); setSuccessMsg(''); }}
-            className={`py-2.5 px-3 sm:px-4 text-xs font-bold rounded-t-xl transition border-b-2 flex items-center space-x-1.5 shrink-0 ${
+            className={`flex-1 min-w-0 py-2.5 px-1.5 sm:px-3 text-[11px] sm:text-xs font-bold rounded-t-xl transition border-b-2 flex items-center justify-center space-x-1 sm:space-x-1.5 ${
               activeTab === 'profile'
                 ? 'border-emerald-500 text-emerald-500 bg-emerald-500/10'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <UserIcon className="w-4 h-4" />
-            <span>ข้อมูลส่วนตัว</span>
+            <UserIcon className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">ข้อมูลส่วนตัว</span>
           </button>
           <button
             onClick={() => { setActiveTab('password'); setErrorMsg(''); setSuccessMsg(''); }}
-            className={`py-2.5 px-3 sm:px-4 text-xs font-bold rounded-t-xl transition border-b-2 flex items-center space-x-1.5 shrink-0 ${
+            className={`flex-1 min-w-0 py-2.5 px-1.5 sm:px-3 text-[11px] sm:text-xs font-bold rounded-t-xl transition border-b-2 flex items-center justify-center space-x-1 sm:space-x-1.5 ${
               activeTab === 'password'
                 ? 'border-emerald-500 text-emerald-500 bg-emerald-500/10'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <KeyRound className="w-4 h-4" />
-            <span>รหัสผ่าน</span>
+            <KeyRound className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">รหัสผ่าน</span>
           </button>
           <button
             onClick={() => { setActiveTab('device'); setErrorMsg(''); setSuccessMsg(''); }}
-            className={`py-2.5 px-3 sm:px-4 text-xs font-bold rounded-t-xl transition border-b-2 flex items-center space-x-1.5 shrink-0 ${
+            className={`flex-1 min-w-0 py-2.5 px-1.5 sm:px-3 text-[11px] sm:text-xs font-bold rounded-t-xl transition border-b-2 flex items-center justify-center space-x-1 sm:space-x-1.5 ${
               activeTab === 'device'
                 ? 'border-emerald-500 text-emerald-500 bg-emerald-500/10'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Smartphone className="w-4 h-4" />
-            <span>อุปกรณ์ & ความปลอดภัย</span>
+            <Smartphone className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">อุปกรณ์ & ความปลอดภัย</span>
           </button>
           <button
             onClick={() => { setActiveTab('gps'); setErrorMsg(''); setSuccessMsg(''); }}
-            className={`py-2.5 px-3 sm:px-4 text-xs font-bold rounded-t-xl transition border-b-2 flex items-center space-x-1.5 shrink-0 ${
+            className={`flex-1 min-w-0 py-2.5 px-1.5 sm:px-3 text-[11px] sm:text-xs font-bold rounded-t-xl transition border-b-2 flex items-center justify-center space-x-1 sm:space-x-1.5 ${
               activeTab === 'gps'
                 ? 'border-teal-500 text-teal-400 bg-teal-500/10'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <MapPin className="w-4 h-4" />
-            <span>ตำแหน่ง GPS & แผนที่</span>
+            <MapPin className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">ตำแหน่ง GPS</span>
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 overflow-y-auto space-y-4 flex-1">
+        <div ref={modalBodyRef} className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1">
           {errorMsg && (
             <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-start space-x-2.5 text-rose-600 dark:text-rose-300 text-xs">
               <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
@@ -389,7 +469,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
 
           {/* Tab 1: Personal Profile */}
           {activeTab === 'profile' && (
-            <form onSubmit={handleSaveProfile} className="space-y-4">
+            <form onSubmit={handleSaveProfile} noValidate className="space-y-4">
               {/* Account Provider Badge */}
               <div className={`p-3 border rounded-2xl flex items-center justify-between text-xs ${
                 currentUser.authProvider === 'google' || currentUser.avatarUrl?.includes('google')
@@ -538,6 +618,177 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                 </div>
               </div>
 
+              {/* Organization Hierarchy Section */}
+              <div className={`p-3.5 border rounded-2xl space-y-3 ${
+                isDarkMode ? 'bg-slate-800/40 border-slate-700/80' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <div className="flex items-center space-x-2 text-xs font-bold text-sky-500">
+                  <Building2 className="w-4 h-4" />
+                  <span>
+                    {currentUser.role === UserRole.STUDENT
+                      ? 'สังกัดและหลักสูตรการศึกษา (เลือกจากรายการในระบบ)'
+                      : 'สังกัดการทำงานและหลักสูตรที่รับผิดชอบ'}
+                  </span>
+                </div>
+
+                {/* University & Faculty */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      1. มหาวิทยาลัย <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={universityCode}
+                      onChange={(e) => setUniversityCode(e.target.value)}
+                      className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                      }`}
+                    >
+                      {universities.map((u) => (
+                        <option key={u.id || u.code} value={u.code}>
+                          {u.nameTh} ({u.code})
+                        </option>
+                      ))}
+                      {universities.length === 0 && (
+                        <option value="MU">มหาวิทยาลัยมหิดล (MU)</option>
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      2. คณะ / หน่วยงาน <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={facultyCode}
+                      onChange={(e) => setFacultyCode(e.target.value)}
+                      className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                      }`}
+                    >
+                      {faculties
+                        .filter((f) => !f.universityCode || f.universityCode === universityCode)
+                        .map((f) => (
+                          <option key={f.id || f.code} value={f.code}>
+                            {f.nameTh} ({f.code})
+                          </option>
+                        ))}
+                      {faculties.length === 0 && (
+                        <option value="MT">คณะเทคนิคการแพทย์ (MT)</option>
+                      )}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Department */}
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    3. ภาควิชา (Department)
+                  </label>
+                  <select
+                    value={departmentCode}
+                    onChange={(e) => setDepartmentCode(e.target.value)}
+                    className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                      isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                    }`}
+                  >
+                    <option value="">-- ไม่ระบุ / ไม่สังกัดภาควิชา --</option>
+                    {departments
+                      .filter((d) => !d.facultyCode || d.facultyCode === facultyCode)
+                      .map((d) => (
+                        <option key={d.id || d.code} value={d.code}>
+                          {d.nameTh} ({d.code})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {/* Role Specific */}
+                {currentUser.role === UserRole.STUDENT ? (
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      4. หลักสูตรการศึกษา (Curriculum / Program) <span className="text-rose-500">* (เลือกจากระบบ)</span>
+                    </label>
+                    <select
+                      value={programCode}
+                      onChange={(e) => setProgramCode(e.target.value)}
+                      required
+                      className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 font-medium ${
+                        isDarkMode ? 'bg-slate-800 border-slate-700 text-sky-300' : 'bg-white border-slate-300 text-sky-800 shadow-sm'
+                      }`}
+                    >
+                      <option value="">-- กรุณาเลือกหลักสูตรที่กำลังศึกษา --</option>
+                      {curriculums
+                        .filter((c) => !facultyCode || !c.facultyCode || c.facultyCode === facultyCode)
+                        .map((c) => (
+                          <option key={c.id || c.code} value={c.code}>
+                            {c.nameTh} ({c.code}) - {c.degreeLevel || 'ปริญญาตรี'}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                        4. แขนงวิชา (Branch / Major - optional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="เช่น เทคนิคการแพทย์, รังสีเทคนิค"
+                        value={branchName}
+                        onChange={(e) => setBranchName(e.target.value)}
+                        className={`w-full border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 ${
+                          isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'
+                        }`}
+                      />
+                    </div>
+
+                    <div>
+                      <label className={`block text-xs font-semibold mb-1.5 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                        5. หลักสูตรที่สังกัด / รับผิดชอบ (เลือกได้มากกว่า 1 หลักสูตร)
+                      </label>
+                      <div className={`p-2.5 border rounded-xl max-h-36 overflow-y-auto space-y-1.5 ${
+                        isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
+                      }`}>
+                        {curriculums.map((c) => {
+                          const isChecked = affiliatedPrograms.includes(c.code) || affiliatedPrograms.includes(c.nameTh);
+                          return (
+                            <label
+                              key={c.id || c.code}
+                              className={`flex items-center space-x-2 text-xs p-1.5 rounded-lg cursor-pointer transition ${
+                                isChecked
+                                  ? isDarkMode ? 'bg-sky-500/20 text-sky-300' : 'bg-sky-50 text-sky-900 font-bold'
+                                  : isDarkMode ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-50 text-slate-700'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setAffiliatedPrograms([...affiliatedPrograms, c.code]);
+                                  } else {
+                                    setAffiliatedPrograms(affiliatedPrograms.filter((p) => p !== c.code && p !== c.nameTh));
+                                  }
+                                }}
+                                className="rounded border-slate-400 text-sky-600 focus:ring-sky-500"
+                              />
+                              <span>{c.nameTh} ({c.code})</span>
+                            </label>
+                          );
+                        })}
+                        {curriculums.length === 0 && (
+                          <p className={`text-[11px] italic p-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                            ไม่พบรายการหลักสูตรในระบบ
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
@@ -627,13 +878,28 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                 </p>
               </div>
 
-              <div className="pt-2 flex justify-end">
+              <div className="pt-2 flex items-center justify-between gap-3">
+                {successMsg ? (
+                  <div className="flex items-center space-x-1.5 text-emerald-500 dark:text-emerald-400 font-bold text-xs bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/30 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{successMsg}</span>
+                  </div>
+                ) : errorMsg ? (
+                  <div className="flex items-center space-x-1.5 text-rose-500 dark:text-rose-400 font-bold text-xs bg-rose-500/10 px-3 py-1.5 rounded-xl border border-rose-500/30 animate-in fade-in">
+                    <ShieldAlert className="w-4 h-4 shrink-0" />
+                    <span>{errorMsg}</span>
+                  </div>
+                ) : (
+                  <div />
+                )}
+
                 <button
                   type="submit"
                   disabled={loading}
-                  className="py-2.5 px-5 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition shadow-lg shadow-emerald-500/20 disabled:opacity-50 cursor-pointer"
+                  className="py-2.5 px-5 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition shadow-lg shadow-emerald-500/20 disabled:opacity-50 cursor-pointer flex items-center space-x-2 shrink-0"
                 >
-                  {loading ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}
+                  {loading && <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />}
+                  <span>{loading ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}</span>
                 </button>
               </div>
             </form>

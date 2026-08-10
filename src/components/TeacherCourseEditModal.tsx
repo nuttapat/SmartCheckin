@@ -361,7 +361,7 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
                   }`}>
                     <span className="font-bold flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-ellipsis">
                       <span>👑</span>
-                      <span className="truncate">ผู้สร้างรายวิชา: {coordinatorName || course.ownerName}</span>
+                      <span className="truncate">ผู้สร้างรายวิชา: {course.ownerName || coordinatorName || '-'}</span>
                     </span>
                   </div>
                 )}

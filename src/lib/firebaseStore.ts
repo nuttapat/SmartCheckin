@@ -42,6 +42,8 @@ export const COLLECTIONS = {
   COURSE_MEMBERS: 'courseMembers',
   LEAVE_REQUESTS: 'leaveRequests',
   SYSTEM_SETTINGS: 'systemSettings',
+  MASTER_UNIVERSITIES: 'masterUniversities',
+  MASTER_FACULTIES: 'masterFaculties',
   MASTER_DEPARTMENTS: 'masterDepartments',
   MASTER_PREFIXES: 'masterPrefixes',
   MASTER_CURRICULUMS: 'masterCurriculums',

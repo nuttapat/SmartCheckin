@@ -91,7 +91,20 @@ export interface User {
   authProvider?: 'google' | 'email';
   deviceId?: string; // Legacy primary device fingerprint/UUID
   devices?: UserDevice[]; // List of bound devices
-  department?: string; // Major/Department code or name
+
+  // Organization & Academic Affiliation Hierarchy
+  universityCode?: string; // e.g. 'MU'
+  universityName?: string; // e.g. 'มหาวิทยาลัยมหิดล'
+  facultyCode?: string; // e.g. 'MT'
+  facultyName?: string; // e.g. 'คณะเทคนิคการแพทย์'
+  departmentCode?: string; // e.g. 'CH'
+  departmentName?: string; // e.g. 'ภาควิชาเคมีคลินิก'
+  branchName?: string; // แขนงวิชา (Optional for Teacher)
+  programCode?: string; // หลักสูตรที่เรียน (For Student)
+  programName?: string; // หลักสูตรที่เรียน (For Student)
+  affiliatedPrograms?: string[]; // หลักสูตรที่สังกัด (For Teacher - multiple selection)
+
+  department?: string; // Legacy Major/Department code or name
   isDemo?: boolean; // Demo account flag for system test users
   isSuspended?: boolean; // Account suspended flag
   suspendedReason?: string;
@@ -306,9 +319,11 @@ export interface MasterDepartment {
   id: string;
   code: string; // e.g., 'CH', 'MI', 'MS', 'CM', 'RT', 'ID'
   nameTh: string; // e.g. 'ภาควิชาเคมีคลินิก'
-  nameEn: string; // e.g. 'Department of Clinical Chemistry'
-  facultyTh?: string; // 'คณะเทคนิคการแพทย์'
-  facultyCode?: string; // 'MT'
+  nameEn?: string; // e.g. 'Department of Clinical Chemistry'
+  universityCode?: string; // e.g. 'MU'
+  universityTh?: string; // e.g. 'มหาวิทยาลัยมหิดล'
+  facultyCode?: string; // e.g. 'MT'
+  facultyTh?: string; // e.g. 'คณะเทคนิคการแพทย์'
   majorCode?: string; // 'MTMT', 'MTRT', or 'ALL'
   majorNameTh?: string; // 'สาขาวิชาเทคนิคการแพทย์' / 'สาขาวิชารังสีเทคนิค'
   createdAt?: string;
@@ -327,8 +342,11 @@ export interface MasterCurriculum {
   nameTh: string; // e.g. 'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)', 'วิทยาศาสตร์มหาบัณฑิต (เทคนิคการแพทย์)', 'ปรัชญาดุษฎีบัณฑิต (เทคนิคการแพทย์)'
   titleTh?: string;
   nameEn: string;
+  universityCode?: string; // 'MU'
+  universityTh?: string; // 'มหาวิทยาลัยมหิดล'
   facultyCode: string; // 'MT'
-  majorCode: string; // 'MTMT' or 'MTRT'
+  facultyTh?: string; // 'คณะเทคนิคการแพทย์'
+  majorCode: string; // 'MTMT' or 'ALL'
   degreeLevel: string; // 'ปริญญาตรี' or 'บัณฑิตศึกษา'
   createdAt?: string;
 }

@@ -224,7 +224,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
                       {item.course.courseName}
                     </h3>
                     <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                      อาจารย์ผู้สอน: {item.course.coordinatorName}
+                      อาจารย์ผู้สอน: {item.course.coordinatorName || '-'}
                     </p>
                   </div>
 

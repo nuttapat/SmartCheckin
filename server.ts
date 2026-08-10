@@ -55,6 +55,8 @@ const teacherAttendanceRecords: TeacherAttendanceRecord[] = [];
 const quickEvents: Map<string, QuickEvent> = new Map();
 const inviteLinks: Map<string, InviteLink> = new Map();
 const leaveRequests: LeaveRequest[] = [];
+const masterUniversities: Map<string, MasterUniversity> = new Map();
+const masterFaculties: Map<string, MasterFaculty> = new Map();
 const masterDepartments: Map<string, MasterDepartment> = new Map();
 const masterCurriculums: Map<string, MasterCurriculum> = new Map();
 const masterPrefixes: Map<string, MasterPrefix> = new Map();
@@ -66,6 +68,7 @@ const deletedCourseIds = new Set<string>();
 const deletedMemberIds = new Set<string>();
 const deletedSessionIds = new Set<string>();
 const deletedUserIds = new Set<string>();
+const deletedLeaveIds = new Set<string>();
 
 export function saveLocalCache() {
   try {
@@ -79,6 +82,8 @@ export function saveLocalCache() {
       quickEvents: Array.from(quickEvents.values()),
       inviteLinks: Array.from(inviteLinks.values()),
       leaveRequests,
+      masterUniversities: Array.from(masterUniversities.values()),
+      masterFaculties: Array.from(masterFaculties.values()),
       masterDepartments: Array.from(masterDepartments.values()),
       masterCurriculums: Array.from(masterCurriculums.values()),
       masterPrefixes: Array.from(masterPrefixes.values()),
@@ -88,6 +93,7 @@ export function saveLocalCache() {
       deletedMemberIds: Array.from(deletedMemberIds),
       deletedSessionIds: Array.from(deletedSessionIds),
       deletedUserIds: Array.from(deletedUserIds),
+      deletedLeaveIds: Array.from(deletedLeaveIds),
     };
     fs.writeFileSync(LOCAL_CACHE_PATH, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
@@ -103,10 +109,89 @@ export async function saveTombstonesToFirestore() {
       deletedMemberIds: Array.from(deletedMemberIds),
       deletedSessionIds: Array.from(deletedSessionIds),
       deletedUserIds: Array.from(deletedUserIds),
+      deletedLeaveIds: Array.from(deletedLeaveIds),
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {
     console.error('[Save Tombstones Error]', err);
+  }
+}
+
+export function seedDefaultMasterData() {
+  if (masterUniversities.size === 0) {
+    const defaultUnivs: MasterUniversity[] = [
+      { id: 'univ_mu', code: 'MU', nameTh: 'มหาวิทยาลัยมหิดล', nameEn: 'Mahidol University' },
+      { id: 'univ_cu', code: 'CU', nameTh: 'จุฬาลงกรณ์มหาวิทยาลัย', nameEn: 'Chulalongkorn University' },
+      { id: 'univ_ku', code: 'KU', nameTh: 'มหาวิทยาลัยเกษตรศาสตร์', nameEn: 'Kasetsart University' },
+      { id: 'univ_cmu', code: 'CMU', nameTh: 'มหาวิทยาลัยเชียงใหม่', nameEn: 'Chiang Mai University' },
+      { id: 'univ_kku', code: 'KKU', nameTh: 'มหาวิทยาลัยขอนแก่น', nameEn: 'Khon Kaen University' },
+      { id: 'univ_psu', code: 'PSU', nameTh: 'มหาวิทยาลัยสงขลานครินทร์', nameEn: 'Prince of Songkla University' },
+    ];
+    defaultUnivs.forEach((u) => {
+      masterUniversities.set(u.id, u);
+      saveToFirestore(COLLECTIONS.MASTER_UNIVERSITIES, u);
+    });
+  }
+
+  if (masterFaculties.size === 0) {
+    const defaultFacs: MasterFaculty[] = [
+      { id: 'fac_mt', universityId: 'univ_mu', code: 'MT', nameTh: 'คณะเทคนิคการแพทย์', nameEn: 'Faculty of Medical Technology' },
+      { id: 'fac_ns', universityId: 'univ_mu', code: 'NS', nameTh: 'คณะพยาบาลศาสตร์', nameEn: 'Faculty of Nursing' },
+      { id: 'fac_ph', universityId: 'univ_mu', code: 'PH', nameTh: 'คณะสาธารณสุขศาสตร์', nameEn: 'Faculty of Public Health' },
+      { id: 'fac_sc', universityId: 'univ_mu', code: 'SC', nameTh: 'คณะวิทยาศาสตร์', nameEn: 'Faculty of Science' },
+      { id: 'fac_eg', universityId: 'univ_mu', code: 'EG', nameTh: 'คณะวิศวกรรมศาสตร์', nameEn: 'Faculty of Engineering' },
+      { id: 'fac_si', universityId: 'univ_mu', code: 'SI', nameTh: 'คณะแพทยศาสตร์ศิริราชพยาบาล', nameEn: 'Faculty of Medicine Siriraj Hospital' },
+      { id: 'fac_ra', universityId: 'univ_mu', code: 'RA', nameTh: 'คณะแพทยศาสตร์โรงพยาบาลรามาธิบดี', nameEn: 'Faculty of Medicine Ramathibodi Hospital' },
+    ];
+    defaultFacs.forEach((f) => {
+      masterFaculties.set(f.id, f);
+      saveToFirestore(COLLECTIONS.MASTER_FACULTIES, f);
+    });
+  }
+
+  if (masterDepartments.size === 0) {
+    const defaultDeps: MasterDepartment[] = [
+      { id: 'dep_ch', code: 'CH', nameTh: 'ภาควิชาเคมีคลินิก', nameEn: 'Department of Clinical Chemistry', facultyCode: 'MT', facultyTh: 'คณะเทคนิคการแพทย์' },
+      { id: 'dep_mi', code: 'MI', nameTh: 'ภาควิชาจุลชีววิทยาคลินิก', nameEn: 'Department of Clinical Microbiology', facultyCode: 'MT', facultyTh: 'คณะเทคนิคการแพทย์' },
+      { id: 'dep_ms', code: 'MS', nameTh: 'ภาควิชาเวชศาสตร์การบริการโลหิตและจุลทรรศนศาสตร์คลินิก', nameEn: 'Department of Transfusion Medicine and Clinical Microbiology', facultyCode: 'MT', facultyTh: 'คณะเทคนิคการแพทย์' },
+      { id: 'dep_cm', code: 'CM', nameTh: 'ภาควิชาจุลทรรศนศาสตร์คลินิก', nameEn: 'Department of Clinical Microscopy', facultyCode: 'MT', facultyTh: 'คณะเทคนิคการแพทย์' },
+      { id: 'dep_rt', code: 'RT', nameTh: 'ภาควิชารังสีเทคนิค', nameEn: 'Department of Radiological Technology', facultyCode: 'MT', facultyTh: 'คณะเทคนิคการแพทย์' },
+      { id: 'dep_id', code: 'ID', nameTh: 'ภาควิชาศูนย์วิจัยและนวัตกรรม', nameEn: 'Center of Research and Innovation', facultyCode: 'MT', facultyTh: 'คณะเทคนิคการแพทย์' },
+    ];
+    defaultDeps.forEach((d) => {
+      masterDepartments.set(d.id, d);
+      saveToFirestore(COLLECTIONS.MASTER_DEPARTMENTS, d);
+    });
+  }
+
+  if (masterCurriculums.size === 0) {
+    const defaultCurrs: MasterCurriculum[] = [
+      { id: 'curr_bs_mt', code: 'CURR_BS_MT', nameTh: 'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)', nameEn: 'Bachelor of Science (Medical Technology)', facultyCode: 'MT', degreeLevel: 'ปริญญาตรี', majorCode: 'MTMT' },
+      { id: 'curr_bs_rt', code: 'CURR_BS_RT', nameTh: 'วิทยาศาสตร์บัณฑิต (รังสีเทคนิค)', nameEn: 'Bachelor of Science (Radiological Technology)', facultyCode: 'MT', degreeLevel: 'ปริญญาตรี', majorCode: 'MTRT' },
+      { id: 'curr_ms_mt', code: 'CURR_MS_MT', nameTh: 'วิทยาศาสตร์มหาบัณฑิต (เทคนิคการแพทย์)', nameEn: 'Master of Science (Medical Technology)', facultyCode: 'MT', degreeLevel: 'บัณฑิตศึกษา', majorCode: 'MTMT' },
+      { id: 'curr_ms_bct', code: 'CURR_MS_BCT', nameTh: 'วิทยาศาสตร์มหาบัณฑิต (เทคโนโลยีชีวภาพทางคลินิก)', nameEn: 'Master of Science (Clinical Biotechnology)', facultyCode: 'MT', degreeLevel: 'บัณฑิตศึกษา', majorCode: 'MTMT' },
+      { id: 'curr_phd_mt', code: 'CURR_PHD_MT', nameTh: 'ปรัชญาดุษฎีบัณฑิต (เทคนิคการแพทย์)', nameEn: 'Doctor of Philosophy (Medical Technology)', facultyCode: 'MT', degreeLevel: 'บัณฑิตศึกษา', majorCode: 'MTMT' },
+    ];
+    defaultCurrs.forEach((c) => {
+      masterCurriculums.set(c.id, c);
+      saveToFirestore(COLLECTIONS.MASTER_CURRICULUMS, c);
+    });
+  }
+
+  if (masterPrefixes.size === 0) {
+    const defaultPrefixes: MasterPrefix[] = [
+      { id: 'pref_mr', titleTh: 'นาย', titleEn: 'Mr.', category: 'BOTH' },
+      { id: 'pref_miss', titleTh: 'นางสาว', titleEn: 'Miss', category: 'BOTH' },
+      { id: 'pref_mrs', titleTh: 'นาง', titleEn: 'Mrs.', category: 'BOTH' },
+      { id: 'pref_dr', titleTh: 'อ.ดร.', titleEn: 'Dr.', category: 'TEACHER' },
+      { id: 'pref_asst_prof', titleTh: 'ผศ.ดร.', titleEn: 'Asst. Prof. Dr.', category: 'TEACHER' },
+      { id: 'pref_assoc_prof', titleTh: 'รศ.ดร.', titleEn: 'Assoc. Prof. Dr.', category: 'TEACHER' },
+      { id: 'pref_prof', titleTh: 'ศ.ดร.', titleEn: 'Prof. Dr.', category: 'TEACHER' },
+    ];
+    defaultPrefixes.forEach((p) => {
+      masterPrefixes.set(p.id, p);
+      saveToFirestore(COLLECTIONS.MASTER_PREFIXES, p);
+    });
   }
 }
 
@@ -133,6 +218,10 @@ export function loadLocalCache(): boolean {
     if (Array.isArray(data.deletedUserIds)) {
       deletedUserIds.clear();
       data.deletedUserIds.forEach((id: string) => deletedUserIds.add(id));
+    }
+    if (Array.isArray(data.deletedLeaveIds)) {
+      deletedLeaveIds.clear();
+      data.deletedLeaveIds.forEach((id: string) => deletedLeaveIds.add(id));
     }
 
     if (Array.isArray(data.users)) {
@@ -175,7 +264,15 @@ export function loadLocalCache(): boolean {
     }
     if (Array.isArray(data.leaveRequests)) {
       leaveRequests.length = 0;
-      leaveRequests.push(...data.leaveRequests);
+      leaveRequests.push(...data.leaveRequests.filter((l: LeaveRequest) => l && l.id && !deletedLeaveIds.has(l.id)));
+    }
+    if (Array.isArray(data.masterUniversities)) {
+      masterUniversities.clear();
+      data.masterUniversities.forEach((u: MasterUniversity) => masterUniversities.set(u.id, u));
+    }
+    if (Array.isArray(data.masterFaculties)) {
+      masterFaculties.clear();
+      data.masterFaculties.forEach((f: MasterFaculty) => masterFaculties.set(f.id, f));
     }
     if (Array.isArray(data.masterDepartments)) {
       masterDepartments.clear();
@@ -1171,6 +1268,16 @@ app.post('/api/auth/register', (req, res) => {
     email,
     password,
     deviceId,
+    universityCode,
+    universityName,
+    facultyCode,
+    facultyName,
+    departmentCode,
+    departmentName,
+    branchName,
+    programCode,
+    programName,
+    affiliatedPrograms,
   } = req.body || {};
 
   const cleanEmail = (email || '').toString().trim().toLowerCase();
@@ -1237,6 +1344,16 @@ app.post('/api/auth/register', (req, res) => {
     password: password.toString(),
     authProvider: 'email',
     deviceId: deviceId || `dev_${Date.now()}`,
+    universityCode: (universityCode || 'MU').toString().trim(),
+    universityName: (universityName || 'มหาวิทยาลัยมหิดล').toString().trim(),
+    facultyCode: (facultyCode || 'MT').toString().trim(),
+    facultyName: (facultyName || 'คณะเทคนิคการแพทย์').toString().trim(),
+    departmentCode: (departmentCode || '').toString().trim(),
+    departmentName: (departmentName || '').toString().trim(),
+    branchName: (branchName || '').toString().trim(),
+    programCode: (programCode || '').toString().trim(),
+    programName: (programName || '').toString().trim(),
+    affiliatedPrograms: Array.isArray(affiliatedPrograms) ? affiliatedPrograms : [],
     createdAt: new Date().toISOString(),
   };
 
@@ -1330,6 +1447,16 @@ app.put('/api/users/:userId/profile', (req, res) => {
     universityId,
     currentPassword,
     newPassword,
+    universityCode,
+    universityName,
+    facultyCode,
+    facultyName,
+    departmentCode,
+    departmentName,
+    branchName,
+    programCode,
+    programName,
+    affiliatedPrograms,
   } = req.body || {};
 
   // Password update validation
@@ -1356,6 +1483,16 @@ app.put('/api/users/:userId/profile', (req, res) => {
   if (firstNameEn) user.firstNameEn = firstNameEn.toString().trim();
   if (lastNameEn) user.lastNameEn = lastNameEn.toString().trim();
   if (universityId !== undefined) user.universityId = universityId.toString().trim();
+  if (universityCode !== undefined) user.universityCode = universityCode.toString().trim();
+  if (universityName !== undefined) user.universityName = universityName.toString().trim();
+  if (facultyCode !== undefined) user.facultyCode = facultyCode.toString().trim();
+  if (facultyName !== undefined) user.facultyName = facultyName.toString().trim();
+  if (departmentCode !== undefined) user.departmentCode = departmentCode.toString().trim();
+  if (departmentName !== undefined) user.departmentName = departmentName.toString().trim();
+  if (branchName !== undefined) user.branchName = branchName.toString().trim();
+  if (programCode !== undefined) user.programCode = programCode.toString().trim();
+  if (programName !== undefined) user.programName = programName.toString().trim();
+  if (affiliatedPrograms !== undefined && Array.isArray(affiliatedPrograms)) user.affiliatedPrograms = affiliatedPrograms;
 
   saveToFirestore(COLLECTIONS.USERS, user);
   res.json({ message: 'บันทึกการตั้งค่าโปรไฟล์เรียบร้อยแล้ว', user });
@@ -1657,12 +1794,32 @@ app.get('/api/courses/:id', (req, res) => {
     course.weeks.sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
   }
 
-  const members = courseMembers
-    .filter((cm) => cm.courseId === course.id)
-    .map((cm) => ({
-      ...cm,
-      user: users.get(cm.userId),
-    }));
+  const rawMembers = courseMembers.filter((cm) => cm.courseId === course.id);
+  const uniqueMemberMap = new Map<string, CourseMember>();
+  const rolePriority: Record<string, number> = {
+    [CourseMemberRole.COORDINATOR]: 4,
+    [CourseMemberRole.CO_TEACHER]: 3,
+    [CourseMemberRole.CO_COORDINATOR]: 3,
+    [CourseMemberRole.INSTRUCTOR]: 2,
+    [CourseMemberRole.STUDENT]: 1,
+  };
+
+  for (const cm of rawMembers) {
+    if (!cm || !cm.userId) continue;
+    if (!uniqueMemberMap.has(cm.userId)) {
+      uniqueMemberMap.set(cm.userId, cm);
+    } else {
+      const existing = uniqueMemberMap.get(cm.userId)!;
+      if ((rolePriority[cm.role] || 0) > (rolePriority[existing.role] || 0)) {
+        uniqueMemberMap.set(cm.userId, cm);
+      }
+    }
+  }
+
+  const members = Array.from(uniqueMemberMap.values()).map((cm) => ({
+    ...cm,
+    user: users.get(cm.userId),
+  }));
 
   const courseSessions = ensureCourseSessions(course);
 
@@ -2053,6 +2210,45 @@ app.put('/api/courses/:id/members/:memberId/role', (req, res) => {
 
 app.delete('/api/courses/:id/members/:memberId', async (req, res) => {
   const { id: courseId, memberId } = req.params;
+  const { teacherId, password } = req.body || {};
+  const reqUserId = (req.headers['x-user-id'] as string) || teacherId;
+
+  // 1. Verify User permissions
+  const course = courses.get(courseId);
+  if (!course) {
+    return res.status(404).json({ error: 'ไม่พบรายวิชานี้ในระบบ' });
+  }
+
+  const reqUser = reqUserId ? users.get(reqUserId) : null;
+  const isAdmin = reqUser?.role === UserRole.ADMIN;
+  const isOwner = course.ownerId === reqUserId;
+  const memberObj = courseMembers.find((m) => m.courseId === courseId && m.userId === reqUserId);
+  const isTeacherOrCoordinator = memberObj && (
+    memberObj.role === CourseMemberRole.COORDINATOR ||
+    memberObj.role === CourseMemberRole.CO_TEACHER ||
+    (memberObj.role as string) === 'TEACHER' ||
+    (memberObj.role as string) === 'INSTRUCTOR'
+  );
+
+  if (!isAdmin && !isOwner && !isTeacherOrCoordinator) {
+    return res.status(403).json({
+      error: 'เฉพาะแอดมิน (Admin), ผู้สร้างรายวิชา, และอาจารย์ผู้รับผิดชอบรายวิชาเท่านั้นที่มีสิทธิ์ลบนักศึกษา',
+    });
+  }
+
+  // 2. Verify Password of the acting user
+  if (!reqUser) {
+    return res.status(400).json({ error: 'ไม่พบข้อมูลอาจารย์ผู้ดำเนินการลบ' });
+  }
+
+  if (!password || password.toString().trim() === '') {
+    return res.status(400).json({ error: 'กรุณากรอกรหัสผ่านของอาจารย์เพื่อยืนยันการลบนักศึกษา' });
+  }
+
+  const expectedPassword = reqUser.password || '123456';
+  if (password.toString().trim() !== expectedPassword) {
+    return res.status(400).json({ error: 'รหัสผ่านอาจารย์ไม่ถูกต้อง ไม่สามารถลบนักศึกษาได้' });
+  }
 
   const index = courseMembers.findIndex((m) => m.id === memberId || (m.courseId === courseId && m.userId === memberId));
   if (index === -1) {
@@ -2061,16 +2257,55 @@ app.delete('/api/courses/:id/members/:memberId', async (req, res) => {
 
   const removed = courseMembers.splice(index, 1)[0];
   await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, removed.id);
+  saveLocalCache();
 
   res.json({ message: 'ลบสมาชิกออกจากรายวิชาเรียบร้อยแล้ว', memberId: removed.id });
 });
 
 app.post('/api/courses/:id/members/batch-delete', async (req, res) => {
   const { id: courseId } = req.params;
-  const { memberIds } = req.body as { memberIds: string[] };
+  const { memberIds, teacherId, password } = req.body as { memberIds: string[]; teacherId?: string; password?: string };
+  const reqUserId = (req.headers['x-user-id'] as string) || teacherId;
 
   if (!Array.isArray(memberIds) || memberIds.length === 0) {
     return res.status(400).json({ error: 'กรุณาระบุรายชื่อสมาชิกที่ต้องการลบ' });
+  }
+
+  // 1. Verify User permissions
+  const course = courses.get(courseId);
+  if (!course) {
+    return res.status(404).json({ error: 'ไม่พบรายวิชานี้ในระบบ' });
+  }
+
+  const reqUser = reqUserId ? users.get(reqUserId) : null;
+  const isAdmin = reqUser?.role === UserRole.ADMIN;
+  const isOwner = course.ownerId === reqUserId;
+  const memberObj = courseMembers.find((m) => m.courseId === courseId && m.userId === reqUserId);
+  const isTeacherOrCoordinator = memberObj && (
+    memberObj.role === CourseMemberRole.COORDINATOR ||
+    memberObj.role === CourseMemberRole.CO_TEACHER ||
+    (memberObj.role as string) === 'TEACHER' ||
+    (memberObj.role as string) === 'INSTRUCTOR'
+  );
+
+  if (!isAdmin && !isOwner && !isTeacherOrCoordinator) {
+    return res.status(403).json({
+      error: 'เฉพาะแอดมิน (Admin), ผู้สร้างรายวิชา, และอาจารย์ผู้รับผิดชอบรายวิชาเท่านั้นที่มีสิทธิ์ลบนักศึกษา',
+    });
+  }
+
+  // 2. Verify Password of the acting user
+  if (!reqUser) {
+    return res.status(400).json({ error: 'ไม่พบข้อมูลอาจารย์ผู้ดำเนินการลบ' });
+  }
+
+  if (!password || password.toString().trim() === '') {
+    return res.status(400).json({ error: 'กรุณากรอกรหัสผ่านของอาจารย์เพื่อยืนยันการลบนักศึกษา' });
+  }
+
+  const expectedPassword = reqUser.password || '123456';
+  if (password.toString().trim() !== expectedPassword) {
+    return res.status(400).json({ error: 'รหัสผ่านอาจารย์ไม่ถูกต้อง ไม่สามารถลบนักศึกษาได้' });
   }
 
   const idsToDeleteSet = new Set(memberIds);
@@ -2084,6 +2319,7 @@ app.post('/api/courses/:id/members/batch-delete', async (req, res) => {
       await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, removed.id);
     }
   }
+  saveLocalCache();
 
   res.json({
     message: `ลบสมาชิกออกจากรายวิชาเรียบร้อยแล้ว ${removedMembers.length} คน`,
@@ -3217,7 +3453,10 @@ app.delete('/api/leave-requests/:id', (req, res) => {
   }
 
   const [removed] = leaveRequests.splice(itemIndex, 1);
-  deleteFromFirestore(COLLECTIONS.LEAVE_REQUESTS, id);
+  deletedLeaveIds.add(id);
+  deleteFromFirestore(COLLECTIONS.LEAVE_REQUESTS, id).catch(() => {});
+  saveLocalCache();
+  saveTombstonesToFirestore().catch(() => {});
 
   res.json({
     message: 'ยกเลิกใบลาเรียนเรียบร้อยแล้ว',
@@ -4121,6 +4360,119 @@ app.put('/api/admin/settings', async (req, res) => {
   }
 });
 
+// Get Master Universities
+app.get('/api/admin/master/universities', (req, res) => {
+  try {
+    seedDefaultMasterData();
+    const univs = Array.from(masterUniversities.values());
+    res.json(univs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error fetching master universities' });
+  }
+});
+
+// Save Master University
+app.post('/api/admin/master/universities', async (req, res) => {
+  try {
+    const { id, code, nameTh, nameEn } = req.body;
+    if (!code || !nameTh) {
+      return res.status(400).json({ error: 'กรุณากรอกรหัสมหาวิทยาลัยและชื่อมหาวิทยาลัย' });
+    }
+    const uId = id || `univ_${Date.now()}`;
+    const newUniv: MasterUniversity = {
+      id: uId,
+      code: code.trim().toUpperCase(),
+      nameTh: nameTh.trim(),
+      nameEn: (nameEn || '').trim(),
+    };
+    masterUniversities.set(uId, newUniv);
+    await saveToFirestore(COLLECTIONS.MASTER_UNIVERSITIES, newUniv);
+    saveLocalCache();
+    res.json({ message: 'บันทึกข้อมูลมหาวิทยาลัยเรียบร้อยแล้ว', university: newUniv });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error saving university' });
+  }
+});
+
+// Delete Master University
+app.delete('/api/admin/master/universities/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    masterUniversities.delete(id);
+    await deleteFromFirestore(COLLECTIONS.MASTER_UNIVERSITIES, id);
+    saveLocalCache();
+    res.json({ message: 'ลบข้อมูลมหาวิทยาลัยเรียบร้อยแล้ว', id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error deleting university' });
+  }
+});
+
+// Get Master Faculties
+app.get('/api/admin/master/faculties', (req, res) => {
+  try {
+    seedDefaultMasterData();
+    const facs = Array.from(masterFaculties.values());
+    res.json(facs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error fetching master faculties' });
+  }
+});
+
+// Save Master Faculty
+app.post('/api/admin/master/faculties', async (req, res) => {
+  try {
+    const { id, universityId, code, nameTh, nameEn } = req.body;
+    if (!code || !nameTh) {
+      return res.status(400).json({ error: 'กรุณากรอกรหัสคณะและชื่อคณะ' });
+    }
+    const fId = id || `fac_${Date.now()}`;
+    const newFac: MasterFaculty = {
+      id: fId,
+      universityId: universityId || 'univ_mu',
+      code: code.trim().toUpperCase(),
+      nameTh: nameTh.trim(),
+      nameEn: (nameEn || '').trim(),
+    };
+    masterFaculties.set(fId, newFac);
+    await saveToFirestore(COLLECTIONS.MASTER_FACULTIES, newFac);
+    saveLocalCache();
+    res.json({ message: 'บันทึกข้อมูลคณะเรียบร้อยแล้ว', faculty: newFac });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error saving faculty' });
+  }
+});
+
+// Delete Master Faculty
+app.delete('/api/admin/master/faculties/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    masterFaculties.delete(id);
+    await deleteFromFirestore(COLLECTIONS.MASTER_FACULTIES, id);
+    saveLocalCache();
+    res.json({ message: 'ลบข้อมูลคณะเรียบร้อยแล้ว', id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error deleting faculty' });
+  }
+});
+
+// Seed/Reset Default Master Data
+app.post('/api/admin/master/seed-defaults', async (req, res) => {
+  try {
+    seedDefaultMasterData();
+    saveLocalCache();
+    res.json({
+      message: 'รีเซ็ต/สร้างข้อมูลหลักเริ่มต้น (มหาวิทยาลัย คณะ ภาควิชา หลักสูตร) เรียบร้อยแล้ว',
+      universities: Array.from(masterUniversities.values()),
+      faculties: Array.from(masterFaculties.values()),
+      departments: Array.from(masterDepartments.values()),
+      curriculums: Array.from(masterCurriculums.values()),
+      prefixes: Array.from(masterPrefixes.values()),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error seeding default master data' });
+  }
+});
+
 // Get Master Departments
 app.get('/api/admin/master/departments', (req, res) => {
   try {
@@ -4134,7 +4486,7 @@ app.get('/api/admin/master/departments', (req, res) => {
 // Save (Create/Update) Master Department
 app.post('/api/admin/master/departments', async (req, res) => {
   try {
-    const { id, code, nameTh, nameEn, facultyTh, facultyCode, majorCode, majorNameTh } = req.body;
+    const { id, code, nameTh, nameEn, facultyTh, facultyCode, universityTh, universityCode, majorCode, majorNameTh } = req.body;
     if (!code || !nameTh) {
       return res.status(400).json({ error: 'กรุณากรอกรหัสภาควิชาและชื่อภาควิชา (ภาษาไทย)' });
     }
@@ -4144,6 +4496,8 @@ app.post('/api/admin/master/departments', async (req, res) => {
       code: code.trim().toUpperCase(),
       nameTh: nameTh.trim(),
       nameEn: (nameEn || '').trim(),
+      universityTh: (universityTh || 'มหาวิทยาลัยมหิดล').trim(),
+      universityCode: (universityCode || 'MU').trim(),
       facultyTh: (facultyTh || 'คณะเทคนิคการแพทย์').trim(),
       facultyCode: (facultyCode || 'MT').trim(),
       majorCode: (majorCode || 'MTMT').trim(),
@@ -4183,7 +4537,7 @@ app.get('/api/admin/master/curriculums', (req, res) => {
 // Save (Create/Update) Master Curriculum
 app.post('/api/admin/master/curriculums', async (req, res) => {
   try {
-    const { id, code, nameTh, titleTh, nameEn, facultyCode, majorCode, degreeLevel } = req.body;
+    const { id, code, nameTh, titleTh, nameEn, universityCode, universityTh, facultyCode, facultyTh, majorCode, degreeLevel } = req.body;
     const currTitle = (nameTh || titleTh || '').trim();
     if (!currTitle) {
       return res.status(400).json({ error: 'กรุณากรอกชื่อหลักสูตร (ภาษาไทย)' });
@@ -4195,7 +4549,10 @@ app.post('/api/admin/master/curriculums', async (req, res) => {
       nameTh: currTitle,
       titleTh: currTitle,
       nameEn: (nameEn || '').trim(),
+      universityCode: (universityCode || 'MU').trim(),
+      universityTh: (universityTh || 'มหาวิทยาลัยมหิดล').trim(),
       facultyCode: (facultyCode || 'MT').trim(),
+      facultyTh: (facultyTh || 'คณะเทคนิคการแพทย์').trim(),
       majorCode: (majorCode || 'MTMT').trim(),
       degreeLevel: (degreeLevel || 'ปริญญาตรี').trim(),
       createdAt: req.body.createdAt || new Date().toISOString(),
@@ -4264,6 +4621,55 @@ app.delete('/api/admin/master/prefixes/:id', async (req, res) => {
   }
 });
 
+// Helper to deduplicate course members by (courseId, userId)
+async function deduplicateCourseMembers(): Promise<number> {
+  const seenMap = new Map<string, CourseMember>();
+  const duplicatesToDelete: string[] = [];
+  const rolePriority: Record<string, number> = {
+    [CourseMemberRole.COORDINATOR]: 4,
+    [CourseMemberRole.CO_TEACHER]: 3,
+    [CourseMemberRole.CO_COORDINATOR]: 3,
+    [CourseMemberRole.INSTRUCTOR]: 2,
+    [CourseMemberRole.STUDENT]: 1,
+  };
+
+  for (let i = 0; i < courseMembers.length; i++) {
+    const cm = courseMembers[i];
+    if (!cm || !cm.courseId || !cm.userId) continue;
+    const key = `${cm.courseId}_${cm.userId}`;
+
+    if (!seenMap.has(key)) {
+      seenMap.set(key, cm);
+    } else {
+      const existing = seenMap.get(key)!;
+      const exPriority = rolePriority[existing.role] || 0;
+      const cmPriority = rolePriority[cm.role] || 0;
+
+      if (cmPriority > exPriority) {
+        duplicatesToDelete.push(existing.id);
+        seenMap.set(key, cm);
+      } else {
+        duplicatesToDelete.push(cm.id);
+      }
+    }
+  }
+
+  if (duplicatesToDelete.length > 0) {
+    const deleteSet = new Set(duplicatesToDelete);
+    for (let i = courseMembers.length - 1; i >= 0; i--) {
+      if (deleteSet.has(courseMembers[i].id)) {
+        courseMembers.splice(i, 1);
+      }
+    }
+    for (const delId of duplicatesToDelete) {
+      deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, delId).catch(() => {});
+    }
+    console.log(`[Deduplication] Cleaned ${duplicatesToDelete.length} duplicate courseMembers records.`);
+  }
+
+  return duplicatesToDelete.length;
+}
+
 // Helper to clean orphaned data
 async function cleanOrphanedData() {
   const deletedSummary = {
@@ -4287,6 +4693,9 @@ async function cleanOrphanedData() {
       await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, cm.id);
     }
   }
+
+  // 1b. Deduplicate courseMembers
+  await deduplicateCourseMembers();
 
   // 2. Clean sessions
   for (const [sesId, ses] of Array.from(sessions.entries())) {
@@ -4429,6 +4838,16 @@ app.put('/api/admin/users/:userId/details', async (req, res) => {
     department,
     isSuspended,
     suspendedReason,
+    universityCode,
+    universityName,
+    facultyCode,
+    facultyName,
+    departmentCode,
+    departmentName,
+    branchName,
+    programCode,
+    programName,
+    affiliatedPrograms,
   } = req.body || {};
 
   if (role && [UserRole.STUDENT, UserRole.TEACHER, UserRole.ADMIN].includes(role)) {
@@ -4442,6 +4861,16 @@ app.put('/api/admin/users/:userId/details', async (req, res) => {
   if (universityId !== undefined) targetUser.universityId = universityId;
   if (email !== undefined) targetUser.email = email;
   if (department !== undefined) targetUser.department = department;
+  if (universityCode !== undefined) targetUser.universityCode = universityCode;
+  if (universityName !== undefined) targetUser.universityName = universityName;
+  if (facultyCode !== undefined) targetUser.facultyCode = facultyCode;
+  if (facultyName !== undefined) targetUser.facultyName = facultyName;
+  if (departmentCode !== undefined) targetUser.departmentCode = departmentCode;
+  if (departmentName !== undefined) targetUser.departmentName = departmentName;
+  if (branchName !== undefined) targetUser.branchName = branchName;
+  if (programCode !== undefined) targetUser.programCode = programCode;
+  if (programName !== undefined) targetUser.programName = programName;
+  if (affiliatedPrograms !== undefined && Array.isArray(affiliatedPrograms)) targetUser.affiliatedPrograms = affiliatedPrograms;
   if (isSuspended !== undefined) targetUser.isSuspended = isSuspended;
   if (suspendedReason !== undefined) targetUser.suspendedReason = suspendedReason;
 
@@ -5393,6 +5822,9 @@ async function syncFromFirestore() {
         if (Array.isArray(tombstoneDoc.deletedUserIds)) {
           tombstoneDoc.deletedUserIds.forEach((id: string) => deletedUserIds.add(id));
         }
+        if (Array.isArray(tombstoneDoc.deletedLeaveIds)) {
+          tombstoneDoc.deletedLeaveIds.forEach((id: string) => deletedLeaveIds.add(id));
+        }
       }
 
       const config = fsSettings.find((s) => s.id === 'global_config') || fsSettings[0];
@@ -5459,6 +5891,7 @@ async function syncFromFirestore() {
       }
       courseMembers.length = 0;
       courseMembers.push(...memberMap.values());
+      await deduplicateCourseMembers();
     }
 
     // 4. Sync Sessions
@@ -5499,7 +5932,7 @@ async function syncFromFirestore() {
     if (fsLeaves !== null && fsLeaves.length > 0) {
       const existingLeaveIds = new Set(leaveRequests.map((l) => l.id));
       for (const l of fsLeaves) {
-        if (l && l.id && !existingLeaveIds.has(l.id)) {
+        if (l && l.id && !deletedLeaveIds.has(l.id) && !existingLeaveIds.has(l.id)) {
           leaveRequests.push(l);
           existingLeaveIds.add(l.id);
         }
@@ -5515,6 +5948,22 @@ async function syncFromFirestore() {
           teacherAttendanceRecords.push(t);
           existingTeacherRecIds.add(t.id);
         }
+      }
+    }
+
+    // Sync Master Universities
+    const fsUnivs = await getAllFromFirestore<MasterUniversity>(COLLECTIONS.MASTER_UNIVERSITIES);
+    if (fsUnivs !== null && fsUnivs.length > 0) {
+      for (const u of fsUnivs) {
+        if (u && u.id) masterUniversities.set(u.id, u);
+      }
+    }
+
+    // Sync Master Faculties
+    const fsFacs = await getAllFromFirestore<MasterFaculty>(COLLECTIONS.MASTER_FACULTIES);
+    if (fsFacs !== null && fsFacs.length > 0) {
+      for (const f of fsFacs) {
+        if (f && f.id) masterFaculties.set(f.id, f);
       }
     }
 

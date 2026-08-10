@@ -1688,6 +1688,7 @@ export const AdminCoursesTab: React.FC<AdminCoursesTabProps> = ({
           isOpen={!!studentModalCourse}
           onClose={() => setStudentModalCourse(null)}
           course={studentModalCourse}
+          currentUserId={adminUser.id}
           courseMembers={studentModalMembers}
           onRefresh={handleRefreshStudentModalMembers}
           onMembersUpdated={handleRefreshStudentModalMembers}

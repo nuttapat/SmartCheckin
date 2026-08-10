@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Course, LeaveRequest, LeaveType, LeaveStatus } from '../types';
 import { submitLeaveRequest, fetchStudentLeaveRequests, cancelLeaveRequest, fetchCourseDetails } from '../services/api';
-import { FileText, Calendar, Clock, AlertCircle, CheckCircle, XCircle, Upload, Plus, Trash2, X, Eye, FileCheck, ShieldAlert, Sparkles, CalendarDays, Maximize2, Minimize2 } from 'lucide-react';
+import { FileText, Calendar, Clock, AlertCircle, CheckCircle, XCircle, Upload, Plus, Trash2, X, Eye, FileCheck, ShieldAlert, Sparkles, CalendarDays, Maximize2, Minimize2, Loader2 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 interface StudentLeaveModalProps {
@@ -45,6 +45,8 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
 
   const [formError, setFormError] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string>('');
+  const [confirmingLeaveId, setConfirmingLeaveId] = useState<string | null>(null);
+  const [cancelingLeaveId, setCancelingLeaveId] = useState<string | null>(null);
 
   const selectedCourse = courses.find((c) => c.id === selectedCourseId);
 
@@ -294,12 +296,16 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
   };
 
   const handleCancelLeave = async (leaveId: string) => {
-    if (!confirm('คุณต้องการยกเลิกใบลาเรียนนี้ใช่หรือไม่?')) return;
     try {
+      setCancelingLeaveId(leaveId);
       await cancelLeaveRequest(leaveId);
+      setLeaveRequests((prev) => prev.filter((l) => l.id !== leaveId));
+      setConfirmingLeaveId(null);
       await loadHistory();
     } catch (err: any) {
-      alert(err.message || 'เกิดข้อผิดพลาดในการยกเลิกใบลา');
+      setFormError(err.message || 'เกิดข้อผิดพลาดในการยกเลิกใบลา');
+    } finally {
+      setCancelingLeaveId(null);
     }
   };
 
@@ -437,7 +443,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                   >
                     {courses.map((c) => (
                       <option key={c.id} value={c.id} className={isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}>
-                        [{c.courseCode}] {c.courseName} (อาจารย์: {c.coordinatorName || c.ownerName || '-'})
+                        [{c.courseCode}] {c.courseName} (อาจารย์: {c.coordinatorName || '-'})
                       </option>
                     ))}
                   </select>
@@ -785,14 +791,40 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                               <span>{statusConfig.label}</span>
                             </div>
 
-                            {leave.status === LeaveStatus.PENDING && (
-                              <button
-                                onClick={() => handleCancelLeave(leave.id)}
-                                className="p-1.5 rounded-xl text-rose-500 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 transition cursor-pointer"
-                                title="ยกเลิกใบลา"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                            {(leave.status === LeaveStatus.PENDING || (leave.status as string) === 'PENDING') && (
+                              cancelingLeaveId === leave.id ? (
+                                <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-500 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700">
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                                  <span>กำลังถอน...</span>
+                                </div>
+                              ) : confirmingLeaveId === leave.id ? (
+                                <div className="flex items-center space-x-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCancelLeave(leave.id)}
+                                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-sm transition active:scale-95 cursor-pointer"
+                                  >
+                                    ยืนยันถอน
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmingLeaveId(null)}
+                                    className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 transition cursor-pointer"
+                                  >
+                                    ยกเลิก
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmingLeaveId(leave.id)}
+                                  className="flex items-center space-x-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 shadow-sm transition active:scale-95 cursor-pointer dark:bg-rose-500/10 dark:hover:bg-rose-500/20 dark:text-rose-400 dark:border-rose-500/30"
+                                  title="ยื่นถอน (ยกเลิก) คำขออนุมัติใบลาเรียน"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                                  <span>ถอนคำขอ</span>
+                                </button>
+                              )
                             )}
                           </div>
                         </div>

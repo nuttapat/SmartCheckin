@@ -97,6 +97,16 @@ export async function updateUserProfile(
     firstNameEn?: string;
     lastNameEn?: string;
     universityId?: string;
+    universityCode?: string;
+    universityName?: string;
+    facultyCode?: string;
+    facultyName?: string;
+    departmentCode?: string;
+    departmentName?: string;
+    branchName?: string;
+    programCode?: string;
+    programName?: string;
+    affiliatedPrograms?: string[];
     currentPassword?: string;
     newPassword?: string;
     isGoogleOrFirstPasswordSet?: boolean;
@@ -325,18 +335,26 @@ export async function updateCourseMemberRole(courseId: string, memberId: string,
   return parseResponse(res);
 }
 
-export async function removeCourseMember(courseId: string, memberId: string) {
+export async function removeCourseMember(courseId: string, memberId: string, teacherId?: string, password?: string) {
   const res = await fetch(`${API_BASE}/courses/${courseId}/members/${memberId}`, {
     method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(teacherId ? { 'x-user-id': teacherId } : {}),
+    },
+    body: JSON.stringify({ teacherId, password }),
   });
   return parseResponse(res);
 }
 
-export async function removeCourseMembersBatch(courseId: string, memberIds: string[]) {
+export async function removeCourseMembersBatch(courseId: string, memberIds: string[], teacherId?: string, password?: string) {
   const res = await fetch(`${API_BASE}/courses/${courseId}/members/batch-delete`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ memberIds }),
+    headers: {
+      'Content-Type': 'application/json',
+      ...(teacherId ? { 'x-user-id': teacherId } : {}),
+    },
+    body: JSON.stringify({ memberIds, teacherId, password }),
   });
   return parseResponse(res);
 }
@@ -730,6 +748,57 @@ export async function updateSystemSettings(settings: any) {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),
+  });
+  return parseResponse(res);
+}
+
+// Master Universities API
+export async function fetchMasterUniversities() {
+  const res = await fetch(`${API_BASE}/admin/master/universities`);
+  return parseResponse(res);
+}
+
+export async function saveMasterUniversity(univ: any) {
+  const res = await fetch(`${API_BASE}/admin/master/universities`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(univ),
+  });
+  return parseResponse(res);
+}
+
+export async function deleteMasterUniversity(id: string) {
+  const res = await fetch(`${API_BASE}/admin/master/universities/${id}`, {
+    method: 'DELETE',
+  });
+  return parseResponse(res);
+}
+
+// Master Faculties API
+export async function fetchMasterFaculties() {
+  const res = await fetch(`${API_BASE}/admin/master/faculties`);
+  return parseResponse(res);
+}
+
+export async function saveMasterFaculty(fac: any) {
+  const res = await fetch(`${API_BASE}/admin/master/faculties`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fac),
+  });
+  return parseResponse(res);
+}
+
+export async function deleteMasterFaculty(id: string) {
+  const res = await fetch(`${API_BASE}/admin/master/faculties/${id}`, {
+    method: 'DELETE',
+  });
+  return parseResponse(res);
+}
+
+export async function seedDefaultMasterDataApi() {
+  const res = await fetch(`${API_BASE}/admin/master/seed-defaults`, {
+    method: 'POST',
   });
   return parseResponse(res);
 }

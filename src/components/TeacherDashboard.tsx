@@ -3455,6 +3455,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           isOpen={isInviteStudentModalOpen}
           onClose={() => setIsInviteStudentModalOpen(false)}
           course={selectedCourse}
+          currentUserId={teacher.id}
           courseMembers={currentCourseMembers || []}
           isDarkMode={isDarkMode}
           onMembersUpdated={handleRefreshCourseMembers}

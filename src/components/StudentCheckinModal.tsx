@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { User, Session, Course } from '../types';
-import { submitCheckin } from '../services/api';
+import { submitCheckin, submitTeacherCheckin } from '../services/api';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
 import { parseCheckinToken } from '../utils/qrParser';
 import { getDeviceInfo } from '../utils/deviceHelper';
 import { Html5Qrcode } from 'html5-qrcode';
 import {
   Sparkles,
+  UserCheck,
   X,
   ShieldCheck,
   Navigation,
@@ -20,11 +21,15 @@ import {
   Minimize2,
 } from 'lucide-react';
 
-interface StudentCheckinModalProps {
+export interface StudentCheckinModalProps {
   isOpen: boolean;
   onClose: () => void;
-  student: User;
-  activeSessionsList: Array<{ session: Session; course?: Course }>;
+  student?: User;
+  teacher?: User;
+  userRole?: 'STUDENT' | 'TEACHER';
+  activeSessionsList?: Array<{ session: Session; course?: Course }>;
+  courses?: Course[];
+  sessionsMap?: Record<string, Session[]>;
   isDarkMode?: boolean;
   onCheckinSuccess?: () => void;
 }
@@ -33,15 +38,23 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
   isOpen,
   onClose,
   student,
-  activeSessionsList,
+  teacher,
+  userRole = 'STUDENT',
+  activeSessionsList = [],
+  courses = [],
+  sessionsMap,
   isDarkMode = false,
   onCheckinSuccess,
 }) => {
+  const isTeacher = userRole === 'TEACHER' || !!teacher;
+  const currentUser = teacher || student;
+
   const [checkinMode, setCheckinMode] = useState<'HYBRID' | 'GPS_ONLY' | 'TOKEN'>('HYBRID');
   const [isMaximized, setIsMaximized] = useState<boolean>(false);
   const [scannedResult, setScannedResult] = useState<string>('');
   const [manualInput, setManualInput] = useState<string>('');
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
+
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [isImageProcessing, setIsImageProcessing] = useState<boolean>(false);
   const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -58,15 +71,36 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync selected session when modal opens or active sessions update
-  useEffect(() => {
-    if (activeSessionsList.length > 0) {
-      const isValid = activeSessionsList.some(item => item.session.id === selectedSessionId);
-      if (!selectedSessionId || !isValid) {
-        setSelectedSessionId(activeSessionsList[0].session.id);
-      }
+  // Unified list of sessions for selection across both Teacher & Student
+  const effectiveSessionsList = useMemo(() => {
+    if (activeSessionsList && activeSessionsList.length > 0) {
+      return activeSessionsList;
     }
-  }, [activeSessionsList, selectedSessionId]);
+    if (courses && courses.length > 0) {
+      const list: Array<{ session: Session; course?: Course }> = [];
+      courses.forEach((c) => {
+        const sessList = (sessionsMap && sessionsMap[c.id]) || c.sessions || [];
+        sessList.forEach((s) => {
+          list.push({ session: s, course: c });
+        });
+      });
+      const activeOnly = list.filter((item) => item.session.isActive);
+      return activeOnly.length > 0 ? activeOnly : list;
+    }
+    return [];
+  }, [activeSessionsList, courses, sessionsMap]);
+
+  // Sync selected session ID
+  useEffect(() => {
+    if (effectiveSessionsList.length > 0) {
+      const isValid = effectiveSessionsList.some((item) => item.session.id === selectedSessionId);
+      if (!selectedSessionId || !isValid) {
+        setSelectedSessionId(effectiveSessionsList[0].session.id);
+      }
+    } else {
+      setSelectedSessionId('');
+    }
+  }, [effectiveSessionsList, selectedSessionId]);
 
   // Update GPS location
   const updateLocation = () => {
@@ -99,7 +133,6 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
             setCheckinMode('HYBRID');
             setPendingCameraNotice(`สแกนจากกล้องมือถือ: ตรวจพบรหัส [${tokenToUse}] ระบบกำลังเช็คชื่อให้อัตโนมัติ...`);
 
-            // Trigger immediate automatic check-in without requiring re-scanning
             if (!autoSubmittedRef.current) {
               autoSubmittedRef.current = true;
               setTimeout(() => {
@@ -234,46 +267,90 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
       }
 
       const devInfo = getDeviceInfo();
-
       const rawInput = qrPayloadText || scannedResult || manualInput.trim();
+
       const parsedToken = parseCheckinToken(rawInput);
       const tokenToSubmit = parsedToken.qrToken || parsedToken.rawToken;
-      const targetSessionId = parsedToken.targetId || selectedSessionId || (activeSessionsList.length > 0 ? activeSessionsList[0].session.id : undefined);
+      const targetSessionId = parsedToken.targetId || selectedSessionId || (effectiveSessionsList.length > 0 ? effectiveSessionsList[0].session.id : undefined);
 
-      if (!targetSessionId) {
-        throw new Error('ไม่พบคาบเรียนที่กำลังเปิดเช็คชื่ออยู่ในขณะนี้ กรุณาให้อาจารย์ผู้สอนเปิดระบบเช็คชื่อก่อน');
-      }
+      if (isTeacher) {
+        if (!currentUser) throw new Error('ไม่พบข้อมูลอาจารย์ผู้สอน');
 
-      const res = await submitCheckin({
-        studentId: student.id,
-        qrToken: mode === 'GPS_ONLY' ? undefined : tokenToSubmit,
-        sessionId: targetSessionId,
-        scannedLat: currentLat,
-        scannedLng: currentLng,
-        deviceId: devInfo.deviceId,
-        deviceName: devInfo.deviceName,
-        deviceType: devInfo.deviceType,
-        browser: devInfo.browser,
-        os: devInfo.os,
-        checkinMode: mode,
-      });
+        if (mode === 'HYBRID' && !tokenToSubmit) {
+          throw new Error('กรุณาสแกน QR Code หรืออัปโหลดรูปภาพ / กรอกรหัส Token ก่อนกดเช็คชื่อ');
+        }
+        if (mode === 'TOKEN' && !tokenToSubmit) {
+          throw new Error('กรุณากรอกรหัส Token 6 หลักสำหรับเข้าสอนก่อนกดเช็คชื่อ');
+        }
 
-      // Clear pending QR session token on success
-      sessionStorage.removeItem('pending_qr_checkin');
+        const targetItem = effectiveSessionsList.find((item) => item.session.id === targetSessionId);
+        const targetCourseId = targetItem?.course?.id || (courses.length > 0 ? courses[0].id : undefined);
 
-      setCheckinStatus({
-        success: true,
-        message: res.message || 'บันทึกการเช็คชื่อเข้าเรียนสำเร็จ!',
-        distance: res.distanceMeters,
-      });
+        const res = await submitTeacherCheckin({
+          teacherId: currentUser.id,
+          courseId: targetCourseId,
+          sessionId: targetSessionId,
+          lat: currentLat,
+          lng: currentLng,
+          deviceId: devInfo.deviceId,
+          deviceName: devInfo.deviceName,
+          deviceType: devInfo.deviceType,
+          browser: devInfo.browser,
+          os: devInfo.os,
+          checkinMethod: mode,
+          qrToken: mode === 'GPS_ONLY' ? undefined : tokenToSubmit,
+        });
 
-      if (onCheckinSuccess) {
-        onCheckinSuccess();
+        await stopLiveCameraStream();
+
+        const distMsg =
+          typeof res.distanceMeters === 'number' && res.distanceMeters > 0
+            ? ` (ระยะห่างจากสถานที่เรียน: ${res.distanceMeters} เมตร)`
+            : '';
+
+        setCheckinStatus({
+          success: true,
+          message: (res.message || 'บันทึกการเช็คชื่อเข้าสอนเรียบร้อยแล้ว!') + distMsg,
+          distance: res.distanceMeters,
+        });
+
+        setScannedResult('');
+        setManualInput('');
+
+        if (onCheckinSuccess) onCheckinSuccess();
+      } else {
+        if (!currentUser) throw new Error('ไม่พบข้อมูลนักศึกษา');
+
+        if (!targetSessionId) {
+          throw new Error('ไม่พบคาบเรียนที่กำลังเปิดเช็คชื่ออยู่ในขณะนี้ กรุณาให้อาจารย์ผู้สอนเปิดระบบเช็คชื่อก่อน');
+        }
+
+        const res = await submitCheckin({
+          studentId: currentUser.id,
+          qrToken: mode === 'GPS_ONLY' ? undefined : tokenToSubmit,
+          sessionId: targetSessionId,
+          scannedLat: currentLat,
+          scannedLng: currentLng,
+          deviceId: devInfo.deviceId,
+          deviceName: devInfo.deviceName,
+          deviceType: devInfo.deviceType,
+          browser: devInfo.browser,
+          os: devInfo.os,
+          checkinMode: mode,
+        });
+
+        sessionStorage.removeItem('pending_qr_checkin');
+
+        setCheckinStatus({
+          success: true,
+          message: res.message || 'บันทึกการเช็คชื่อเข้าเรียนสำเร็จ!',
+          distance: res.distanceMeters,
+        });
+
+        if (onCheckinSuccess) onCheckinSuccess();
       }
     } catch (err: any) {
-      // Clear pending token so stale data won't persist
       sessionStorage.removeItem('pending_qr_checkin');
-      
       setScannedResult('');
       setManualInput('');
       setPendingCameraNotice(null);
@@ -308,9 +385,13 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
         {/* Header & Controls */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <Sparkles className="w-5 h-5 text-sky-600 dark:text-sky-400" />
+            {isTeacher ? (
+              <UserCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+            ) : (
+              <Sparkles className="w-5 h-5 text-sky-600 dark:text-sky-400" />
+            )}
             <h3 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-              ระบบเช็คชื่อเข้าเรียน (Student Check-in)
+              {isTeacher ? 'ระบบเช็คชื่อเข้าสอน (Teacher Check-in)' : 'ระบบเช็คชื่อเข้าเรียน (Student Check-in)'}
             </h3>
           </div>
           <div className="flex items-center space-x-1">
@@ -325,6 +406,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
               {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
             </button>
             <button
+              type="button"
               onClick={onClose}
               className={`p-1.5 rounded-lg transition cursor-pointer ${
                 isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
@@ -345,7 +427,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
         {submitting && (
           <div className="p-4 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300 flex items-center space-x-3 text-xs font-bold animate-pulse shadow-sm">
             <div className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin shrink-0"></div>
-            <span>⚡ ระบบกำลังตรวจสอบพิกัด GPS และบันทึกเวลาเรียนให้อัตโนมัติ...</span>
+            <span>⚡ ระบบกำลังตรวจสอบพิกัด GPS และบันทึกเวลาให้อัตโนมัติ...</span>
           </div>
         )}
 
@@ -454,8 +536,8 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
               💡 คำแนะนำสำหรับการเช็คชื่อด้วย QR Code:
             </p>
             <ul className="list-disc list-inside space-y-0.5 text-[10px]">
-              <li>สแกน QR Code จากหน้าจออาจารย์ หรืออัปโหลดรูปภาพ QR Code</li>
-              <li>ระบบจะทำการตรวจสอบพิกัด GPS และรหัสอุปกรณ์ป้องกันการแทนกันโดยอัตโนมัติ</li>
+              <li>สแกน QR Code หรืออัปโหลดรูปภาพ QR Code ที่ได้รับ</li>
+              <li>ระบบจะทำการตรวจสอบพิกัด GPS และรหัสอุปกรณ์โดยอัตโนมัติ</li>
             </ul>
           </div>
         </div>
@@ -486,9 +568,9 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
               <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                 เลือกคาบเรียนที่กำลังเปิดอยู่ (Active Session):
               </label>
-              {activeSessionsList.length === 0 ? (
+              {effectiveSessionsList.length === 0 ? (
                 <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-700 dark:text-amber-300 text-xs font-medium">
-                  ยังไม่มีคาบเรียนเปิดเช็คชื่อในขณะนี้ (อาจารย์ต้องเปิดเช็คชื่อในระบบก่อน)
+                  ยังไม่มีคาบเรียนเปิดเช็คชื่อในขณะนี้
                 </div>
               ) : (
                 <select
@@ -500,13 +582,13 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
                       : 'bg-white border-slate-300 text-slate-900 focus:border-sky-500 shadow-sm'
                   }`}
                 >
-                  {[...activeSessionsList]
+                  {[...effectiveSessionsList]
                     .sort((a, b) => (Number(a.session.weekNumber) || 0) - (Number(b.session.weekNumber) || 0))
                     .map(({ session: s, course: c }) => (
-                    <option key={s.id} value={s.id}>
-                      {c ? `[${c.courseCode}] ${c.courseName}` : 'Ad-hoc Class'} - สัปดาห์ที่ {s.weekNumber}: {s.topic}
-                    </option>
-                  ))}
+                      <option key={s.id} value={s.id}>
+                        {c ? `[${c.courseCode}] ${c.courseName}` : 'Ad-hoc Class'} - สัปดาห์ที่ {s.weekNumber}: {s.topic}
+                      </option>
+                    ))}
                 </select>
               )}
             </div>
@@ -530,7 +612,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
             <button
               type="button"
               onClick={() => handleProcessCheckin(undefined, 'GPS_ONLY')}
-              disabled={submitting || activeSessionsList.length === 0}
+              disabled={submitting || effectiveSessionsList.length === 0}
               className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm disabled:opacity-50 cursor-pointer"
             >
               <Navigation className="w-4 h-4" />
@@ -555,9 +637,9 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
               <label className={`block text-xs font-semibold mb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                 เลือกคาบเรียนที่กำลังเปิดอยู่ (Active Session):
               </label>
-              {activeSessionsList.length === 0 ? (
+              {effectiveSessionsList.length === 0 ? (
                 <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-700 dark:text-amber-300 text-xs font-medium">
-                  ยังไม่มีคาบเรียนเปิดเช็คชื่อในขณะนี้ (อาจารย์ต้องเปิดเช็คชื่อในระบบก่อน)
+                  ยังไม่มีคาบเรียนเปิดเช็คชื่อในขณะนี้
                 </div>
               ) : (
                 <select
@@ -569,20 +651,20 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
                       : 'bg-white border-slate-300 text-slate-900 focus:border-sky-500 shadow-sm'
                   }`}
                 >
-                  {[...activeSessionsList]
+                  {[...effectiveSessionsList]
                     .sort((a, b) => (Number(a.session.weekNumber) || 0) - (Number(b.session.weekNumber) || 0))
                     .map(({ session: s, course: c }) => (
-                    <option key={s.id} value={s.id}>
-                      {c ? `[${c.courseCode}] ${c.courseName}` : 'Ad-hoc Class'} - สัปดาห์ที่ {s.weekNumber}: {s.topic}
-                    </option>
-                  ))}
+                      <option key={s.id} value={s.id}>
+                        {c ? `[${c.courseCode}] ${c.courseName}` : 'Ad-hoc Class'} - สัปดาห์ที่ {s.weekNumber}: {s.topic}
+                      </option>
+                    ))}
                 </select>
               )}
             </div>
 
             <div className="space-y-2">
               <label className={`block text-xs font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                ป้อนรหัส Token หรือตัวเลข 6 หลักจากหน้าจออาจารย์:
+                ป้อนรหัส Token หรือตัวเลข 6 หลักจากระบบ:
               </label>
               <input
                 type="text"
@@ -601,12 +683,12 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
               type="button"
               onClick={() => {
                 if (!manualInput.trim()) {
-                  alert('กรุณาป้อนรหัส Token หรือตัวเลข 6 หลักจากหน้าจออาจารย์ก่อนกดส่ง');
+                  alert('กรุณาป้อนรหัส Token หรือตัวเลข 6 หลักก่อนกดส่ง');
                   return;
                 }
                 handleProcessCheckin(manualInput.trim(), 'TOKEN');
               }}
-              disabled={submitting || activeSessionsList.length === 0}
+              disabled={submitting || effectiveSessionsList.length === 0}
               className="w-full py-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm disabled:opacity-50 cursor-pointer"
             >
               <KeyRound className="w-4 h-4" />
@@ -644,7 +726,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
 
             {checkinStatus.success ? (
               <p className={`text-[11px] font-mono ${isDarkMode ? 'text-stone-300' : 'text-stone-600'}`}>
-                ระยะห่างจากห้องเรียน: {checkinStatus.distance} เมตร | วิธีที่ใช้: {checkinMode}
+                {checkinStatus.distance ? `ระยะห่างจากสถานที่เรียน: ${checkinStatus.distance} เมตร | ` : ''}วิธีที่ใช้: {checkinMode}
               </p>
             ) : (
               <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-rose-200' : 'text-rose-700'}`}>{checkinStatus.error}</p>
