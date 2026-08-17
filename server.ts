@@ -69,6 +69,8 @@ const deletedMemberIds = new Set<string>();
 const deletedSessionIds = new Set<string>();
 const deletedUserIds = new Set<string>();
 const deletedLeaveIds = new Set<string>();
+const deletedAttendanceIds = new Set<string>();
+const deletedQuickEventIds = new Set<string>();
 
 export function saveLocalCache() {
   try {
@@ -94,6 +96,8 @@ export function saveLocalCache() {
       deletedSessionIds: Array.from(deletedSessionIds),
       deletedUserIds: Array.from(deletedUserIds),
       deletedLeaveIds: Array.from(deletedLeaveIds),
+      deletedAttendanceIds: Array.from(deletedAttendanceIds),
+      deletedQuickEventIds: Array.from(deletedQuickEventIds),
     };
     fs.writeFileSync(LOCAL_CACHE_PATH, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
@@ -110,6 +114,8 @@ export async function saveTombstonesToFirestore() {
       deletedSessionIds: Array.from(deletedSessionIds),
       deletedUserIds: Array.from(deletedUserIds),
       deletedLeaveIds: Array.from(deletedLeaveIds),
+      deletedAttendanceIds: Array.from(deletedAttendanceIds),
+      deletedQuickEventIds: Array.from(deletedQuickEventIds),
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {
@@ -222,6 +228,14 @@ export function loadLocalCache(): boolean {
     if (Array.isArray(data.deletedLeaveIds)) {
       deletedLeaveIds.clear();
       data.deletedLeaveIds.forEach((id: string) => deletedLeaveIds.add(id));
+    }
+    if (Array.isArray(data.deletedAttendanceIds)) {
+      deletedAttendanceIds.clear();
+      data.deletedAttendanceIds.forEach((id: string) => deletedAttendanceIds.add(id));
+    }
+    if (Array.isArray(data.deletedQuickEventIds)) {
+      deletedQuickEventIds.clear();
+      data.deletedQuickEventIds.forEach((id: string) => deletedQuickEventIds.add(id));
     }
 
     if (Array.isArray(data.users)) {
@@ -1752,7 +1766,7 @@ app.get('/api/courses', (req, res) => {
   res.json(result);
 });
 
-app.post('/api/courses', (req, res) => {
+app.post('/api/courses', async (req, res) => {
   const { courseCode, courseName, academicYear, semester, coordinatorName, weeks, ownerId, defaultLat, defaultLng, allowedGpsRadius, curriculums, facultyCode, departmentCode, majorCode, degreeLevel } = req.body;
 
   if (!courseCode || !courseName) {
@@ -1794,8 +1808,7 @@ app.post('/api/courses', (req, res) => {
 
   courses.set(newCourse.id, newCourse);
   deletedCourseIds.delete(newCourse.id);
-  saveLocalCache();
-  saveToFirestore(COLLECTIONS.COURSES, newCourse);
+  await saveToFirestore(COLLECTIONS.COURSES, newCourse);
 
   // Add owner as course member
   const ownerMember: CourseMember = {
@@ -1806,9 +1819,11 @@ app.post('/api/courses', (req, res) => {
     joinedAt: new Date().toISOString(),
   };
   courseMembers.push(ownerMember);
-  saveToFirestore(COLLECTIONS.COURSE_MEMBERS, ownerMember);
+  deletedMemberIds.delete(ownerMember.id);
+  await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, ownerMember);
 
-  // Automatically create session entries for each week
+  // Automatically create session entries for each week and batch-persist to Firestore
+  const newSessionsToSave: Session[] = [];
   newCourse.weeks.forEach((w) => {
     const wNum = Number(w.weekNumber) || 1;
     const sesId = `ses_${newCourse.id}_w${wNum}`;
@@ -1816,16 +1831,22 @@ app.post('/api/courses', (req, res) => {
       id: sesId,
       courseId: newCourse.id,
       weekNumber: wNum,
-      topic: w.topic,
+      topic: w.topic || `สัปดาห์ที่ ${wNum}`,
       teacherLat: lat,
       teacherLng: lng,
       isActive: false,
       createdAt: new Date().toISOString(),
     };
     sessions.set(sesId, newSession);
-    saveToFirestore(COLLECTIONS.SESSIONS, newSession);
+    deletedSessionIds.delete(sesId);
+    newSessionsToSave.push(newSession);
   });
 
+  if (newSessionsToSave.length > 0) {
+    await batchSaveToFirestore(COLLECTIONS.SESSIONS, newSessionsToSave);
+  }
+
+  saveLocalCache();
   res.json({ message: 'Course created successfully', course: newCourse });
 });
 
@@ -1843,6 +1864,8 @@ function ensureCourseSessions(course: Course): Session[] {
       existingWeekMap.set(Number(s.weekNumber), s);
     });
 
+    const sessionsToPersist: Session[] = [];
+
     course.weeks.forEach((w) => {
       const wNum = Number(w.weekNumber) || 1;
       const existing = existingWeekMap.get(wNum);
@@ -1859,13 +1882,18 @@ function ensureCourseSessions(course: Course): Session[] {
           createdAt: new Date().toISOString(),
         };
         sessions.set(sesId, newSession);
-        saveToFirestore(COLLECTIONS.SESSIONS, newSession).catch(() => {});
+        deletedSessionIds.delete(sesId);
+        sessionsToPersist.push(newSession);
       } else if (w.topic && existing.topic !== w.topic) {
         existing.topic = w.topic;
         sessions.set(existing.id, existing);
-        saveToFirestore(COLLECTIONS.SESSIONS, existing).catch(() => {});
+        sessionsToPersist.push(existing);
       }
     });
+
+    if (sessionsToPersist.length > 0) {
+      batchSaveToFirestore(COLLECTIONS.SESSIONS, sessionsToPersist).catch(() => {});
+    }
   }
 
   return Array.from(sessions.values())
@@ -1919,7 +1947,7 @@ app.get('/api/courses/:id', (req, res) => {
   });
 });
 
-app.put('/api/courses/:id', (req, res) => {
+app.put('/api/courses/:id', async (req, res) => {
   const courseId = req.params.id;
   const course = courses.get(courseId);
   if (!course) {
@@ -1960,12 +1988,16 @@ app.put('/api/courses/:id', (req, res) => {
   const courseLat = course.defaultLat || 13.7988363;
   const courseLng = course.defaultLng || 100.322944;
 
+  const sessionsToSave: Session[] = [];
+  const sessionsToDelete: string[] = [];
+
   // Synchronize all existing sessions with course default location
   Array.from(sessions.values()).forEach((s) => {
     if (s.courseId === courseId) {
       s.teacherLat = courseLat;
       s.teacherLng = courseLng;
       sessions.set(s.id, s);
+      sessionsToSave.push(s);
     }
   });
 
@@ -1981,6 +2013,8 @@ app.put('/api/courses/:id', (req, res) => {
     existingSessions.forEach((s) => {
       if (!currentWeekNumbers.has(Number(s.weekNumber))) {
         sessions.delete(s.id);
+        deletedSessionIds.add(s.id);
+        sessionsToDelete.push(s.id);
       }
     });
 
@@ -1994,25 +2028,49 @@ app.put('/api/courses/:id', (req, res) => {
         existingSession.teacherLat = courseLat;
         existingSession.teacherLng = courseLng;
         sessions.set(existingSession.id, existingSession);
+        deletedSessionIds.delete(existingSession.id);
+        if (!sessionsToSave.some((s) => s.id === existingSession.id)) {
+          sessionsToSave.push(existingSession);
+        }
       } else {
-        const newSesId = `ses_${courseId}_w${wNum}_${Date.now()}`;
-        sessions.set(newSesId, {
+        const newSesId = `ses_${courseId}_w${wNum}`;
+        const newSession: Session = {
           id: newSesId,
           courseId,
           weekNumber: wNum,
-          topic: w.topic,
+          topic: w.topic || `สัปดาห์ที่ ${wNum}`,
           teacherLat: courseLat,
           teacherLng: courseLng,
           isActive: false,
           createdAt: new Date().toISOString(),
-        });
+        };
+        sessions.set(newSesId, newSession);
+        deletedSessionIds.delete(newSesId);
+        sessionsToSave.push(newSession);
       }
     });
   }
 
   courses.set(courseId, course);
   deletedCourseIds.delete(courseId);
+
+  // Real-time Cloud Firestore Persistence
+  await saveToFirestore(COLLECTIONS.COURSES, course);
+
+  if (sessionsToSave.length > 0) {
+    await batchSaveToFirestore(COLLECTIONS.SESSIONS, sessionsToSave);
+  }
+
+  for (const delSesId of sessionsToDelete) {
+    await deleteFromFirestore(COLLECTIONS.SESSIONS, delSesId);
+  }
+
+  if (sessionsToDelete.length > 0) {
+    await saveTombstonesToFirestore();
+  }
+
   saveLocalCache();
+
   const updatedSessions = Array.from(sessions.values())
     .filter((s) => s.courseId === courseId)
     .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
@@ -2137,7 +2195,7 @@ app.get('/api/students', (req, res) => {
   res.json(studentUsers);
 });
 
-app.post('/api/courses/:id/members/invite-student', (req, res) => {
+app.post('/api/courses/:id/members/invite-student', async (req, res) => {
   const courseId = req.params.id;
   const { studentUserId } = req.body;
 
@@ -2155,7 +2213,9 @@ app.post('/api/courses/:id/members/invite-student', (req, res) => {
 
   if (existingMember) {
     existingMember.role = CourseMemberRole.STUDENT;
-    saveToFirestore(COLLECTIONS.COURSE_MEMBERS, existingMember);
+    deletedMemberIds.delete(existingMember.id);
+    await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, existingMember);
+    saveLocalCache();
     return res.json({
       message: `นักศึกษา ${targetStudent.firstNameTh} ${targetStudent.lastNameTh} (${targetStudent.universityId || '-'}) มีชื่อในวิชานี้อยู่แล้ว`,
       member: { ...existingMember, user: targetStudent },
@@ -2171,7 +2231,9 @@ app.post('/api/courses/:id/members/invite-student', (req, res) => {
   };
 
   courseMembers.push(newMember);
-  saveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMember);
+  deletedMemberIds.delete(newMember.id);
+  await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMember);
+  saveLocalCache();
 
   res.json({
     message: `เพิ่มนักศึกษา ${targetStudent.firstNameTh} ${targetStudent.lastNameTh} (${targetStudent.universityId || '-'}) เข้าร่วมรายวิชาสำเร็จ`,
@@ -2203,7 +2265,8 @@ app.post('/api/courses/:id/members/invite-students-batch', async (req, res) => {
     const existingMember = courseMembers.find((m) => m.courseId === courseId && m.userId === uid);
     if (existingMember) {
       existingMember.role = CourseMemberRole.STUDENT;
-      saveToFirestore(COLLECTIONS.COURSE_MEMBERS, existingMember);
+      deletedMemberIds.delete(existingMember.id);
+      newMembersToSave.push(existingMember);
       updatedCount++;
     } else {
       const newMember: CourseMember = {
@@ -2214,6 +2277,7 @@ app.post('/api/courses/:id/members/invite-students-batch', async (req, res) => {
         joinedAt: new Date().toISOString(),
       };
       courseMembers.push(newMember);
+      deletedMemberIds.delete(newMember.id);
       newMembersToSave.push(newMember);
       addedCount++;
     }
@@ -2223,6 +2287,8 @@ app.post('/api/courses/:id/members/invite-students-batch', async (req, res) => {
     await batchSaveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMembersToSave);
   }
 
+  saveLocalCache();
+
   res.json({
     message: `เพิ่มนักศึกษาเข้าร่วมรายวิชาสำเร็จจำนวน ${addedCount} คน${updatedCount > 0 ? ` (มีอยู่แล้ว ${updatedCount} คน)` : ''}`,
     addedCount,
@@ -2231,7 +2297,7 @@ app.post('/api/courses/:id/members/invite-students-batch', async (req, res) => {
   });
 });
 
-app.post('/api/courses/:id/members/invite-teacher', (req, res) => {
+app.post('/api/courses/:id/members/invite-teacher', async (req, res) => {
   const courseId = req.params.id;
   const { teacherUserId, role } = req.body;
 
@@ -2258,7 +2324,9 @@ app.post('/api/courses/:id/members/invite-teacher', (req, res) => {
 
   if (existingMember) {
     existingMember.role = targetRole;
-    saveToFirestore(COLLECTIONS.COURSE_MEMBERS, existingMember);
+    deletedMemberIds.delete(existingMember.id);
+    await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, existingMember);
+    saveLocalCache();
     return res.json({
       message: `ปรับเปลี่ยนสิทธิ์ของ ${targetTeacher.title} ${targetTeacher.firstNameTh} ${targetTeacher.lastNameTh} เป็นสิทธิ์ใหม่เรียบร้อยแล้ว`,
       member: { ...existingMember, user: targetTeacher },
@@ -2274,7 +2342,9 @@ app.post('/api/courses/:id/members/invite-teacher', (req, res) => {
   };
 
   courseMembers.push(newMember);
-  saveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMember);
+  deletedMemberIds.delete(newMember.id);
+  await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMember);
+  saveLocalCache();
 
   res.json({
     message: `เพิ่ม/เชิญ ${targetTeacher.title} ${targetTeacher.firstNameTh} ${targetTeacher.lastNameTh} เข้าร่วมรายวิชาสำเร็จ`,
@@ -2282,7 +2352,7 @@ app.post('/api/courses/:id/members/invite-teacher', (req, res) => {
   });
 });
 
-app.put('/api/courses/:id/members/:memberId/role', (req, res) => {
+app.put('/api/courses/:id/members/:memberId/role', async (req, res) => {
   const { id: courseId, memberId } = req.params;
   const { role } = req.body;
 
@@ -2292,7 +2362,9 @@ app.put('/api/courses/:id/members/:memberId/role', (req, res) => {
   }
 
   member.role = role;
-  saveToFirestore(COLLECTIONS.COURSE_MEMBERS, member);
+  deletedMemberIds.delete(member.id);
+  await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, member);
+  saveLocalCache();
 
   res.json({ message: 'อัปเดตสิทธิ์ของอาจารย์เรียบร้อยแล้ว', member });
 });
@@ -2466,7 +2538,7 @@ app.post('/api/courses/:id/invite', (req, res) => {
   res.json(invite);
 });
 
-app.post('/api/invites/join', (req, res) => {
+app.post('/api/invites/join', async (req, res) => {
   const { code, userId } = req.body;
   if (!code || !code.trim()) {
     return res.status(400).json({ error: 'กรุณาระบุรหัสเชิญชวนหรือรหัสรายวิชา' });
@@ -2537,13 +2609,15 @@ app.post('/api/invites/join', (req, res) => {
   };
 
   courseMembers.push(newMember);
-  saveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMember);
+  deletedMemberIds.delete(newMember.id);
+  await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, newMember);
+  saveLocalCache();
 
   res.json({ message: 'เข้าร่วมรายวิชาสำเร็จเรียบร้อยแล้ว!', courseId: targetCourseId });
 });
 
 // 3. Active Session & Dynamic QR Management
-app.post('/api/sessions/:id/activate', (req, res) => {
+app.post('/api/sessions/:id/activate', async (req, res) => {
   const { teacherLat, teacherLng, isGpsCheckEnabled = true, sessionDurationMinutes, lateThresholdMinutes, isStaticQr, qrRefreshIntervalSeconds } = req.body;
   const session = sessions.get(req.params.id);
 
@@ -2601,28 +2675,37 @@ app.post('/api/sessions/:id/activate', (req, res) => {
   };
   activeQRCodes.set(session.id, qrData);
 
+  deletedSessionIds.delete(session.id);
+  await saveToFirestore(COLLECTIONS.SESSIONS, session);
+  saveLocalCache();
+
   res.json({ message: 'Session QR code activated', session, qrToken: token, expiresAt, isStatic, refreshIntervalSeconds: intervalSec });
 });
 
-app.post('/api/sessions/:id/gps-toggle', (req, res) => {
+app.post('/api/sessions/:id/gps-toggle', async (req, res) => {
   const { isGpsCheckEnabled } = req.body;
   const targetId = req.params.id;
   const session = sessions.get(targetId);
   if (session) {
     session.isGpsCheckEnabled = isGpsCheckEnabled !== false;
+    deletedSessionIds.delete(session.id);
+    await saveToFirestore(COLLECTIONS.SESSIONS, session);
   }
   const qEvt = quickEvents.get(targetId);
   if (qEvt) {
     qEvt.isGpsCheckEnabled = isGpsCheckEnabled !== false;
+    deletedQuickEventIds.delete(qEvt.id);
+    await saveToFirestore(COLLECTIONS.QUICK_EVENTS, qEvt);
   }
   const activeQR = activeQRCodes.get(targetId);
   if (activeQR) {
     activeQR.isGpsCheckEnabled = isGpsCheckEnabled !== false;
   }
+  saveLocalCache();
   res.json({ message: 'GPS check status updated', isGpsCheckEnabled: isGpsCheckEnabled !== false });
 });
 
-app.post('/api/sessions/:id/qr-mode', (req, res) => {
+app.post('/api/sessions/:id/qr-mode', async (req, res) => {
   const { isStatic } = req.body;
   const targetId = req.params.id;
   const isStaticBool = isStatic === true;
@@ -2630,10 +2713,14 @@ app.post('/api/sessions/:id/qr-mode', (req, res) => {
   const session = sessions.get(targetId);
   if (session) {
     session.isStaticQr = isStaticBool;
+    deletedSessionIds.delete(session.id);
+    await saveToFirestore(COLLECTIONS.SESSIONS, session);
   }
   const qEvt = quickEvents.get(targetId);
   if (qEvt) {
     qEvt.isStaticQr = isStaticBool;
+    deletedQuickEventIds.delete(qEvt.id);
+    await saveToFirestore(COLLECTIONS.QUICK_EVENTS, qEvt);
   }
 
   const activeQR = activeQRCodes.get(targetId);
@@ -2652,10 +2739,11 @@ app.post('/api/sessions/:id/qr-mode', (req, res) => {
     });
   }
 
+  saveLocalCache();
   res.json({ message: 'QR Mode updated successfully', isStatic: isStaticBool, activeQR });
 });
 
-app.post('/api/sessions/:id/qr-interval', (req, res) => {
+app.post('/api/sessions/:id/qr-interval', async (req, res) => {
   const { qrRefreshIntervalSeconds } = req.body;
   const targetId = req.params.id;
   const intervalSec = Math.max(5, Math.min(600, Number(qrRefreshIntervalSeconds) || 30));
@@ -2663,10 +2751,14 @@ app.post('/api/sessions/:id/qr-interval', (req, res) => {
   const session = sessions.get(targetId);
   if (session) {
     session.qrRefreshIntervalSeconds = intervalSec;
+    deletedSessionIds.delete(session.id);
+    await saveToFirestore(COLLECTIONS.SESSIONS, session);
   }
   const qEvt = quickEvents.get(targetId);
   if (qEvt) {
     qEvt.qrRefreshIntervalSeconds = intervalSec;
+    deletedQuickEventIds.delete(qEvt.id);
+    await saveToFirestore(COLLECTIONS.QUICK_EVENTS, qEvt);
   }
 
   const activeQR = activeQRCodes.get(targetId);
@@ -2689,14 +2781,18 @@ app.post('/api/sessions/:id/qr-interval', (req, res) => {
     });
   }
 
+  saveLocalCache();
   res.json({ message: 'QR Refresh Interval updated', qrRefreshIntervalSeconds: intervalSec, activeQR });
 });
 
-app.post('/api/sessions/:id/deactivate', (req, res) => {
+app.post('/api/sessions/:id/deactivate', async (req, res) => {
   const session = sessions.get(req.params.id);
   if (session) {
     session.isActive = false;
     activeQRCodes.delete(session.id);
+    deletedSessionIds.delete(session.id);
+    await saveToFirestore(COLLECTIONS.SESSIONS, session);
+    saveLocalCache();
   }
   res.json({ message: 'Session closed', session });
 });
@@ -2730,7 +2826,7 @@ app.get('/api/sessions/active', (req, res) => {
 });
 
 // 4. ANTI-PROXY CHECK-IN ENDPOINT
-app.post('/api/checkin', (req, res) => {
+app.post('/api/checkin', async (req, res) => {
   const { sessionId, qrToken, studentId, scannedLat, scannedLng, deviceId, checkinMode = 'HYBRID' } = req.body;
 
   if (!sessionId || !studentId) {
@@ -2787,7 +2883,7 @@ app.post('/api/checkin', (req, res) => {
       });
     }
     users.set(student.id, student);
-    saveToFirestore(COLLECTIONS.USERS, student);
+    await saveToFirestore(COLLECTIONS.USERS, student);
   }
 
   // Geofence Distance Calculation
@@ -2916,7 +3012,9 @@ app.post('/api/checkin', (req, res) => {
   };
 
   attendanceRecords.push(newRecord);
-  saveToFirestore(COLLECTIONS.ATTENDANCE, newRecord);
+  deletedAttendanceIds.delete(newRecord.id);
+  await saveToFirestore(COLLECTIONS.ATTENDANCE, newRecord);
+  saveLocalCache();
   broadcastCheckinEvent(sessionId, newRecord);
 
   res.json({
@@ -2928,7 +3026,7 @@ app.post('/api/checkin', (req, res) => {
 });
 
 // 4.5 TEACHER CHECK-IN ENDPOINT (SEPARATE DATASET)
-app.post('/api/teacher/checkin', (req, res) => {
+app.post('/api/teacher/checkin', async (req, res) => {
   const { teacherId, courseId, sessionId, lat, lng, deviceId, deviceName, deviceType, browser, os, checkinMethod = 'HYBRID', qrToken, buildingRoom, notes } = req.body;
 
   const teacher = users.get(teacherId);
@@ -2945,7 +3043,7 @@ app.post('/api/teacher/checkin', (req, res) => {
       });
     }
     users.set(teacher.id, teacher);
-    saveToFirestore(COLLECTIONS.USERS, teacher);
+    await saveToFirestore(COLLECTIONS.USERS, teacher);
   }
 
   // Token Validation if provided or in TOKEN/HYBRID mode
@@ -3024,7 +3122,8 @@ app.post('/api/teacher/checkin', (req, res) => {
   };
 
   teacherAttendanceRecords.push(record);
-  saveToFirestore(COLLECTIONS.TEACHER_ATTENDANCE, record);
+  await saveToFirestore(COLLECTIONS.TEACHER_ATTENDANCE, record);
+  saveLocalCache();
 
   res.json({
     message: 'อาจารย์เช็คชื่อเข้าสอนสำเร็จเรียบร้อยแล้ว!',
@@ -3044,7 +3143,7 @@ app.get('/api/teacher/checkin', (req, res) => {
 });
 
 // 5. Quick Check-In (Event Mode)
-app.post('/api/quick-events', (req, res) => {
+app.post('/api/quick-events', async (req, res) => {
   const { title, teacherId, teacherLat, teacherLng, isGpsCheckEnabled = true } = req.body;
   const reqUserId = req.headers['x-user-id'] as string;
   const newEvent: QuickEvent = {
@@ -3059,6 +3158,9 @@ app.post('/api/quick-events', (req, res) => {
   };
 
   quickEvents.set(newEvent.id, newEvent);
+  deletedQuickEventIds.delete(newEvent.id);
+  await saveToFirestore(COLLECTIONS.QUICK_EVENTS, newEvent);
+  saveLocalCache();
 
   // Active QR Token (6 characters)
   const token = generate6CharToken();
@@ -3078,7 +3180,7 @@ app.get('/api/quick-events/:id/records', (req, res) => {
   res.json(records);
 });
 
-app.post('/api/checkin/quick', (req, res) => {
+app.post('/api/checkin/quick', async (req, res) => {
   const { eventId, qrToken, studentId, scannedLat, scannedLng, deviceId } = req.body;
 
   const qEvent = quickEvents.get(eventId);
@@ -3101,7 +3203,7 @@ app.post('/api/checkin/quick', (req, res) => {
       });
     }
     users.set(student.id, student);
-    saveToFirestore(COLLECTIONS.USERS, student);
+    await saveToFirestore(COLLECTIONS.USERS, student);
   }
 
   const checkinMode = req.body.checkinMode || 'HYBRID';
@@ -3177,6 +3279,9 @@ app.post('/api/checkin/quick', (req, res) => {
   };
 
   attendanceRecords.push(newRecord);
+  deletedAttendanceIds.delete(newRecord.id);
+  await saveToFirestore(COLLECTIONS.ATTENDANCE, newRecord);
+  saveLocalCache();
   broadcastCheckinEvent(eventId, newRecord);
 
   res.json({ message: 'Quick Check-in recorded!', record: newRecord });
@@ -5917,6 +6022,12 @@ async function syncFromFirestore() {
         }
         if (Array.isArray(tombstoneDoc.deletedLeaveIds)) {
           tombstoneDoc.deletedLeaveIds.forEach((id: string) => deletedLeaveIds.add(id));
+        }
+        if (Array.isArray(tombstoneDoc.deletedAttendanceIds)) {
+          tombstoneDoc.deletedAttendanceIds.forEach((id: string) => deletedAttendanceIds.add(id));
+        }
+        if (Array.isArray(tombstoneDoc.deletedQuickEventIds)) {
+          tombstoneDoc.deletedQuickEventIds.forEach((id: string) => deletedQuickEventIds.add(id));
         }
       }
 
