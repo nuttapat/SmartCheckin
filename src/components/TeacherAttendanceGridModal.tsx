@@ -252,6 +252,32 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
     return 'ABSENT';
   };
 
+  // Determine conducted weeks (sessions that have been held or are scheduled on/before today)
+  const isWeekConducted = (wk: { weekNumber: number; date?: string; topic?: string }) => {
+    // 1. Session active or activatedAt or has records
+    const ses = sessions?.find((s) => Number(s.weekNumber) === Number(wk.weekNumber));
+    if (ses) {
+      if (ses.isActive || ses.activatedAt) return true;
+    }
+    // 2. Check if any student has any record for this week
+    for (const st of studentsData) {
+      const ss = st.sessionStatuses?.find((s) => Number(s.weekNumber) === Number(wk.weekNumber));
+      if (ss && (ss.status === 'PRESENT' || ss.status === 'LATE' || ss.status === 'LEAVE' || ss.checkinTime)) {
+        return true;
+      }
+    }
+    // 3. Date check (Bangkok timezone)
+    if (wk.date) {
+      const todayBkk = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+      if (wk.date <= todayBkk) return true;
+    }
+    return false;
+  };
+
+  const conductedWeeks = useMemo(() => {
+    return weekList.filter((wk) => isWeekConducted(wk));
+  }, [weekList, sessions, studentsData]);
+
   // Sorted list based on column header selection
   const sortedStudents = useMemo(() => {
     const list = [...filteredStudents];
@@ -265,7 +291,9 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
         return gridSortDirection === 'asc' ? cmp : -cmp;
       }
       if (gridSortColumn === 'summary') {
-        const weeksCount = weekList.length || 1;
+        const conductedCount = conductedWeeks.length;
+        if (conductedCount === 0) return 0;
+
         let aAttended = 0;
         let bAttended = 0;
 
@@ -274,15 +302,15 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
         const bStatusByWeek = new Map<number, string>();
         b.sessionStatuses?.forEach((ss) => ss.weekNumber && bStatusByWeek.set(Number(ss.weekNumber), ss.status));
 
-        weekList.forEach((wk) => {
+        conductedWeeks.forEach((wk) => {
           const aEff = getEffectiveStatus(a.userId, wk.weekNumber, aStatusByWeek.get(wk.weekNumber) || 'ABSENT');
           if (aEff === 'PRESENT' || aEff === 'LATE') aAttended++;
           const bEff = getEffectiveStatus(b.userId, wk.weekNumber, bStatusByWeek.get(wk.weekNumber) || 'ABSENT');
           if (bEff === 'PRESENT' || bEff === 'LATE') bAttended++;
         });
 
-        const aPct = Math.round((aAttended / weeksCount) * 100);
-        const bPct = Math.round((bAttended / weeksCount) * 100);
+        const aPct = Math.round((aAttended / conductedCount) * 100);
+        const bPct = Math.round((bAttended / conductedCount) * 100);
 
         return gridSortDirection === 'asc' ? aPct - bPct : bPct - aPct;
       }
@@ -304,17 +332,19 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
       return 0;
     });
     return list;
-  }, [filteredStudents, gridSortColumn, gridSortDirection, weekList, pendingChanges]);
+  }, [filteredStudents, gridSortColumn, gridSortDirection, weekList, conductedWeeks, pendingChanges]);
 
   // Overall statistics incorporating draft changes
   const stats = useMemo(() => {
     const totalStudents = studentsData.length;
+    const conductedCount = conductedWeeks.length;
+    const maxAllowedAbsences = Math.floor((weekList.length || 1) * 0.20);
     let totalPercentSum = 0;
     let eligibleCount = 0;
 
     studentsData.forEach((st) => {
-      const weeksCount = weekList.length || 1;
       let attended = 0;
+      let absent = 0;
 
       const statusByWeek = new Map<number, string>();
       if (st.sessionStatuses) {
@@ -325,27 +355,34 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
         });
       }
 
-      weekList.forEach((wk) => {
+      conductedWeeks.forEach((wk) => {
         const origRaw = statusByWeek.get(wk.weekNumber) || 'ABSENT';
         const eff = getEffectiveStatus(st.userId, wk.weekNumber, origRaw);
         if (eff === 'PRESENT' || eff === 'LATE') {
           attended++;
+        } else if (eff === 'ABSENT') {
+          absent++;
         }
       });
 
-      const pct = Math.round((attended / weeksCount) * 100);
+      const pct = conductedCount > 0 ? Math.round((attended / conductedCount) * 100) : 100;
       totalPercentSum += pct;
-      if (pct >= 80) eligibleCount++;
+      
+      const isEligible = (absent <= maxAllowedAbsences) && (pct >= 80);
+      if (isEligible) eligibleCount++;
     });
 
     const avgAttendancePercent = totalStudents > 0 ? Math.round(totalPercentSum / totalStudents) : 0;
     return {
       totalStudents,
+      conductedWeeksCount: conductedCount,
+      totalWeeksCount: weekList.length,
+      maxAllowedAbsences,
       avgAttendancePercent,
       eligibleCount,
       ineligibleCount: totalStudents - eligibleCount,
     };
-  }, [studentsData, weekList, pendingChanges]);
+  }, [studentsData, weekList, conductedWeeks, pendingChanges]);
 
   if (!isOpen) return null;
 
@@ -551,7 +588,8 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
       ...sessionHeaders,
       'จำนวนคาบที่เข้าเรียน',
       'จำนวนคาบที่ลา',
-      'คาบทั้งหมด',
+      'คาบที่เปิดสอนแล้ว',
+      'คาบตามแผนทั้งหมด',
       'อัตราการเข้าเรียน (%)',
       'สถานะสิทธิ์สอบ',
     ];
@@ -591,8 +629,13 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
       });
 
       const totalWeeks = weekList.length || 1;
-      const pct = Math.round((attendedCount / totalWeeks) * 100);
-      const examEligibility = pct >= 80 ? 'มีสิทธิ์สอบ (80%+)' : 'เสี่ยงหมดสิทธิ์สอบ (ต่ำกว่า 80%)';
+      const conductedCount = conductedWeeks.length;
+      const maxAllowedAbsences = Math.floor(totalWeeks * 0.20);
+      const absentCount = conductedCount - attendedCount - leaveCount;
+      const pct = conductedCount > 0 ? Math.round((attendedCount / conductedCount) * 100) : 100;
+      const examEligibility = (absentCount <= maxAllowedAbsences && pct >= 80)
+        ? 'มีสิทธิ์สอบ (ปกติ)'
+        : 'เสี่ยงหมดสิทธิ์สอบ (ขาดเกินโควตา/ต่ำกว่า 80%)';
 
       const row = [
         idx + 1,
@@ -602,6 +645,7 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
         ...weekCols,
         attendedCount,
         leaveCount,
+        conductedCount,
         totalWeeks,
         `"${pct}%"`,
         `"${examEligibility}"`,
@@ -941,16 +985,21 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
 
                     <th
                       onClick={() => handleGridSort('summary')}
-                      className="p-2 sm:p-3 text-center min-w-[110px] sm:min-w-[140px] bg-slate-200/60 dark:bg-slate-900/80 cursor-pointer hover:bg-slate-300/60 dark:hover:bg-slate-800 select-none transition"
+                      className="p-2 sm:p-3 text-center min-w-[130px] sm:min-w-[160px] bg-slate-200/60 dark:bg-slate-900/80 cursor-pointer hover:bg-slate-300/60 dark:hover:bg-slate-800 select-none transition"
                       title="กดเพื่อจัดเรียงตามเปอร์เซ็นต์เข้าเรียน"
                     >
-                      <div className="flex items-center justify-center space-x-1">
-                        <span>สรุปเข้าเรียน (%)</span>
-                        {gridSortColumn === 'summary' ? (
-                          gridSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                        ) : (
-                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
-                        )}
+                      <div className="flex flex-col items-center justify-center">
+                        <div className="flex items-center space-x-1">
+                          <span>สรุปเข้าเรียน (%)</span>
+                          {gridSortColumn === 'summary' ? (
+                            gridSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                          )}
+                        </div>
+                        <span className="text-[9px] text-slate-500 dark:text-slate-400 font-normal mt-0.5">
+                          {conductedWeeks.length} คาบที่สอนแล้ว
+                        </span>
                       </div>
                     </th>
                   </tr>
@@ -966,18 +1015,26 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
                       }
                     });
 
-                    // Calculate total attended count incorporating draft changes
+                    // Calculate total attended count in conducted weeks incorporating draft changes
                     const totalWeeksCount = weekList.length || 1;
+                    const conductedCount = conductedWeeks.length;
+                    const maxAllowedAbsences = Math.floor(totalWeeksCount * 0.20);
                     let attendedWeeksCount = 0;
-                    weekList.forEach((wk) => {
+                    let absentWeeksCount = 0;
+
+                    conductedWeeks.forEach((wk) => {
                       const origRaw = statusByWeek.get(wk.weekNumber) || 'ABSENT';
                       const eff = getEffectiveStatus(student.userId, wk.weekNumber, origRaw);
                       if (eff === 'PRESENT' || eff === 'LATE') {
                         attendedWeeksCount++;
+                      } else if (eff === 'ABSENT') {
+                        absentWeeksCount++;
                       }
                     });
-                    const pct = Math.round((attendedWeeksCount / totalWeeksCount) * 100);
-                    const isEligible = pct >= 80;
+
+                    const pct = conductedCount > 0 ? Math.round((attendedWeeksCount / conductedCount) * 100) : 100;
+                    const isEligible = (absentWeeksCount <= maxAllowedAbsences) && (pct >= 80);
+                    const remainingQuota = Math.max(0, maxAllowedAbsences - absentWeeksCount);
 
                     return (
                       <tr
@@ -1084,10 +1141,10 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
                           <div className="font-extrabold text-xs">
                             <span className={isEligible ? 'text-emerald-500' : 'text-rose-500'}>{pct}%</span>
                             <span className="text-[10px] text-slate-400 font-normal ml-1">
-                              ({attendedWeeksCount}/{totalWeeksCount})
+                              ({attendedWeeksCount}/{conductedCount} คาบ)
                             </span>
                           </div>
-                          <div className="mt-1">
+                          <div className="mt-1 flex flex-col items-center gap-0.5">
                             <span
                               className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase inline-block ${
                                 isEligible
@@ -1095,7 +1152,10 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
                                   : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
                               }`}
                             >
-                              {isEligible ? 'สิทธิ์สอบ' : 'หมดสิทธิ์สอบ'}
+                              {conductedCount === 0 ? 'ยังไม่เริ่มสอน' : (isEligible ? 'สิทธิ์สอบปกติ' : 'เสี่ยงหมดสิทธิ์')}
+                            </span>
+                            <span className="text-[9px] text-slate-400">
+                              ขาดได้อีก {remainingQuota}/{maxAllowedAbsences} คาบ
                             </span>
                           </div>
                         </td>

@@ -86,6 +86,7 @@ export interface User {
   lastNameEn: string;
   universityId: string; // Student ID or Staff ID
   email: string;
+  emailAliases?: string[]; // Parallel domain aliases e.g. ['66010012@student.mahidol.edu']
   password?: string;
   avatarUrl?: string;
   authProvider?: 'google' | 'email';
@@ -240,11 +241,17 @@ export interface GeofenceLocation {
 
 export interface AttendanceStats {
   totalSessions: number;
+  conductedSessions: number;
   attendedSessions: number;
+  approvedLeaveSessions?: number;
   lateSessions: number;
   absentSessions: number;
   percentage: number;
   statusColor: 'GREEN' | 'YELLOW' | 'RED';
+  maxAllowedAbsences: number;
+  remainingAbsenceQuota: number;
+  statusText?: string;
+  examEligibilityStatus?: 'ELIGIBLE' | 'WARNING' | 'INELIGIBLE';
 }
 
 export interface QRTokenPayload {
@@ -371,4 +378,39 @@ export interface NotificationItem {
   isRead: boolean;
   createdAt: string;
 }
+
+export interface DuplicateUserCandidate {
+  id: string;
+  primaryUser: User;
+  secondaryUsers: User[];
+  matchReason: 'DOMAIN_TRANSITION' | 'UNIVERSITY_ID_MATCH' | 'NAME_MATCH';
+  details: {
+    emails: string[];
+    universityIds: string[];
+    totalAttendanceRecords: number;
+    totalCoursesCount: number;
+    totalLeavesCount: number;
+  };
+}
+
+export interface DuplicateScanReport {
+  timestamp: string;
+  totalUsersChecked: number;
+  duplicateGroupCount: number;
+  totalRedundantAccounts: number;
+  candidates: DuplicateUserCandidate[];
+}
+
+export interface MergeResultReport {
+  success: boolean;
+  message: string;
+  mergedCount: number;
+  primaryUserId: string;
+  removedUserIds: string[];
+  reassignedAttendanceCount: number;
+  reassignedCoursesCount: number;
+  reassignedLeavesCount: number;
+  backupId?: string;
+}
+
 

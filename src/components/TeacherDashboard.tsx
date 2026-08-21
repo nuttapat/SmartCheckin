@@ -2396,15 +2396,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         </div>
 
                         <div className={`p-3 sm:p-3.5 rounded-2xl border ${isDarkMode ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                          <div className="text-[10px] font-bold uppercase text-slate-400">คาบเรียนทั้งหมด</div>
-                          <div className="text-lg sm:text-xl font-extrabold text-sky-500 mt-0.5">{currentOverviewItem.totalSessions} คาบ</div>
-                          <div className="text-[10px] text-slate-500">สัปดาห์เรียน</div>
+                          <div className="text-[10px] font-bold uppercase text-slate-400">คาบเรียนที่สอนแล้ว</div>
+                          <div className="text-lg sm:text-xl font-extrabold text-sky-500 mt-0.5">
+                            {currentOverviewItem.conductedSessions !== undefined ? currentOverviewItem.conductedSessions : currentOverviewItem.totalSessions} / {currentOverviewItem.totalSessions}
+                          </div>
+                          <div className="text-[10px] text-slate-500">คาบที่เปิดสอนจริง</div>
                         </div>
 
                         <div className={`p-3 sm:p-3.5 rounded-2xl border ${isDarkMode ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                           <div className="text-[10px] font-bold uppercase text-slate-400">อัตราเข้าเรียนรวม</div>
                           <div className="text-lg sm:text-xl font-extrabold text-amber-500 mt-0.5">{currentOverviewItem.courseAvgAttendanceRate}%</div>
-                          <div className="text-[10px] text-slate-500">เปอร์เซ็นต์รวม</div>
+                          <div className="text-[10px] text-slate-500">คำนวณจากคาบที่สอนแล้ว</div>
                         </div>
                       </div>
 
@@ -2503,15 +2505,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                       {/* Exam Eligibility Badge */}
                                       <div className="flex items-center justify-between">
                                         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                                          isEligible
-                                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-                                            : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                                          st.examEligibilityStatus === 'INELIGIBLE'
+                                            ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                                            : st.examEligibilityStatus === 'WARNING'
+                                            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                                            : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
                                         }`}>
-                                          {isEligible ? '🟢 มีสิทธิ์สอบ (80%+)' : '🔴 เสี่ยงหมดสิทธิ์สอบ (<80%)'}
+                                          {st.examEligibilityLabel || (isEligible ? '🟢 มีสิทธิ์สอบปกติ' : '🔴 เสี่ยงหมดสิทธิ์สอบ')}
                                         </span>
-                                        <span className={`text-xs font-mono font-bold ${isEligible ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                          {st.attendancePercent}%
-                                        </span>
+                                        <div className="text-right">
+                                          <span className={`text-xs font-mono font-bold ${isEligible ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                            {st.attendancePercent}%
+                                          </span>
+                                        </div>
                                       </div>
 
                                       {/* Stats Grid */}
@@ -2519,12 +2525,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                         <div className="space-y-0.5">
                                           <div className="text-slate-400">คาบที่เข้าเรียน:</div>
                                           <div className="font-mono font-bold">
-                                            <span className="text-emerald-500">{st.attendedCount}</span> / {st.totalSessionsCount} คาบ
+                                            <span className="text-emerald-500">{st.attendedCount}</span> / {st.conductedSessionsCount !== undefined ? st.conductedSessionsCount : st.totalSessionsCount} คาบ
+                                            {st.conductedSessionsCount !== undefined && st.conductedSessionsCount < st.totalSessionsCount && (
+                                              <span className="text-slate-400 font-normal text-[9px] block">
+                                                (จากทั้งหมด {st.totalSessionsCount} คาบ)
+                                              </span>
+                                            )}
                                           </div>
                                         </div>
                                         <div className="space-y-0.5">
-                                          <div className="text-slate-400">เวลาเข้าเรียนเฉลี่ย:</div>
-                                          <div className="font-mono font-bold text-amber-500">{st.avgTimeStr}</div>
+                                          <div className="text-slate-400">โควตาขาดเรียน:</div>
+                                          <div className="font-mono font-bold text-sky-500">
+                                            {st.remainingAbsenceQuota !== undefined 
+                                              ? `ขาดได้อีก ${st.remainingAbsenceQuota} ครั้ง`
+                                              : st.avgTimeStr}
+                                          </div>
                                         </div>
                                       </div>
 
@@ -2680,7 +2695,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                             </div>
                                           </td>
                                           <td className="p-3 text-center font-bold font-mono">
-                                            <span className="text-emerald-500">{st.attendedCount}</span> / {st.totalSessionsCount} คาบ
+                                            <div>
+                                              <span className="text-emerald-500">{st.attendedCount}</span> / {st.conductedSessionsCount !== undefined ? st.conductedSessionsCount : st.totalSessionsCount} คาบ
+                                              {st.conductedSessionsCount !== undefined && st.conductedSessionsCount < st.totalSessionsCount && (
+                                                <div className="text-[10px] text-slate-400 font-normal">
+                                                  (แผนทั้งหมด {st.totalSessionsCount} คาบ)
+                                                </div>
+                                              )}
+                                            </div>
                                           </td>
                                           <td className="p-3 text-center whitespace-nowrap">
                                             <div className="flex items-center justify-center space-x-1.5">
@@ -2696,7 +2718,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                             </div>
                                           </td>
                                           <td className="p-3 font-mono font-bold text-amber-500 whitespace-nowrap">
-                                            {st.avgTimeStr}
+                                            <div>{st.avgTimeStr}</div>
+                                            {st.remainingAbsenceQuota !== undefined && (
+                                              <div className="text-[10px] font-normal text-sky-400">
+                                                โควตาขาดได้อีก {st.remainingAbsenceQuota} คาบ
+                                              </div>
+                                            )}
                                           </td>
                                           <td className="p-3 text-[11px] text-slate-400 whitespace-nowrap">
                                             {st.lastCheckinTime ? (
@@ -2716,11 +2743,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                           </td>
                                           <td className="p-3 whitespace-nowrap">
                                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                                              isEligible
-                                                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-                                                : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                                              st.examEligibilityStatus === 'INELIGIBLE'
+                                                ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                                                : st.examEligibilityStatus === 'WARNING'
+                                                ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                                                : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
                                             }`}>
-                                              {isEligible ? '🟢 มีสิทธิ์สอบ (80%+)' : '🔴 เสี่ยงหมดสิทธิ์สอบ (<80%)'}
+                                              {st.examEligibilityLabel || (isEligible ? '🟢 มีสิทธิ์สอบ (80%+)' : '🔴 เสี่ยงหมดสิทธิ์สอบ (<80%)')}
                                             </span>
                                           </td>
                                         </tr>

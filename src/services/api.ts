@@ -9,6 +9,8 @@ import {
   LeaveType,
   LeaveStatus,
   NotificationItem,
+  DuplicateScanReport,
+  MergeResultReport,
 } from '../types';
 
 export const API_BASE = '/api';
@@ -951,6 +953,30 @@ export async function markAllNotificationsAsRead(userId: string) {
   });
   return parseResponse(res);
 }
+
+// Account Deduplication & Domain Transition API
+export async function scanDuplicateAccounts(): Promise<DuplicateScanReport> {
+  const res = await fetch(`${API_BASE}/admin/users/duplicate-scan`);
+  return parseResponse<DuplicateScanReport>(res);
+}
+
+export async function mergeUserAccounts(primaryUserId: string, secondaryUserIds: string[]): Promise<MergeResultReport> {
+  const res = await fetch(`${API_BASE}/admin/users/merge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ primaryUserId, secondaryUserIds }),
+  });
+  return parseResponse<MergeResultReport>(res);
+}
+
+export async function mergeAllDuplicateAccounts(): Promise<MergeResultReport> {
+  const res = await fetch(`${API_BASE}/admin/users/merge-all-duplicates`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  return parseResponse<MergeResultReport>(res);
+}
+
 
 
 

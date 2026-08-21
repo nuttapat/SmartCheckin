@@ -16,11 +16,17 @@ interface StudentCourseItem {
   course: Course;
   stats: {
     totalSessions: number;
+    conductedSessions: number;
     attendedSessions: number;
+    approvedLeaveSessions?: number;
     lateSessions: number;
     absentSessions: number;
     percentage: number;
     statusColor: 'GREEN' | 'YELLOW' | 'RED';
+    maxAllowedAbsences: number;
+    remainingAbsenceQuota: number;
+    statusText?: string;
+    examEligibilityStatus?: 'ELIGIBLE' | 'WARNING' | 'INELIGIBLE';
   };
   pastCheckins: AttendanceRecord[];
 }
@@ -229,9 +235,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
                   </div>
 
                   {/* Attendance Percentage Badge */}
-                  <div className="text-right">
+                  <div className="text-right flex flex-col items-end">
                     <div
-                      className={`inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl border text-sm font-black font-mono ${
+                      className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-sm font-black font-mono shadow-sm ${
                         item.stats.statusColor === 'GREEN'
                           ? 'bg-emerald-700/10 border-emerald-600/30 text-emerald-800 dark:text-emerald-300'
                           : item.stats.statusColor === 'YELLOW'
@@ -244,14 +250,29 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
                       </span>
                       <span>{item.stats.percentage}%</span>
                     </div>
+                    <span className="text-[10px] text-slate-400 mt-1 font-medium">
+                      {item.stats.conductedSessions === 0 
+                        ? 'ยังไม่เริ่มสอน (100%)' 
+                        : `จาก ${item.stats.conductedSessions} คาบที่เปิดสอน`}
+                    </span>
                   </div>
                 </div>
 
-                {/* Progress bar */}
-                <div>
-                  <div className={`flex justify-between text-[11px] mb-1 font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    <span>เข้าเรียนแล้ว: {item.stats.attendedSessions} / {item.stats.totalSessions} ครั้ง</span>
-                    <span>สิทธิ์สอบ: {item.stats.percentage >= 80 ? 'มีสิทธิ์สอบ (Eligible)' : 'เสี่ยงหมดสิทธิ์สอบ'}</span>
+                {/* Progress bar & Quota Information */}
+                <div className="space-y-1.5">
+                  <div className={`flex justify-between text-[11px] font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                    <span>
+                      เข้าเรียน: <strong className="text-sky-600 dark:text-sky-400">{item.stats.attendedSessions}</strong>/{item.stats.conductedSessions} คาบที่สอนแล้ว (ทั้งหมด {item.stats.totalSessions} คาบ)
+                    </span>
+                    <span className={`font-bold ${
+                      item.stats.statusColor === 'GREEN' 
+                        ? 'text-emerald-600 dark:text-emerald-400' 
+                        : item.stats.statusColor === 'YELLOW' 
+                        ? 'text-amber-600 dark:text-amber-400' 
+                        : 'text-rose-600 dark:text-rose-400'
+                    }`}>
+                      {item.stats.statusText || (item.stats.percentage >= 80 ? 'มีสิทธิ์สอบปกติ' : 'เสี่ยงหมดสิทธิ์สอบ')}
+                    </span>
                   </div>
                   <div className={`w-full rounded-full h-2 overflow-hidden ${isDarkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
                     <div
@@ -264,6 +285,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
                       }`}
                       style={{ width: `${Math.min(100, item.stats.percentage)}%` }}
                     ></div>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-slate-400">
+                    <span>
+                      โควตาขาดเรียน: ขาดได้อีก <strong className={item.stats.remainingAbsenceQuota <= 1 ? 'text-amber-500 font-bold' : 'text-slate-600 dark:text-slate-300 font-bold'}>{item.stats.remainingAbsenceQuota}</strong> ครั้ง (ขาดไปแล้ว {item.stats.absentSessions}/{item.stats.maxAllowedAbsences} ครั้ง)
+                    </span>
+                    {item.stats.approvedLeaveSessions ? (
+                      <span className="text-amber-500 font-medium">มีใบลา {item.stats.approvedLeaveSessions} คาบ</span>
+                    ) : null}
                   </div>
                 </div>
 

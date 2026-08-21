@@ -620,6 +620,116 @@ function formatBangkokTime(dateInput: string | number | Date | null | undefined)
 
 const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || 'nuttapat.anu@gmail.com').trim().toLowerCase();
 
+/**
+ * Returns all equivalent email variants for a given email address
+ * by cross-mapping legacy institutional domains (.edu <-> .ac.th)
+ */
+function getEmailDomainVariants(emailStr: string): string[] {
+  if (!emailStr || !emailStr.includes('@')) return [emailStr.trim().toLowerCase()];
+  const clean = emailStr.trim().toLowerCase();
+  const [username, domain] = clean.split('@');
+  const variants = new Set<string>([clean]);
+
+  // Mahidol Student domain mapping
+  if (domain === 'student.mahidol.edu') {
+    variants.add(`${username}@student.mahidol.ac.th`);
+  } else if (domain === 'student.mahidol.ac.th') {
+    variants.add(`${username}@student.mahidol.edu`);
+  }
+
+  // Mahidol Teacher/Staff domain mapping
+  if (domain === 'mahidol.edu') {
+    variants.add(`${username}@mahidol.ac.th`);
+  } else if (domain === 'mahidol.ac.th') {
+    variants.add(`${username}@mahidol.edu`);
+  }
+
+  // Generic .edu <-> .ac.th fallback
+  if (domain.endsWith('.edu')) {
+    variants.add(`${username}@${domain.replace(/\.edu$/, '.ac.th')}`);
+  } else if (domain.endsWith('.ac.th')) {
+    variants.add(`${username}@${domain.replace(/\.ac\.th$/, '.edu')}`);
+  }
+
+  return Array.from(variants);
+}
+
+/**
+ * Normalizes an incoming email to prefer the canonical modern .ac.th domain
+ */
+function getCanonicalUniversityEmail(emailStr: string): string {
+  if (!emailStr || !emailStr.includes('@')) return (emailStr || '').trim().toLowerCase();
+  const clean = emailStr.trim().toLowerCase();
+  const [username, domain] = clean.split('@');
+
+  if (domain === 'student.mahidol.edu') {
+    return `${username}@student.mahidol.ac.th`;
+  }
+  if (domain === 'mahidol.edu') {
+    return `${username}@mahidol.ac.th`;
+  }
+  if (domain.endsWith('.edu')) {
+    return `${username}@${domain.replace(/\.edu$/, '.ac.th')}`;
+  }
+  return clean;
+}
+
+/**
+ * Multi-Factor User Resolution:
+ * Finds an existing user by exact email, alias email, or domain transition equivalent,
+ * or by (universityId + role)
+ */
+function findUserByIdentity(emailStr?: string, universityIdStr?: string, role?: UserRole): User | undefined {
+  const allUsers = Array.from(users.values());
+
+  if (emailStr) {
+    const cleanEmail = emailStr.trim().toLowerCase();
+    const variants = getEmailDomainVariants(cleanEmail);
+
+    // 1. Exact email match
+    const exact = allUsers.find((u) => u && u.email && u.email.trim().toLowerCase() === cleanEmail);
+    if (exact) return exact;
+
+    // 2. Email aliases match
+    const byAlias = allUsers.find((u) => {
+      if (!u) return false;
+      if (Array.isArray(u.emailAliases)) {
+        return u.emailAliases.some((alias) => alias.trim().toLowerCase() === cleanEmail);
+      }
+      return false;
+    });
+    if (byAlias) return byAlias;
+
+    // 3. Domain transition variants match
+    const byVariant = allUsers.find((u) => {
+      if (!u || !u.email) return false;
+      const uEmail = u.email.trim().toLowerCase();
+      if (variants.includes(uEmail)) return true;
+      if (Array.isArray(u.emailAliases)) {
+        return u.emailAliases.some((alias) => variants.includes(alias.trim().toLowerCase()));
+      }
+      return false;
+    });
+    if (byVariant) return byVariant;
+  }
+
+  // 4. Match by Student/University ID if provided
+  if (universityIdStr && universityIdStr.trim()) {
+    const cleanUId = universityIdStr.trim();
+    const byUId = allUsers.find((u) => {
+      if (!u || !u.universityId) return false;
+      if (u.universityId.trim() === cleanUId) {
+        if (role) return u.role === role;
+        return true;
+      }
+      return false;
+    });
+    if (byUId) return byUId;
+  }
+
+  return undefined;
+}
+
 // Domain check helper function for new user registration
 const checkRegistrationDomain = (emailStr: string): { allowed: boolean; forcedRole: UserRole | null; reason?: string } => {
   const cleanEmail = emailStr.trim().toLowerCase();
@@ -1472,7 +1582,7 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   const cleanEmail = email.toString().trim().toLowerCase();
-  const user = Array.from(users.values()).find((u) => u.email && u.email.toLowerCase() === cleanEmail);
+  const user = findUserByIdentity(cleanEmail);
 
   if (!user) {
     return res.status(404).json({ error: 'ไม่พบผู้ใช้งานในระบบ กรุณาตรวจสอบอีเมลหรือลงทะเบียนใหม่' });
@@ -1604,13 +1714,14 @@ app.put('/api/users/:userId/profile', (req, res) => {
 app.post('/api/auth/google', (req, res) => {
   try {
     const { email, name, picture, role, title, universityId, firstNameTh, lastNameTh, firstNameEn, lastNameEn, password } = req.body || {};
-    const userEmail = (email || `user_${Math.floor(1000 + Math.random() * 9000)}@university.ac.th`).toString().trim().toLowerCase();
+    const rawEmail = (email || `user_${Math.floor(1000 + Math.random() * 9000)}@university.ac.th`).toString().trim().toLowerCase();
 
-    let user = Array.from(users.values()).find((u) => u.email && u.email.toLowerCase() === userEmail);
+    // Multi-factor Identity Resolution: match exact email, alias, domain transition (.edu <-> .ac.th), or student ID
+    let user = findUserByIdentity(rawEmail, universityId, role as UserRole);
 
     // Maintenance mode check for non-admin users
     const isMaintenance = systemSettings.maintenanceMode || systemSettings.systemMaintenanceMode;
-    const isUserAdmin = (user && (user.role === UserRole.ADMIN || user.id === 'usr_admin_1')) || userEmail === SUPER_ADMIN_EMAIL;
+    const isUserAdmin = (user && (user.role === UserRole.ADMIN || user.id === 'usr_admin_1')) || rawEmail === SUPER_ADMIN_EMAIL;
     if (isMaintenance && !isUserAdmin) {
       const msg = systemSettings.maintenanceMessage || systemSettings.announcementMessage || 'ระบบกำลังปิดปรับปรุงชั่วคราว ขออภัยในความไม่สะดวก';
       return res.status(503).json({
@@ -1620,14 +1731,14 @@ app.post('/api/auth/google', (req, res) => {
 
     if (!user) {
       // Check if system allows auto registration via Google
-      if (!systemSettings.allowGoogleAutoRegister && userEmail !== SUPER_ADMIN_EMAIL) {
+      if (!systemSettings.allowGoogleAutoRegister && rawEmail !== SUPER_ADMIN_EMAIL) {
         return res.status(403).json({
           error: 'ระบบปิดการสมัครสมาชิกใหม่ชั่วคราว กรุณาติดต่อผู้ดูแลระบบเพื่อขออนุมัติหรือสร้างบัญชี',
         });
       }
 
       // Domain permission check
-      const domainCheck = checkRegistrationDomain(userEmail);
+      const domainCheck = checkRegistrationDomain(rawEmail);
       if (!domainCheck.allowed) {
         return res.status(403).json({ error: domainCheck.reason });
       }
@@ -1642,8 +1753,8 @@ app.post('/api/auth/google', (req, res) => {
         return res.json({
           requiresOnboarding: true,
           forcedRole: forcedRole,
-          email: userEmail,
-          name: name || userEmail.split('@')[0],
+          email: rawEmail,
+          name: name || rawEmail.split('@')[0],
           picture: picture || 'https://lh3.googleusercontent.com/a/default-user',
           message: forcedRole === UserRole.STUDENT
             ? `พบอีเมลนักศึกษา (@${sDomain}) กรุณากรอกข้อมูลสำหรับนักศึกษาเพื่อเริ่มต้นใช้งาน`
@@ -1669,6 +1780,13 @@ app.post('/api/auth/google', (req, res) => {
       const fEn = firstNameEn && firstNameEn.toString().trim() ? firstNameEn.toString().trim() : (parts[0] || 'Google');
       const lEn = lastNameEn && lastNameEn.toString().trim() ? lastNameEn.toString().trim() : (parts.slice(1).join(' ') || 'User');
 
+      const canonicalEmail = getCanonicalUniversityEmail(rawEmail);
+      const emailAliasesList = new Set<string>();
+      if (canonicalEmail !== rawEmail) {
+        emailAliasesList.add(rawEmail);
+      }
+      getEmailDomainVariants(rawEmail).forEach((v) => emailAliasesList.add(v));
+
       user = {
         id: `usr_g_${Date.now()}`,
         role: effectiveRole,
@@ -1678,7 +1796,8 @@ app.post('/api/auth/google', (req, res) => {
         firstNameEn: fEn,
         lastNameEn: lEn,
         universityId: effectiveRole === UserRole.STUDENT ? (universityId || '').toString().trim() : '',
-        email: userEmail,
+        email: canonicalEmail,
+        emailAliases: Array.from(emailAliasesList),
         password: password && password.toString().trim() ? password.toString().trim() : '123456',
         avatarUrl: picture || 'https://lh3.googleusercontent.com/a/default-user',
         authProvider: 'google',
@@ -1694,13 +1813,33 @@ app.post('/api/auth/google', (req, res) => {
         });
       }
 
-      // Existing user signing in with Google - link account & update avatar / password if provided
+      // Existing user signing in with Google - Auto Upgrade to canonical .ac.th and preserve aliases
+      if (!Array.isArray(user.emailAliases)) {
+        user.emailAliases = [];
+      }
+      if (!user.emailAliases.includes(user.email)) {
+        user.emailAliases.push(user.email);
+      }
+      if (!user.emailAliases.includes(rawEmail)) {
+        user.emailAliases.push(rawEmail);
+      }
+
+      // If user logs in with .ac.th while currently having .edu, upgrade primary email
+      const canonical = getCanonicalUniversityEmail(rawEmail);
+      if (rawEmail.endsWith('.ac.th') && user.email.endsWith('.edu')) {
+        if (!user.emailAliases.includes(user.email)) {
+          user.emailAliases.push(user.email);
+        }
+        user.email = canonical;
+      }
+
+      // Link account & update avatar / password if provided
       if (picture) user.avatarUrl = picture;
       if (!user.authProvider) user.authProvider = 'google';
       if (password && password.toString().trim()) {
         user.password = password.toString().trim();
       }
-      if (userEmail === SUPER_ADMIN_EMAIL) {
+      if (rawEmail === SUPER_ADMIN_EMAIL) {
         user.role = UserRole.ADMIN;
       }
       saveToFirestore(COLLECTIONS.USERS, user);
@@ -3716,6 +3855,39 @@ function getApprovedLeaveForSession(studentId: string, courseId: string, session
   });
 }
 
+// Helper to check if a session has been conducted/opened for attendance
+function isSessionConducted(session: Session, course?: Course): boolean {
+  if (!session) return false;
+  if (session.isActive) return true;
+  if (session.activatedAt) return true;
+
+  // Check if any student attendance record exists for this session or week
+  const hasAttendance = attendanceRecords.some((r) =>
+    r.sessionId === session.id ||
+    (r.courseId === session.courseId && Number(r.weekNumber) === Number(session.weekNumber))
+  );
+  if (hasAttendance) return true;
+
+  // Check if any teacher check-in record exists for this session or week
+  const hasTeacherLog = teacherAttendanceRecords.some((tr: any) =>
+    tr.sessionId === session.id ||
+    (tr.courseId === session.courseId && Number(tr.weekNumber) === Number(session.weekNumber))
+  );
+  if (hasTeacherLog) return true;
+
+  // Check if session has a scheduled date that has already passed or is today in Bangkok timezone
+  const matchedWeek = course?.weeks?.find((w) => Number(w.weekNumber) === Number(session.weekNumber));
+  const weekDate = matchedWeek?.date;
+  if (weekDate && /^\d{4}-\d{2}-\d{2}$/.test(weekDate)) {
+    const todayBkk = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+    if (weekDate <= todayBkk) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // Student Dashboard Stats endpoint
 app.get('/api/student/:studentId/stats', (req, res) => {
   const studentId = req.params.studentId;
@@ -3730,25 +3902,47 @@ app.get('/api/student/:studentId/stats', (req, res) => {
       .filter((s) => s.courseId === c.id)
       .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
 
+    const totalSessions = cSessions.length || 1;
+    const conductedSessionsList = cSessions.filter((s) => isSessionConducted(s, c));
+    const conductedSessions = conductedSessionsList.length;
+
     let attendedCount = 0;
     let approvedLeaveCount = 0;
+    let lateCount = 0;
 
-    cSessions.forEach((s) => {
+    conductedSessionsList.forEach((s) => {
       const approvedLeave = getApprovedLeaveForSession(studentId, c.id, s);
       if (approvedLeave) {
         approvedLeaveCount++;
       } else {
         const rec = findStudentAttendanceRecord(studentId, c.id, s);
-        if (rec) attendedCount++;
+        if (rec) {
+          attendedCount++;
+          if (rec.status === AttendanceStatus.LATE || Boolean(rec.isLate)) {
+            lateCount++;
+          }
+        }
       }
     });
 
-    const total = cSessions.length || 1;
-    const percentage = Math.round((attendedCount / total) * 100);
+    const absentSessions = Math.max(0, conductedSessions - attendedCount - approvedLeaveCount);
+    const maxAllowedAbsences = Math.floor(totalSessions * 0.20);
+    const remainingAbsenceQuota = Math.max(0, maxAllowedAbsences - absentSessions);
+    const isExceededAbsenceQuota = absentSessions > maxAllowedAbsences;
+
+    // Calculate percentage based on conducted sessions to avoid premature "risk of failing" warning
+    const percentage = conductedSessions === 0 ? 100 : Math.round((attendedCount / conductedSessions) * 100);
 
     let statusColor: 'GREEN' | 'YELLOW' | 'RED' = 'GREEN';
-    if (percentage < 80) statusColor = 'RED';
-    else if (percentage <= 84) statusColor = 'YELLOW';
+    let statusText = 'มีสิทธิ์สอบปกติ';
+
+    if (isExceededAbsenceQuota || (conductedSessions > 0 && percentage < 80)) {
+      statusColor = 'RED';
+      statusText = 'เสี่ยงหมดสิทธิ์สอบ';
+    } else if ((remainingAbsenceQuota <= 1 && conductedSessions >= 3) || (conductedSessions > 0 && percentage <= 84)) {
+      statusColor = 'YELLOW';
+      statusText = 'เฝ้าระวัง';
+    }
 
     const pastCheckins = attendanceRecords.filter((r) =>
       cSessions.some((s) => findStudentAttendanceRecord(studentId, c.id, s)?.id === r.id)
@@ -3757,13 +3951,18 @@ app.get('/api/student/:studentId/stats', (req, res) => {
     return {
       course: c,
       stats: {
-        totalSessions: cSessions.length,
+        totalSessions,
+        conductedSessions,
         attendedSessions: attendedCount,
         approvedLeaveSessions: approvedLeaveCount,
-        lateSessions: 0,
-        absentSessions: Math.max(0, cSessions.length - attendedCount - approvedLeaveCount),
+        lateSessions: lateCount,
+        absentSessions,
         percentage,
         statusColor,
+        maxAllowedAbsences,
+        remainingAbsenceQuota,
+        statusText,
+        examEligibilityStatus: statusColor === 'RED' ? 'INELIGIBLE' : statusColor === 'YELLOW' ? 'WARNING' : 'ELIGIBLE',
       },
       pastCheckins,
     };
@@ -3803,6 +4002,10 @@ app.get('/api/teacher/courses-overview', (req, res) => {
     const coTeacherMembers = membersInCourse.filter((m) => m.role === CourseMemberRole.CO_TEACHER);
 
     const cSessions = ensureCourseSessions(course);
+    const conductedSessionsList = cSessions.filter((s) => isSessionConducted(s, course));
+    const conductedSessionsCount = conductedSessionsList.length;
+    const totalSessionsCount = cSessions.length || 1;
+    const maxAllowedAbsences = Math.floor(totalSessionsCount * 0.20);
 
     const studentList = studentMembers.map((m) => {
       const studentUser = users.get(m.userId);
@@ -3813,14 +4016,16 @@ app.get('/api/teacher/courses-overview', (req, res) => {
 
       let attendedCount = 0;
       let approvedLeaveCount = 0;
+      let lateCount = 0;
       let lastCheckinTime: string | null = null;
       let lastCheckinMethod: string | null = null;
       const validCheckinTimes: Date[] = [];
 
       const sessionStatuses = cSessions.map((s) => {
+        const isConducted = isSessionConducted(s, course);
         const approvedLeave = getApprovedLeaveForSession(m.userId, course.id, s);
         if (approvedLeave) {
-          approvedLeaveCount++;
+          if (isConducted) approvedLeaveCount++;
           const leaveTypeLabel =
             approvedLeave.leaveType === LeaveType.SICK
               ? 'ลาป่วย'
@@ -3843,6 +4048,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
             const timeBkk = formatBangkokTime(rec.timestamp);
             const recStatus = rec.status as string;
             if (recStatus === 'LEAVE' || recStatus === AttendanceStatus.LEAVE) {
+              if (isConducted) approvedLeaveCount++;
               return {
                 sessionId: s.id,
                 weekNumber: s.weekNumber,
@@ -3873,6 +4079,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
                 lastCheckinMethod = rec.checkinMethod;
               }
               const isLate = rec.status === AttendanceStatus.LATE || Boolean(rec.isLate);
+              if (isLate) lateCount++;
               const statusLabel = isLate ? `มาสาย (${timeBkk})` : `มาเรียน (${timeBkk})`;
               return {
                 sessionId: s.id,
@@ -3886,22 +4093,50 @@ app.get('/api/teacher/courses-overview', (req, res) => {
               };
             }
           } else {
-            return {
-              sessionId: s.id,
-              weekNumber: s.weekNumber,
-              topic: s.topic,
-              status: 'ABSENT',
-              statusText: 'ขาดเรียน',
-              shortStatus: 'ขาดเรียน',
-              checkinTime: null,
-              checkinTimeBangkok: null,
-            };
+            if (isConducted) {
+              return {
+                sessionId: s.id,
+                weekNumber: s.weekNumber,
+                topic: s.topic,
+                status: 'ABSENT',
+                statusText: 'ขาดเรียน',
+                shortStatus: 'ขาดเรียน',
+                checkinTime: null,
+                checkinTimeBangkok: null,
+              };
+            } else {
+              return {
+                sessionId: s.id,
+                weekNumber: s.weekNumber,
+                topic: s.topic,
+                status: 'UPCOMING',
+                statusText: 'ยังไม่เริ่มสอน',
+                shortStatus: 'ยังไม่สอน',
+                checkinTime: null,
+                checkinTimeBangkok: null,
+              };
+            }
           }
         }
       });
 
-      const totalSessionsCount = cSessions.length || 1;
-      const attendancePercent = Math.round((attendedCount / totalSessionsCount) * 100);
+      const absentCount = Math.max(0, conductedSessionsCount - attendedCount - approvedLeaveCount);
+      const remainingAbsenceQuota = Math.max(0, maxAllowedAbsences - absentCount);
+      const isExceededAbsenceQuota = absentCount > maxAllowedAbsences;
+
+      // Calculate attendance percent based on conducted sessions
+      const attendancePercent = conductedSessionsCount === 0 ? 100 : Math.round((attendedCount / conductedSessionsCount) * 100);
+
+      let examEligibilityStatus: 'ELIGIBLE' | 'WARNING' | 'INELIGIBLE' = 'ELIGIBLE';
+      let examEligibilityLabel = 'มีสิทธิ์สอบ (ปกติ)';
+
+      if (isExceededAbsenceQuota || (conductedSessionsCount > 0 && attendancePercent < 80)) {
+        examEligibilityStatus = 'INELIGIBLE';
+        examEligibilityLabel = 'เสี่ยงหมดสิทธิ์สอบ (<80%)';
+      } else if ((remainingAbsenceQuota <= 1 && conductedSessionsCount >= 3) || (conductedSessionsCount > 0 && attendancePercent <= 84)) {
+        examEligibilityStatus = 'WARNING';
+        examEligibilityLabel = 'เฝ้าระวัง (80-84%)';
+      }
 
       let avgTimeStr = '-';
       if (validCheckinTimes.length > 0) {
@@ -3925,14 +4160,20 @@ app.get('/api/teacher/courses-overview', (req, res) => {
         joinedAt: m.joinedAt,
         attendedCount,
         approvedLeaveCount,
+        lateCount,
+        absentCount,
+        conductedSessionsCount,
         totalSessionsCount,
+        maxAllowedAbsences,
+        remainingAbsenceQuota,
         attendancePercent,
+        examEligibilityStatus,
+        examEligibilityLabel,
         avgTimeStr,
         lastCheckinTime,
         lastCheckinMethod,
         sessionStatuses,
       };
-
     });
 
     const courseSessionsList = Array.from(sessions.values())
@@ -4000,6 +4241,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
               checkinMethod: rec.checkinMethod || 'สแกน QR',
             });
           } else {
+            const isConducted = isSessionConducted(s, course);
             absentStudents.push({
               userId: m.userId,
               studentName,
@@ -4007,7 +4249,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
               email: studentUser?.email || '',
               avatarUrl: studentUser?.avatarUrl || '',
               isOnLeave: false,
-              statusText: 'ขาดเรียน',
+              statusText: isConducted ? 'ขาดเรียน' : 'ยังไม่เริ่มสอน',
             });
           }
         }
@@ -4020,6 +4262,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
         weekNumber: s.weekNumber,
         topic: s.topic,
         isActive: s.isActive,
+        isConducted: isSessionConducted(s, course),
         createdAt: s.createdAt,
         checkinCount,
         registeredCount: studentMembers.length,
@@ -4035,10 +4278,10 @@ app.get('/api/teacher/courses-overview', (req, res) => {
     const totalCoTeachersCount = coTeacherMembers.length + 1;
     const totalSessions = courseSessionsList.length;
 
-    const totalPossibleCheckins = totalRegisteredCount * (totalSessions || 1);
+    const totalPossibleConductedCheckins = totalRegisteredCount * (conductedSessionsCount || 1);
     let totalActualCheckins = 0;
 
-    courseSessionsList.forEach((s) => {
+    conductedSessionsList.forEach((s) => {
       studentMembers.forEach((m) => {
         const approvedLeave = getApprovedLeaveForSession(m.userId, course.id, s);
         if (!approvedLeave) {
@@ -4048,13 +4291,16 @@ app.get('/api/teacher/courses-overview', (req, res) => {
       });
     });
 
-    const courseAvgAttendanceRate = totalPossibleCheckins > 0 ? Math.round((totalActualCheckins / totalPossibleCheckins) * 100) : 0;
+    const courseAvgAttendanceRate = conductedSessionsCount === 0
+      ? 100
+      : (totalPossibleConductedCheckins > 0 ? Math.round((totalActualCheckins / totalPossibleConductedCheckins) * 100) : 100);
 
     return {
       course,
       totalRegisteredCount,
       totalCoTeachersCount,
       totalSessions,
+      conductedSessionsCount,
       totalActualCheckins,
       courseAvgAttendanceRate,
       studentList,
@@ -5205,6 +5451,505 @@ app.post('/api/admin/users/bulk-reset-devices', async (req, res) => {
 
   res.json({ message: `ปลดล็อกอุปกรณ์ของผู้ใช้จำนวน ${resetCount} รายการเรียบร้อยแล้ว` });
 });
+
+// -------------------- DOMAIN TRANSITION & ACCOUNT MERGE API --------------------
+
+/**
+ * Scans the database to identify duplicate accounts based on domain aliases (.edu vs .ac.th),
+ * identical Student ID, or exact name matches.
+ */
+app.get('/api/admin/users/duplicate-scan', (req, res) => {
+  try {
+    const allUsers = Array.from(users.values()).filter(Boolean);
+    const groups: Map<string, { primaryUser: User; secondaryUsers: User[]; reason: 'DOMAIN_TRANSITION' | 'UNIVERSITY_ID_MATCH' | 'NAME_MATCH' }> = new Map();
+    const processedUserIds = new Set<string>();
+
+    for (let i = 0; i < allUsers.length; i++) {
+      const u1 = allUsers[i];
+      if (processedUserIds.has(u1.id)) continue;
+
+      const duplicates: User[] = [];
+      let matchReason: 'DOMAIN_TRANSITION' | 'UNIVERSITY_ID_MATCH' | 'NAME_MATCH' = 'DOMAIN_TRANSITION';
+
+      const email1 = (u1.email || '').trim().toLowerCase();
+      const uId1 = (u1.universityId || '').trim();
+      const variants1 = getEmailDomainVariants(email1);
+
+      for (let j = i + 1; j < allUsers.length; j++) {
+        const u2 = allUsers[j];
+        if (processedUserIds.has(u2.id)) continue;
+
+        const email2 = (u2.email || '').trim().toLowerCase();
+        const uId2 = (u2.universityId || '').trim();
+
+        let isMatch = false;
+
+        // Check 1: Domain transition match (.edu vs .ac.th)
+        if (email1 && email2 && variants1.includes(email2)) {
+          isMatch = true;
+          matchReason = 'DOMAIN_TRANSITION';
+        }
+        // Check 2: Same University ID (Student ID) and same role
+        else if (uId1 && uId2 && uId1 === uId2 && u1.role === u2.role) {
+          isMatch = true;
+          matchReason = 'UNIVERSITY_ID_MATCH';
+        }
+        // Check 3: Identical Thai name & same role (when student ID missing or same)
+        else if (
+          u1.firstNameTh &&
+          u2.firstNameTh &&
+          u1.lastNameTh &&
+          u2.lastNameTh &&
+          u1.firstNameTh.trim() === u2.firstNameTh.trim() &&
+          u1.lastNameTh.trim() === u2.lastNameTh.trim() &&
+          u1.role === u2.role
+        ) {
+          isMatch = true;
+          matchReason = 'NAME_MATCH';
+        }
+
+        if (isMatch) {
+          duplicates.push(u2);
+          processedUserIds.add(u2.id);
+        }
+      }
+
+      if (duplicates.length > 0) {
+        processedUserIds.add(u1.id);
+        const groupKey = `group_${u1.id}`;
+
+        // Determine which user is the primary user:
+        // Prefer .ac.th over .edu, or the account with most data / newer Google login
+        const allInGroup = [u1, ...duplicates];
+        allInGroup.sort((a, b) => {
+          const aIsAcTh = (a.email || '').endsWith('.ac.th') ? 1 : 0;
+          const bIsAcTh = (b.email || '').endsWith('.ac.th') ? 1 : 0;
+          if (aIsAcTh !== bIsAcTh) return bIsAcTh - aIsAcTh;
+
+          const aIsGoogle = a.authProvider === 'google' ? 1 : 0;
+          const bIsGoogle = b.authProvider === 'google' ? 1 : 0;
+          if (aIsGoogle !== bIsGoogle) return bIsGoogle - aIsGoogle;
+
+          const aDate = new Date(a.createdAt || 0).getTime();
+          const bDate = new Date(b.createdAt || 0).getTime();
+          return aDate - bDate; // Older established account if same
+        });
+
+        const primary = allInGroup[0];
+        const secondaries = allInGroup.slice(1);
+
+        groups.set(groupKey, {
+          primaryUser: primary,
+          secondaryUsers: secondaries,
+          reason: matchReason,
+        });
+      }
+    }
+
+    const candidates = Array.from(groups.entries()).map(([groupId, group]) => {
+      const allGroupUserIds = [group.primaryUser.id, ...group.secondaryUsers.map((u) => u.id)];
+      const allGroupEmails = Array.from(new Set([group.primaryUser.email, ...group.secondaryUsers.map((u) => u.email)].filter(Boolean)));
+      const allGroupUIds = Array.from(new Set([group.primaryUser.universityId, ...group.secondaryUsers.map((u) => u.universityId)].filter(Boolean)));
+
+      const attendanceCount = attendanceRecords.filter((ar) => allGroupUserIds.includes(ar.studentId)).length;
+      const coursesCount = courseMembers.filter((cm) => allGroupUserIds.includes(cm.userId)).length;
+      const leavesCount = leaveRequests.filter((lr) => allGroupUserIds.includes(lr.studentId)).length;
+
+      return {
+        id: groupId,
+        primaryUser: group.primaryUser,
+        secondaryUsers: group.secondaryUsers,
+        matchReason: group.reason,
+        details: {
+          emails: allGroupEmails,
+          universityIds: allGroupUIds,
+          totalAttendanceRecords: attendanceCount,
+          totalCoursesCount: coursesCount,
+          totalLeavesCount: leavesCount,
+        },
+      };
+    });
+
+    const totalRedundant = candidates.reduce((acc, c) => acc + c.secondaryUsers.length, 0);
+
+    res.json({
+      timestamp: new Date().toISOString(),
+      totalUsersChecked: allUsers.length,
+      duplicateGroupCount: candidates.length,
+      totalRedundantAccounts: totalRedundant,
+      candidates,
+    });
+  } catch (err: any) {
+    console.error('Error during duplicate scan:', err);
+    res.status(500).json({ error: `เกิดข้อผิดพลาดในการตรวจสอบบัญชีซ้ำซ้อน: ${err.message}` });
+  }
+});
+
+/**
+ * Universal Smart Account Merge Core Function:
+ * Merges secondary user accounts into the primary user account with zero data loss.
+ */
+async function executeUserAccountMerge(primaryUserId: string, secondaryUserIds: string[]): Promise<{
+  success: boolean;
+  primaryUser: User;
+  removedUserIds: string[];
+  reassignedAttendanceCount: number;
+  reassignedCoursesCount: number;
+  reassignedLeavesCount: number;
+}> {
+  const primaryUser = users.get(primaryUserId);
+  if (!primaryUser) {
+    throw new Error('ไม่พบบัญชีผู้ใช้หลัก (Primary User)');
+  }
+
+  const validSecondaryIds = secondaryUserIds.filter((id) => id !== primaryUserId && users.has(id));
+  if (validSecondaryIds.length === 0) {
+    throw new Error('ไม่พบบัญชีผู้ใช้ซ้ำซ้อนที่ต้องการรวม');
+  }
+
+  // Ensure aliases list
+  if (!Array.isArray(primaryUser.emailAliases)) {
+    primaryUser.emailAliases = [];
+  }
+  if (primaryUser.email && !primaryUser.emailAliases.includes(primaryUser.email)) {
+    primaryUser.emailAliases.push(primaryUser.email);
+  }
+
+  // Ensure devices list
+  if (!Array.isArray(primaryUser.devices)) {
+    primaryUser.devices = [];
+    if (primaryUser.deviceId) {
+      primaryUser.devices.push({
+        id: `dev_primary_${primaryUser.id}`,
+        deviceId: primaryUser.deviceId,
+        deviceName: 'อุปกรณ์หลัก (Primary Phone)',
+        deviceType: 'MOBILE',
+        boundAt: primaryUser.createdAt || new Date().toISOString(),
+        lastUsedAt: new Date().toISOString(),
+        isPrimary: true,
+      });
+    }
+  }
+
+  let reassignedAttendanceCount = 0;
+  let reassignedCoursesCount = 0;
+  let reassignedLeavesCount = 0;
+
+  for (const secId of validSecondaryIds) {
+    const secUser = users.get(secId);
+    if (!secUser) continue;
+
+    // 1. Inherit email and aliases
+    if (secUser.email) {
+      if (!primaryUser.emailAliases.includes(secUser.email)) {
+        primaryUser.emailAliases.push(secUser.email);
+      }
+    }
+    if (Array.isArray(secUser.emailAliases)) {
+      secUser.emailAliases.forEach((alias) => {
+        if (alias && !primaryUser.emailAliases!.includes(alias)) {
+          primaryUser.emailAliases!.push(alias);
+        }
+      });
+    }
+
+    // 2. Inherit missing student profile fields
+    if (!primaryUser.universityId && secUser.universityId) {
+      primaryUser.universityId = secUser.universityId;
+    }
+    if (!primaryUser.title && secUser.title) {
+      primaryUser.title = secUser.title;
+    }
+    if (!primaryUser.firstNameTh && secUser.firstNameTh) {
+      primaryUser.firstNameTh = secUser.firstNameTh;
+    }
+    if (!primaryUser.lastNameTh && secUser.lastNameTh) {
+      primaryUser.lastNameTh = secUser.lastNameTh;
+    }
+    if (!primaryUser.department && secUser.department) {
+      primaryUser.department = secUser.department;
+    }
+    if (!primaryUser.facultyCode && secUser.facultyCode) {
+      primaryUser.facultyCode = secUser.facultyCode;
+      primaryUser.facultyName = secUser.facultyName;
+    }
+    if (!primaryUser.departmentCode && secUser.departmentCode) {
+      primaryUser.departmentCode = secUser.departmentCode;
+      primaryUser.departmentName = secUser.departmentName;
+    }
+    if (!primaryUser.programCode && secUser.programCode) {
+      primaryUser.programCode = secUser.programCode;
+      primaryUser.programName = secUser.programName;
+    }
+    if (secUser.avatarUrl && (!primaryUser.avatarUrl || primaryUser.avatarUrl.includes('default-user'))) {
+      primaryUser.avatarUrl = secUser.avatarUrl;
+    }
+
+    // 3. Consolidate devices
+    if (Array.isArray(secUser.devices) && secUser.devices.length > 0) {
+      secUser.devices.forEach((d) => {
+        const alreadyHas = primaryUser.devices!.some((pd) => pd.deviceId === d.deviceId);
+        if (!alreadyHas) {
+          primaryUser.devices!.push({
+            ...d,
+            id: `dev_merged_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            isPrimary: false,
+          });
+        }
+      });
+    } else if (secUser.deviceId) {
+      const alreadyHas = primaryUser.devices!.some((pd) => pd.deviceId === secUser.deviceId);
+      if (!alreadyHas) {
+        primaryUser.devices!.push({
+          id: `dev_merged_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          deviceId: secUser.deviceId,
+          deviceName: 'อุปกรณ์เพิ่มเติม (Merged Device)',
+          deviceType: 'MOBILE',
+          boundAt: secUser.createdAt || new Date().toISOString(),
+          lastUsedAt: new Date().toISOString(),
+          isPrimary: false,
+        });
+      }
+    }
+
+    // 4. Reassign Attendance Records
+    for (const ar of attendanceRecords) {
+      if (ar && ar.studentId === secId) {
+        ar.studentId = primaryUserId;
+        ar.studentNameTh = primaryUser.firstNameTh ? `${primaryUser.title || ''} ${primaryUser.firstNameTh} ${primaryUser.lastNameTh || ''}`.trim() : ar.studentNameTh;
+        if (primaryUser.universityId) {
+          ar.studentUniversityId = primaryUser.universityId;
+        }
+        await saveToFirestore(COLLECTIONS.ATTENDANCE, ar);
+        reassignedAttendanceCount++;
+      }
+    }
+
+    // 5. Reassign Course Memberships
+    // Filter course memberships for secondary user
+    const secMembers = courseMembers.filter((cm) => cm.userId === secId);
+    for (const sm of secMembers) {
+      // Check if primary is already a member of this course
+      const primaryInCourse = courseMembers.find((cm) => cm.courseId === sm.courseId && cm.userId === primaryUserId);
+      if (!primaryInCourse) {
+        sm.userId = primaryUserId;
+        await saveToFirestore(COLLECTIONS.COURSE_MEMBERS, sm);
+        reassignedCoursesCount++;
+      } else {
+        // Remove redundant membership
+        const idx = courseMembers.findIndex((cm) => cm.id === sm.id);
+        if (idx >= 0) courseMembers.splice(idx, 1);
+        await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, sm.id);
+      }
+    }
+
+    // 6. Reassign Courses ownership (if teacher)
+    for (const c of Array.from(courses.values())) {
+      let courseUpdated = false;
+      if (c.ownerId === secId) {
+        c.ownerId = primaryUserId;
+        c.ownerName = `${primaryUser.title || ''} ${primaryUser.firstNameTh} ${primaryUser.lastNameTh || ''}`.trim();
+        courseUpdated = true;
+      }
+      if (courseUpdated) {
+        courses.set(c.id, c);
+        await saveToFirestore(COLLECTIONS.COURSES, c);
+      }
+    }
+
+    // 7. Reassign Leave Requests
+    for (const lr of leaveRequests) {
+      if (lr && lr.studentId === secId) {
+        lr.studentId = primaryUserId;
+        lr.studentNameTh = `${primaryUser.title || ''} ${primaryUser.firstNameTh} ${primaryUser.lastNameTh || ''}`.trim();
+        if (primaryUser.universityId) {
+          lr.studentUniversityId = primaryUser.universityId;
+        }
+        await saveToFirestore(COLLECTIONS.LEAVE_REQUESTS, lr);
+        reassignedLeavesCount++;
+      }
+    }
+
+    // 8. Reassign Notifications
+    for (const [nId, notif] of Array.from(notifications.entries())) {
+      if (notif.recipientUserId === secId) {
+        notif.recipientUserId = primaryUserId;
+        notifications.set(nId, notif);
+        await saveToFirestore(COLLECTIONS.NOTIFICATIONS, notif);
+      }
+    }
+
+    // 9. Delete secondary user permanently
+    users.delete(secId);
+    await deleteFromFirestore(COLLECTIONS.USERS, secId);
+  }
+
+  // Ensure primary email is canonical .ac.th if possible
+  const canonicalEmail = getCanonicalUniversityEmail(primaryUser.email);
+  if (canonicalEmail !== primaryUser.email) {
+    if (!primaryUser.emailAliases.includes(primaryUser.email)) {
+      primaryUser.emailAliases.push(primaryUser.email);
+    }
+    primaryUser.email = canonicalEmail;
+  }
+
+  users.set(primaryUserId, primaryUser);
+  await saveToFirestore(COLLECTIONS.USERS, primaryUser);
+
+  return {
+    success: true,
+    primaryUser,
+    removedUserIds: validSecondaryIds,
+    reassignedAttendanceCount,
+    reassignedCoursesCount,
+    reassignedLeavesCount,
+  };
+}
+
+/**
+ * Admin Merge Single Pair / Group of Users
+ */
+app.post('/api/admin/users/merge', async (req, res) => {
+  try {
+    const { primaryUserId, secondaryUserIds } = req.body || {};
+    if (!primaryUserId || !Array.isArray(secondaryUserIds) || secondaryUserIds.length === 0) {
+      return res.status(400).json({ error: 'กรุณาระบุ primaryUserId และ secondaryUserIds สำหรับการรวมบัญชี' });
+    }
+
+    // Create automatic safety backup before performing merge
+    let backupId = '';
+    try {
+      const backupResult = await createSnapshotBackup(`Auto Backup ก่อนรวมบัญชี (${primaryUserId})`, 'Account Deduplication Merge', 'auto');
+      backupId = backupResult?.id || '';
+    } catch (bErr) {
+      console.warn('Auto backup warning:', bErr);
+    }
+
+    const mergeResult = await executeUserAccountMerge(primaryUserId, secondaryUserIds);
+
+    res.json({
+      success: true,
+      message: `รวมบัญชีสำเร็จเรียบร้อยแล้ว (${mergeResult.removedUserIds.length} บัญชีถูกรวมเข้ากับ ${mergeResult.primaryUser.firstNameTh || mergeResult.primaryUser.email})`,
+      mergedCount: mergeResult.removedUserIds.length,
+      primaryUserId: mergeResult.primaryUser.id,
+      primaryUser: mergeResult.primaryUser,
+      removedUserIds: mergeResult.removedUserIds,
+      reassignedAttendanceCount: mergeResult.reassignedAttendanceCount,
+      reassignedCoursesCount: mergeResult.reassignedCoursesCount,
+      reassignedLeavesCount: mergeResult.reassignedLeavesCount,
+      backupId,
+    });
+  } catch (err: any) {
+    console.error('Error merging accounts:', err);
+    res.status(500).json({ error: `เกิดข้อผิดพลาดในการรวมบัญชี: ${err.message}` });
+  }
+});
+
+/**
+ * Admin Auto-Merge All Detected Duplicates
+ */
+app.post('/api/admin/users/merge-all-duplicates', async (req, res) => {
+  try {
+    // 1. Create safety backup first
+    let backupId = '';
+    try {
+      const backupResult = await createSnapshotBackup('Auto Backup ก่อนรวมบัญชีซ้ำซ้อนทั้งหมด (Domain Transition Full Merge)', 'Account Deduplication Batch Merge', 'auto');
+      backupId = backupResult?.id || '';
+    } catch (bErr) {
+      console.warn('Auto backup warning:', bErr);
+    }
+
+    // 2. Scan duplicates
+    const allUsers = Array.from(users.values()).filter(Boolean);
+    const groups: Array<{ primaryUserId: string; secondaryUserIds: string[] }> = [];
+    const processedUserIds = new Set<string>();
+
+    for (let i = 0; i < allUsers.length; i++) {
+      const u1 = allUsers[i];
+      if (processedUserIds.has(u1.id)) continue;
+
+      const duplicates: User[] = [];
+      const email1 = (u1.email || '').trim().toLowerCase();
+      const uId1 = (u1.universityId || '').trim();
+      const variants1 = getEmailDomainVariants(email1);
+
+      for (let j = i + 1; j < allUsers.length; j++) {
+        const u2 = allUsers[j];
+        if (processedUserIds.has(u2.id)) continue;
+
+        const email2 = (u2.email || '').trim().toLowerCase();
+        const uId2 = (u2.universityId || '').trim();
+
+        let isMatch = false;
+        if (email1 && email2 && variants1.includes(email2)) {
+          isMatch = true;
+        } else if (uId1 && uId2 && uId1 === uId2 && u1.role === u2.role) {
+          isMatch = true;
+        }
+
+        if (isMatch) {
+          duplicates.push(u2);
+          processedUserIds.add(u2.id);
+        }
+      }
+
+      if (duplicates.length > 0) {
+        processedUserIds.add(u1.id);
+        const allInGroup = [u1, ...duplicates];
+        allInGroup.sort((a, b) => {
+          const aIsAcTh = (a.email || '').endsWith('.ac.th') ? 1 : 0;
+          const bIsAcTh = (b.email || '').endsWith('.ac.th') ? 1 : 0;
+          if (aIsAcTh !== bIsAcTh) return bIsAcTh - aIsAcTh;
+
+          const aIsGoogle = a.authProvider === 'google' ? 1 : 0;
+          const bIsGoogle = b.authProvider === 'google' ? 1 : 0;
+          if (aIsGoogle !== bIsGoogle) return bIsGoogle - aIsGoogle;
+
+          const aDate = new Date(a.createdAt || 0).getTime();
+          const bDate = new Date(b.createdAt || 0).getTime();
+          return aDate - bDate;
+        });
+
+        groups.push({
+          primaryUserId: allInGroup[0].id,
+          secondaryUserIds: allInGroup.slice(1).map((u) => u.id),
+        });
+      }
+    }
+
+    let totalMergedUsers = 0;
+    let totalAttendanceReassigned = 0;
+    let totalCoursesReassigned = 0;
+    let totalLeavesReassigned = 0;
+
+    for (const group of groups) {
+      try {
+        const resMerge = await executeUserAccountMerge(group.primaryUserId, group.secondaryUserIds);
+        totalMergedUsers += resMerge.removedUserIds.length;
+        totalAttendanceReassigned += resMerge.reassignedAttendanceCount;
+        totalCoursesReassigned += resMerge.reassignedCoursesCount;
+        totalLeavesReassigned += resMerge.reassignedLeavesCount;
+      } catch (grpErr) {
+        console.error(`Error merging group ${group.primaryUserId}:`, grpErr);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `ดำเนินการรวมบัญชีซ้ำซ้อนทั้งหมดเสร็จสิ้น รวมบัญชีทั้งสิ้น ${totalMergedUsers} บัญชี (โอนประวัติเช็กชื่อ ${totalAttendanceReassigned} รายการ, วิชา ${totalCoursesReassigned} รายการ, ใบลา ${totalLeavesReassigned} รายการ)`,
+      totalGroupsProcessed: groups.length,
+      totalMergedUsers,
+      totalAttendanceReassigned,
+      totalCoursesReassigned,
+      totalLeavesReassigned,
+      backupId,
+    });
+  } catch (err: any) {
+    console.error('Error auto-merging all duplicates:', err);
+    res.status(500).json({ error: `เกิดข้อผิดพลาดในการรวมบัญชีทั้งหมด: ${err.message}` });
+  }
+});
+
 
 // -------------------- DEVICE BINDING MANAGEMENT API --------------------
 // Get bound devices for a user

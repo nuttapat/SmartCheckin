@@ -42,7 +42,9 @@ import {
   Mail,
   ChevronLeft,
   ChevronRight,
+  GitMerge,
 } from 'lucide-react';
+import { AccountDeduplicationModal } from './AccountDeduplicationModal';
 
 interface AdminUsersTabProps {
   isDarkMode: boolean;
@@ -173,6 +175,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
 
   const [suspendTargetUser, setSuspendTargetUser] = useState<User | null>(null);
   const [suspendReasonInput, setSuspendReasonInput] = useState<string>('');
+  const [showDeduplicationModal, setShowDeduplicationModal] = useState<boolean>(false);
 
   const loadUsersData = async (silent = false) => {
     try {
@@ -692,6 +695,14 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               )}
             </div>
 
+            <button
+              onClick={() => setShowDeduplicationModal(true)}
+              className="w-full px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer shadow-md shadow-sky-600/20 whitespace-nowrap active:scale-95"
+              title="ตรวจหาและรวมบัญชีที่ซ้ำซ้อนจากนโยบายเปลี่ยนโดเมน (.edu -> .ac.th)"
+            >
+              <GitMerge className="w-3.5 h-3.5 shrink-0" />
+              <span>รวมบัญชีซ้ำ (.edu/.ac.th)</span>
+            </button>
             <button
               onClick={handleExportUsersCSV}
               className="w-full px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs whitespace-nowrap active:scale-95"
@@ -1516,6 +1527,16 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
           </div>
         </div>
       )}
+
+      {/* Domain Transition & Account Deduplication Modal */}
+      <AccountDeduplicationModal
+        isOpen={showDeduplicationModal}
+        onClose={() => setShowDeduplicationModal(false)}
+        isDarkMode={isDarkMode}
+        showToast={showToast}
+        onRefreshUsers={() => loadUsersData()}
+        onRefreshOverview={onRefreshOverview}
+      />
     </div>
   );
 };
