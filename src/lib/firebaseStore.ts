@@ -48,7 +48,97 @@ export const COLLECTIONS = {
   MASTER_PREFIXES: 'masterPrefixes',
   MASTER_CURRICULUMS: 'masterCurriculums',
   NOTIFICATIONS: 'notifications',
+  USER_POINTERS: 'mergedUserPointers',
 };
+
+// Retry queue for failed Firestore operations
+interface RetryItem {
+  type: 'SAVE' | 'DELETE';
+  collectionName: string;
+  item?: any;
+  docId?: string;
+  retryCount: number;
+  lastAttempt: number;
+}
+
+const retryQueue: RetryItem[] = [];
+let isProcessingRetry = false;
+
+function enqueueRetry(item: Omit<RetryItem, 'retryCount' | 'lastAttempt'>) {
+  // Deduplicate in queue
+  const existingIdx = retryQueue.findIndex(
+    (r) =>
+      r.collectionName === item.collectionName &&
+      ((item.docId && r.docId === item.docId) || (item.item && r.item?.id === item.item?.id))
+  );
+  if (existingIdx >= 0) {
+    retryQueue[existingIdx] = {
+      ...item,
+      retryCount: retryQueue[existingIdx].retryCount,
+      lastAttempt: Date.now(),
+    };
+  } else {
+    retryQueue.push({
+      ...item,
+      retryCount: 0,
+      lastAttempt: Date.now(),
+    });
+  }
+  scheduleRetryProcessing();
+}
+
+let retryTimeout: any = null;
+function scheduleRetryProcessing() {
+  if (retryTimeout || isProcessingRetry || retryQueue.length === 0) return;
+  retryTimeout = setTimeout(() => {
+    retryTimeout = null;
+    processRetryQueue();
+  }, 5000);
+}
+
+async function processRetryQueue() {
+  if (isProcessingRetry || retryQueue.length === 0) return;
+  isProcessingRetry = true;
+  const now = Date.now();
+
+  try {
+    for (let i = retryQueue.length - 1; i >= 0; i--) {
+      const task = retryQueue[i];
+      // Exponential backoff wait: 5s, 15s, 45s, max 3 retries
+      const delay = Math.min(60000, 5000 * Math.pow(3, task.retryCount));
+      if (now - task.lastAttempt < delay) continue;
+
+      if (task.retryCount >= 4) {
+        // Exceeded max retries, remove to prevent leak
+        retryQueue.splice(i, 1);
+        continue;
+      }
+
+      task.lastAttempt = now;
+      task.retryCount++;
+
+      try {
+        if (task.type === 'SAVE' && task.item) {
+          const docRef = doc(db, task.collectionName, task.item.id);
+          const cleanedItem = removeUndefinedFields(task.item);
+          await setDoc(docRef, cleanedItem, { merge: true });
+          retryQueue.splice(i, 1);
+        } else if (task.type === 'DELETE' && task.docId) {
+          const docRef = doc(db, task.collectionName, task.docId);
+          await deleteDoc(docRef);
+          retryQueue.splice(i, 1);
+        }
+      } catch (err: any) {
+        // Leave in queue for next cycle
+      }
+    }
+  } finally {
+    isProcessingRetry = false;
+    if (retryQueue.length > 0) {
+      scheduleRetryProcessing();
+    }
+  }
+}
 
 /**
  * Recursively remove undefined fields from an object for Firestore compatibility
@@ -70,7 +160,7 @@ function removeUndefinedFields<T>(obj: T): T {
 }
 
 /**
- * Generic helper to save or update an entity in Firestore with 15s timeout
+ * Generic helper to save or update an entity in Firestore with 15s timeout and retry queue
  */
 export async function saveToFirestore<T extends { id: string }>(
   collectionName: string,
@@ -89,7 +179,8 @@ export async function saveToFirestore<T extends { id: string }>(
     if (msg.includes('Quota limit exceeded')) {
       console.warn(`[Firestore Quota Exceeded] Save skipped for '${collectionName}/${item.id}'. Saved locally.`);
     } else {
-      console.warn(`[Firestore Save Notice] Collection: ${collectionName}, ID: ${item.id}: ${msg}`);
+      console.warn(`[Firestore Save Notice] Collection: ${collectionName}, ID: ${item.id}: ${msg}. Queued for retry.`);
+      enqueueRetry({ type: 'SAVE', collectionName, item });
     }
   }
 }
@@ -154,7 +245,7 @@ export async function getAllFromFirestore<T>(collectionName: string): Promise<T[
 }
 
 /**
- * Generic helper to delete a document from Firestore
+ * Generic helper to delete a document from Firestore with fallback retry
  */
 export async function deleteFromFirestore(
   collectionName: string,
@@ -168,7 +259,8 @@ export async function deleteFromFirestore(
     if (msg.includes('Quota limit exceeded')) {
       console.warn(`[Firestore Quota Exceeded] Delete skipped for '${collectionName}/${docId}'. Handled locally via tombstone.`);
     } else {
-      console.warn(`[Firestore Delete Notice] Collection: ${collectionName}, ID: ${docId}: ${msg}`);
+      console.warn(`[Firestore Delete Notice] Collection: ${collectionName}, ID: ${docId}: ${msg}. Queued for retry.`);
+      enqueueRetry({ type: 'DELETE', collectionName, docId });
     }
   }
 }

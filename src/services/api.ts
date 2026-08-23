@@ -266,6 +266,7 @@ export async function submitCheckin(params: {
   studentId: string;
   scannedLat?: number;
   scannedLng?: number;
+  scannedAccuracy?: number;
   deviceId: string;
   deviceName?: string;
   deviceType?: 'MOBILE' | 'TABLET' | 'DESKTOP' | 'OTHER';

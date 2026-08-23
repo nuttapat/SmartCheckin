@@ -61,6 +61,106 @@ const masterDepartments: Map<string, MasterDepartment> = new Map();
 const masterCurriculums: Map<string, MasterCurriculum> = new Map();
 const masterPrefixes: Map<string, MasterPrefix> = new Map();
 const notifications: Map<string, NotificationItem> = new Map();
+// Pointer mapping for merged accounts (secondaryUserId -> primaryUserId)
+const mergedUserPointers: Map<string, string> = new Map();
+
+// Helper to resolve an active user, chasing merge pointers if necessary
+export function resolveActiveUser(userId?: string): User | undefined {
+  if (!userId) return undefined;
+  const cleanId = String(userId).trim();
+
+  // 1. Direct hit in active users
+  const direct = users.get(cleanId);
+  if (direct) return direct;
+
+  // 2. Chase pointer chain
+  let currentId: string | undefined = cleanId;
+  const visited = new Set<string>();
+  while (currentId && mergedUserPointers.has(currentId)) {
+    if (visited.has(currentId)) break; // Prevent circular reference
+    visited.add(currentId);
+    currentId = mergedUserPointers.get(currentId);
+    if (currentId && users.has(currentId)) {
+      return users.get(currentId);
+    }
+  }
+
+  // 3. Fallback: Lookup by email or university ID
+  const allUsers = Array.from(users.values());
+  const byEmail = allUsers.find(
+    (u) =>
+      (u.email && u.email.toLowerCase() === cleanId.toLowerCase()) ||
+      (Array.isArray(u.emailAliases) && u.emailAliases.some((a) => a.toLowerCase() === cleanId.toLowerCase()))
+  );
+  if (byEmail) return byEmail;
+
+  const byUniId = allUsers.find((u) => u.universityId && u.universityId.trim() === cleanId);
+  if (byUniId) return byUniId;
+
+  return undefined;
+}
+
+/**
+ * Deduplicates course members list, resolving any merged accounts to primary accounts
+ * and eliminating duplicate course enrollment entries while preserving highest role privilege.
+ */
+export async function deduplicateCourseMembers(): Promise<number> {
+  const seen = new Map<string, CourseMember>();
+  const toDeleteIds: string[] = [];
+
+  const rolePriority: Record<string, number> = {
+    [CourseMemberRole.COORDINATOR]: 4,
+    [CourseMemberRole.CO_TEACHER]: 3,
+    [CourseMemberRole.CO_COORDINATOR]: 3,
+    [CourseMemberRole.INSTRUCTOR]: 2,
+    [CourseMemberRole.STUDENT]: 1,
+  };
+
+  for (const cm of courseMembers) {
+    if (!cm || !cm.id || !cm.courseId || !cm.userId) continue;
+
+    // Resolve active userId in case it was merged
+    const resolvedUser = resolveActiveUser(cm.userId);
+    const effectiveUserId = resolvedUser ? resolvedUser.id : cm.userId;
+    const key = `${cm.courseId}_${effectiveUserId}`;
+
+    if (seen.has(key)) {
+      const existing = seen.get(key)!;
+      if ((rolePriority[cm.role] || 0) > (rolePriority[existing.role] || 0)) {
+        toDeleteIds.push(existing.id);
+        seen.set(key, { ...cm, userId: effectiveUserId });
+      } else {
+        toDeleteIds.push(cm.id);
+      }
+    } else {
+      seen.set(key, { ...cm, userId: effectiveUserId });
+    }
+  }
+
+  courseMembers.length = 0;
+  courseMembers.push(...seen.values());
+
+  if (toDeleteIds.length > 0) {
+    for (const delId of toDeleteIds) {
+      deletedMemberIds.add(delId);
+      await deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, delId).catch(() => {});
+    }
+  }
+  return toDeleteIds.length;
+}
+
+// Universal User Resolution Express Middleware
+app.use((req, _res, next) => {
+  const headerUserId = req.headers['x-user-id'] as string;
+  if (headerUserId) {
+    const resolved = resolveActiveUser(headerUserId);
+    if (resolved) {
+      req.headers['x-user-id'] = resolved.id;
+      (req as any).user = resolved;
+    }
+  }
+  next();
+});
 
 // --- LOCAL PERSISTENCE & TOMBSTONE TRACKING ENGINE ---
 const LOCAL_CACHE_PATH = path.join(process.cwd(), 'local_db_cache.json');
@@ -90,6 +190,7 @@ export function saveLocalCache() {
       masterCurriculums: Array.from(masterCurriculums.values()),
       masterPrefixes: Array.from(masterPrefixes.values()),
       notifications: Array.from(notifications.values()),
+      mergedUserPointers: Array.from(mergedUserPointers.entries()),
       systemSettings,
       deletedCourseIds: Array.from(deletedCourseIds),
       deletedMemberIds: Array.from(deletedMemberIds),
@@ -303,6 +404,12 @@ export function loadLocalCache(): boolean {
     if (Array.isArray(data.notifications)) {
       notifications.clear();
       data.notifications.forEach((n: NotificationItem) => notifications.set(n.id, n));
+    }
+    if (Array.isArray(data.mergedUserPointers)) {
+      mergedUserPointers.clear();
+      data.mergedUserPointers.forEach(([secId, priId]: [string, string]) => {
+        if (secId && priId) mergedUserPointers.set(secId, priId);
+      });
     }
     if (data.systemSettings) {
       systemSettings = { ...systemSettings, ...data.systemSettings };
@@ -1854,7 +1961,7 @@ app.post('/api/auth/google', (req, res) => {
 
 app.get('/api/users/me', (req, res) => {
   const userId = req.headers['x-user-id'] as string;
-  const user = users.get(userId);
+  const user = resolveActiveUser(userId) || users.get(userId);
   if (!user) {
     return res.status(401).json({ error: 'User not found' });
   }
@@ -1864,27 +1971,28 @@ app.get('/api/users/me', (req, res) => {
 // 2. Course Management
 app.get('/api/courses', (req, res) => {
   const userId = req.headers['x-user-id'] as string;
-  const user = users.get(userId);
+  const user = resolveActiveUser(userId) || users.get(userId);
 
   if (!user) {
     return res.json([]);
   }
 
+  const effectiveUserId = user.id;
   let result: Course[] = [];
 
   if (user.role === UserRole.STUDENT) {
     const enrolledCourseIds = courseMembers
-      .filter((m) => m.userId === userId && m.role === CourseMemberRole.STUDENT)
+      .filter((m) => (m.userId === effectiveUserId || m.userId === userId) && m.role === CourseMemberRole.STUDENT)
       .map((m) => m.courseId);
     result = Array.from(courses.values()).filter((c) => enrolledCourseIds.includes(c.id));
   } else if (user.role === UserRole.ADMIN) {
     result = Array.from(courses.values());
   } else if (user.role === UserRole.TEACHER) {
     const memberCourseIds = courseMembers
-      .filter((m) => m.userId === userId)
+      .filter((m) => (m.userId === effectiveUserId || m.userId === userId))
       .map((m) => m.courseId);
     result = Array.from(courses.values()).filter((c) => {
-      if (c.ownerId === userId || memberCourseIds.includes(c.id)) return true;
+      if (c.ownerId === effectiveUserId || c.ownerId === userId || memberCourseIds.includes(c.id)) return true;
       if (user.firstNameTh && (c.coordinatorName?.includes(user.firstNameTh) || c.ownerName?.includes(user.firstNameTh))) return true;
       return false;
     });
@@ -2966,13 +3074,13 @@ app.get('/api/sessions/active', (req, res) => {
 
 // 4. ANTI-PROXY CHECK-IN ENDPOINT
 app.post('/api/checkin', async (req, res) => {
-  const { sessionId, qrToken, studentId, scannedLat, scannedLng, deviceId, checkinMode = 'HYBRID' } = req.body;
+  const { sessionId, qrToken, studentId, scannedLat, scannedLng, scannedAccuracy, deviceId, checkinMode = 'HYBRID' } = req.body;
 
   if (!sessionId || !studentId) {
     return res.status(400).json({ error: 'Missing check-in parameters.' });
   }
 
-  const student = users.get(studentId);
+  const student = resolveActiveUser(studentId) || users.get(studentId);
   if (!student) {
     return res.status(404).json({ error: 'Student profile not found.' });
   }
@@ -3089,9 +3197,15 @@ app.post('/api/checkin', async (req, res) => {
       ? course.allowedGpsRadius
       : 200;
 
-    if (distanceMeters > ALLOWED_RADIUS) {
+    // Smart tolerance: allow minor hardware/indoor triangulation jitter based on accuracy (max 40m buffer)
+    const accuracyBuffer = typeof scannedAccuracy === 'number' && scannedAccuracy > 0
+      ? Math.min(40, Math.round(scannedAccuracy * 0.4))
+      : 0;
+    const effectiveRadius = ALLOWED_RADIUS + accuracyBuffer;
+
+    if (distanceMeters > effectiveRadius) {
       return res.status(400).json({
-        error: `[GPS Geofence Violation] คุณอยู่ห่างจากสถานที่เรียน ${distanceMeters} เมตร (อนุญาตไม่เกิน ${ALLOWED_RADIUS} เมตร)`,
+        error: `[GPS Geofence Violation] คุณอยู่ห่างจากสถานที่เรียน ${distanceMeters} เมตร (อนุญาตไม่เกิน ${ALLOWED_RADIUS} เมตร) หากอยู่ในห้องเรียนแล้วแต่พิกัดคลาดเคลื่อน กรุณาแจ้งอาจารย์ผู้สอน`,
         distanceMeters,
         allowedRadius: ALLOWED_RADIUS,
       });
@@ -3100,15 +3214,16 @@ app.post('/api/checkin', async (req, res) => {
     distanceMeters = getHaversineDistance(lat1, lon1, lat2, lon2);
   }
 
-  // Duplicate check
+  // Duplicate check (checks both requested studentId and resolved student.id)
   const alreadyChecked = attendanceRecords.find(
-    (r) => r.sessionId === sessionId && r.studentId === studentId
+    (r) => r.sessionId === sessionId && (r.studentId === studentId || r.studentId === student.id || (student.universityId && r.studentUniversityId === student.universityId))
   );
 
   if (alreadyChecked) {
     return res.status(400).json({
       error: 'คุณได้เช็คชื่อในคาบนี้ไปแล้ว!',
       record: alreadyChecked,
+      resolvedUser: student.id !== studentId ? student : undefined,
     });
   }
 
@@ -3161,6 +3276,7 @@ app.post('/api/checkin', async (req, res) => {
     record: newRecord,
     distanceMeters,
     checkinMethod: checkinMode,
+    resolvedUser: student.id !== studentId ? student : undefined,
   });
 });
 
@@ -3320,14 +3436,14 @@ app.get('/api/quick-events/:id/records', (req, res) => {
 });
 
 app.post('/api/checkin/quick', async (req, res) => {
-  const { eventId, qrToken, studentId, scannedLat, scannedLng, deviceId } = req.body;
+  const { eventId, qrToken, studentId, scannedLat, scannedLng, scannedAccuracy, deviceId } = req.body;
 
   const qEvent = quickEvents.get(eventId);
   if (!qEvent || !qEvent.isActive) {
     return res.status(400).json({ error: 'Quick Check-in event is inactive.' });
   }
 
-  const student = users.get(studentId);
+  const student = resolveActiveUser(studentId) || users.get(studentId);
   if (!student) {
     return res.status(404).json({ error: 'Student not found.' });
   }
@@ -3390,10 +3506,14 @@ app.post('/api/checkin/quick', async (req, res) => {
 
     distanceMeters = getHaversineDistance(lat1, lon1, lat2, lon2);
     const ALLOWED_RADIUS = 200;
+    const accuracyBuffer = typeof scannedAccuracy === 'number' && scannedAccuracy > 0
+      ? Math.min(40, Math.round(scannedAccuracy * 0.4))
+      : 0;
+    const effectiveRadius = ALLOWED_RADIUS + accuracyBuffer;
 
-    if (distanceMeters > ALLOWED_RADIUS) {
+    if (distanceMeters > effectiveRadius) {
       return res.status(400).json({
-        error: `[GPS Geofence Violation] คุณอยู่ห่างจากสถานที่กิจกรรม ${distanceMeters} เมตร (อนุญาตไม่เกิน ${ALLOWED_RADIUS} เมตร)`,
+        error: `[GPS Geofence Violation] คุณอยู่ห่างจากสถานที่กิจกรรม ${distanceMeters} เมตร (อนุญาตไม่เกิน ${ALLOWED_RADIUS} เมตร) หากอยู่ในสถานที่แล้วแต่พิกัดคลาดเคลื่อน กรุณาแจ้งผู้จัด`,
         distanceMeters,
         allowedRadius: ALLOWED_RADIUS,
       });
@@ -3423,7 +3543,11 @@ app.post('/api/checkin/quick', async (req, res) => {
   saveLocalCache();
   broadcastCheckinEvent(eventId, newRecord);
 
-  res.json({ message: 'Quick Check-in recorded!', record: newRecord });
+  res.json({
+    message: 'Quick Check-in recorded!',
+    record: newRecord,
+    resolvedUser: student.id !== studentId ? student : undefined,
+  });
 });
 
 // 6. CSV Export Endpoint
@@ -3890,19 +4014,20 @@ function isSessionConducted(session: Session, course?: Course): boolean {
 
 // Student Dashboard Stats endpoint
 app.get('/api/student/:studentId/stats', (req, res) => {
-  const studentId = req.params.studentId;
+  const reqStudentId = req.params.studentId;
+  const resolvedStudent = resolveActiveUser(reqStudentId) || users.get(reqStudentId);
+  const studentId = resolvedStudent ? resolvedStudent.id : reqStudentId;
+
   const enrolledCourseIds = courseMembers
-    .filter((cm) => cm.userId === studentId && cm.role === CourseMemberRole.STUDENT)
+    .filter((cm) => (cm.userId === studentId || cm.userId === reqStudentId) && cm.role === CourseMemberRole.STUDENT)
     .map((cm) => cm.courseId);
 
   const studentCourses = enrolledCourseIds.map((id) => courses.get(id)).filter(Boolean) as Course[];
 
   const courseStats = studentCourses.map((c) => {
-    const cSessions = Array.from(sessions.values())
-      .filter((s) => s.courseId === c.id)
-      .sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
+    const cSessions = ensureCourseSessions(c);
 
-    const totalSessions = cSessions.length || 1;
+    const totalSessions = cSessions.length || (c.weeks ? c.weeks.length : 15);
     const conductedSessionsList = cSessions.filter((s) => isSessionConducted(s, c));
     const conductedSessions = conductedSessionsList.length;
 
@@ -3973,20 +4098,21 @@ app.get('/api/student/:studentId/stats', (req, res) => {
 
 // Teacher Course Overview Dashboard API
 app.get('/api/teacher/courses-overview', (req, res) => {
-  const teacherId = (req.query.teacherId as string) || (req.headers['x-user-id'] as string);
-  const teacher = users.get(teacherId);
+  const reqTeacherId = (req.query.teacherId as string) || (req.headers['x-user-id'] as string);
+  const teacher = resolveActiveUser(reqTeacherId) || users.get(reqTeacherId);
+  const teacherId = teacher ? teacher.id : reqTeacherId;
 
   if (!teacher) {
     return res.status(401).json({ error: 'ไม่พบข้อมูลอาจารย์ผู้ใช้งาน' });
   }
 
   const memberCourseIds = courseMembers
-    .filter((m) => m.userId === teacherId)
+    .filter((m) => m.userId === teacherId || m.userId === reqTeacherId)
     .map((m) => m.courseId);
 
   let teacherCourses = Array.from(courses.values()).filter((c) => {
     if (teacher.role === UserRole.ADMIN) return true;
-    if (c.ownerId === teacherId || memberCourseIds.includes(c.id)) return true;
+    if (c.ownerId === teacherId || c.ownerId === reqTeacherId || memberCourseIds.includes(c.id)) return true;
     if (teacher.firstNameTh && (c.coordinatorName?.includes(teacher.firstNameTh) || c.ownerName?.includes(teacher.firstNameTh))) return true;
     return false;
   });
@@ -5060,55 +5186,6 @@ app.delete('/api/admin/master/prefixes/:id', async (req, res) => {
   }
 });
 
-// Helper to deduplicate course members by (courseId, userId)
-async function deduplicateCourseMembers(): Promise<number> {
-  const seenMap = new Map<string, CourseMember>();
-  const duplicatesToDelete: string[] = [];
-  const rolePriority: Record<string, number> = {
-    [CourseMemberRole.COORDINATOR]: 4,
-    [CourseMemberRole.CO_TEACHER]: 3,
-    [CourseMemberRole.CO_COORDINATOR]: 3,
-    [CourseMemberRole.INSTRUCTOR]: 2,
-    [CourseMemberRole.STUDENT]: 1,
-  };
-
-  for (let i = 0; i < courseMembers.length; i++) {
-    const cm = courseMembers[i];
-    if (!cm || !cm.courseId || !cm.userId) continue;
-    const key = `${cm.courseId}_${cm.userId}`;
-
-    if (!seenMap.has(key)) {
-      seenMap.set(key, cm);
-    } else {
-      const existing = seenMap.get(key)!;
-      const exPriority = rolePriority[existing.role] || 0;
-      const cmPriority = rolePriority[cm.role] || 0;
-
-      if (cmPriority > exPriority) {
-        duplicatesToDelete.push(existing.id);
-        seenMap.set(key, cm);
-      } else {
-        duplicatesToDelete.push(cm.id);
-      }
-    }
-  }
-
-  if (duplicatesToDelete.length > 0) {
-    const deleteSet = new Set(duplicatesToDelete);
-    for (let i = courseMembers.length - 1; i >= 0; i--) {
-      if (deleteSet.has(courseMembers[i].id)) {
-        courseMembers.splice(i, 1);
-      }
-    }
-    for (const delId of duplicatesToDelete) {
-      deleteFromFirestore(COLLECTIONS.COURSE_MEMBERS, delId).catch(() => {});
-    }
-    console.log(`[Deduplication] Cleaned ${duplicatesToDelete.length} duplicate courseMembers records.`);
-  }
-
-  return duplicatesToDelete.length;
-}
-
 // Helper to clean orphaned data
 async function cleanOrphanedData() {
   const deletedSummary = {
@@ -5779,7 +5856,15 @@ async function executeUserAccountMerge(primaryUserId: string, secondaryUserIds: 
       }
     }
 
-    // 9. Delete secondary user permanently
+    // 9. Save Pointer Mapping for seamless redirect & healing
+    mergedUserPointers.set(secId, primaryUserId);
+    await saveToFirestore(COLLECTIONS.USER_POINTERS, {
+      id: secId,
+      targetUserId: primaryUserId,
+      mergedAt: new Date().toISOString(),
+    });
+
+    // 10. Delete secondary user record from active users
     users.delete(secId);
     await deleteFromFirestore(COLLECTIONS.USERS, secId);
   }
@@ -6945,6 +7030,16 @@ async function syncFromFirestore() {
     if (fsNotifs !== null && fsNotifs.length > 0) {
       for (const n of fsNotifs) {
         if (n && n.id) notifications.set(n.id, n);
+      }
+    }
+
+    // Sync Merged User Pointers
+    const fsPointers = await getAllFromFirestore<{ id: string; targetUserId: string }>(COLLECTIONS.USER_POINTERS);
+    if (fsPointers !== null && fsPointers.length > 0) {
+      for (const ptr of fsPointers) {
+        if (ptr && ptr.id && ptr.targetUserId) {
+          mergedUserPointers.set(ptr.id, ptr.targetUserId);
+        }
       }
     }
 

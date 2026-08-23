@@ -248,6 +248,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
     try {
       let currentLat = currentCoords?.lat || 13.7563;
       let currentLng = currentCoords?.lng || 100.5018;
+      let currentAccuracy: number | undefined = undefined;
 
       if (navigator.geolocation) {
         try {
@@ -260,6 +261,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
           });
           currentLat = position.coords.latitude;
           currentLng = position.coords.longitude;
+          currentAccuracy = position.coords.accuracy;
           setCurrentCoords({ lat: currentLat, lng: currentLng });
         } catch (err) {
           console.warn('Geolocation lookup failed/denied:', err);
@@ -331,6 +333,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
           sessionId: targetSessionId,
           scannedLat: currentLat,
           scannedLng: currentLng,
+          scannedAccuracy: currentAccuracy,
           deviceId: devInfo.deviceId,
           deviceName: devInfo.deviceName,
           deviceType: devInfo.deviceType,
@@ -340,6 +343,15 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
         });
 
         sessionStorage.removeItem('pending_qr_checkin');
+
+        // Check if server resolved a merged user
+        if (res?.resolvedUser) {
+          try {
+            localStorage.setItem('smart_attendance_logged_user', JSON.stringify(res.resolvedUser));
+          } catch (e) {
+            console.error('Failed to update resolvedUser in localStorage:', e);
+          }
+        }
 
         setCheckinStatus({
           success: true,

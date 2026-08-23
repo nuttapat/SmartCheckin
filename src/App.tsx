@@ -101,6 +101,28 @@ export default function App() {
     return null;
   });
 
+  // Self-healing: Verify currentUser against backend to resolve any merged accounts
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    fetchCurrentUser(currentUser.id)
+      .then((activeUser) => {
+        if (activeUser && activeUser.id) {
+          if (activeUser.id !== currentUser.id || activeUser.email !== currentUser.email) {
+            console.log(`[Account Healed] Updated user ID from ${currentUser.id} to ${activeUser.id}`);
+            setCurrentUser(activeUser);
+            try {
+              localStorage.setItem('smart_attendance_logged_user', JSON.stringify(activeUser));
+            } catch (e) {
+              console.error('Failed to save healed user to localStorage:', e);
+            }
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not verify/heal active user state:', err);
+      });
+  }, []);
+
   // Track if current session was switched from Admin view mode
   const [switchedFromAdmin, setSwitchedFromAdmin] = useState<User | null>(() => {
     try {
