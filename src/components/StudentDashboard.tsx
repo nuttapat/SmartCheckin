@@ -35,8 +35,47 @@ interface StudentCourseItem {
 export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onOpenJoinCourse, isDarkMode: propIsDarkMode }) => {
   const { isDarkMode: themeIsDarkMode } = useTheme();
   const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
-  const [coursesStats, setCoursesStats] = useState<StudentCourseItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+
+  const studentStatsCacheKey = `smart_student_stats_cache_${student.id}`;
+
+  // Initial SWR hydration from localStorage for Instant 0ms render
+  const [coursesStats, setCoursesStats] = useState<StudentCourseItem[]>(() => {
+    try {
+      const cached = localStorage.getItem(studentStatsCacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  // Sync state tracking: 'syncing' | 'synced' | 'cached' | 'error'
+  const [syncStatus, setSyncStatus] = useState<'syncing' | 'synced' | 'cached' | 'error'>(() => {
+    try {
+      const cached = localStorage.getItem(studentStatsCacheKey);
+      return cached ? 'cached' : 'syncing';
+    } catch {
+      return 'syncing';
+    }
+  });
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(`smart_student_sync_time_${student.id}`);
+    } catch {
+      return null;
+    }
+  });
+
+  const [loading, setLoading] = useState<boolean>(() => {
+    try {
+      const cached = localStorage.getItem(studentStatsCacheKey);
+      return !cached;
+    } catch {
+      return true;
+    }
+  });
+
   const [selectedCourseHistory, setSelectedCourseHistory] = useState<StudentCourseItem | null>(null);
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState<boolean>(false);
 
@@ -53,20 +92,33 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
     }
   };
 
-  const loadStats = async () => {
+  const loadStats = async (silent = false) => {
     try {
-      setLoading(true);
+      setSyncStatus('syncing');
+      if (!silent && coursesStats.length === 0) {
+        setLoading(true);
+      }
       const data = await fetchStudentStats(student.id);
-      setCoursesStats(data);
+      if (Array.isArray(data)) {
+        setCoursesStats(data);
+        setSyncStatus('synced');
+        const nowTime = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setLastSyncTime(nowTime);
+        try {
+          localStorage.setItem(studentStatsCacheKey, JSON.stringify(data));
+          localStorage.setItem(`smart_student_sync_time_${student.id}`, nowTime);
+        } catch {}
+      }
     } catch (err) {
-      console.error(err);
+      console.error('Failed to load student stats:', err);
+      setSyncStatus(coursesStats.length > 0 ? 'cached' : 'error');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadStats();
+    loadStats(coursesStats.length > 0);
   }, [student.id]);
 
   // Auto-open checkin modal if user scanned QR code via mobile phone camera
@@ -173,6 +225,54 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
             <p className={`text-xs pl-7 mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
               เกณฑ์สิทธิ์เข้าสอบ: 🟢 &gt; 85% (ปกติ) | 🟡 80-84% (เฝ้าระวัง) | 🔴 &lt; 80% (หมดสิทธิ์สอบ)
             </p>
+          </div>
+
+          {/* Sync Status Badge for Student Dashboard */}
+          <div className="flex items-center space-x-2">
+            {syncStatus === 'syncing' && (
+              <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/25 animate-pulse">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                <span>กำลังซิงค์ข้อมูล...</span>
+              </span>
+            )}
+            {syncStatus === 'synced' && (
+              <span
+                title={lastSyncTime ? `ซิงค์ล่าสุดเมื่อ ${lastSyncTime}` : 'ข้อมูลเป็นปัจจุบันแล้ว'}
+                className="inline-flex items-center space-x-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span>{lastSyncTime ? `อัปเดต ${lastSyncTime}` : 'ข้อมูลเป็นปัจจุบันแล้ว'}</span>
+              </span>
+            )}
+            {syncStatus === 'cached' && (
+              <span
+                title="กำลังแสดงผลจากแคชล่าสุด (กดเพื่อซิงค์ข้อมูลใหม่)"
+                className="inline-flex items-center space-x-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                <span>แคชล่าสุด</span>
+              </span>
+            )}
+            {syncStatus === 'error' && (
+              <span
+                title="ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้"
+                className="inline-flex items-center space-x-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                <span>ออฟไลน์</span>
+              </span>
+            )}
+
+            <button
+              onClick={() => loadStats(false)}
+              disabled={syncStatus === 'syncing'}
+              className={`p-1.5 rounded-xl transition disabled:opacity-50 cursor-pointer ${
+                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+              title="รีเฟรชสถิติการเช็คชื่อ"
+            >
+              <RefreshCw className={`w-4 h-4 ${syncStatus === 'syncing' ? 'animate-spin text-sky-500' : ''}`} />
+            </button>
           </div>
         </div>
 

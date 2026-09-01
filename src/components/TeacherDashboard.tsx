@@ -42,10 +42,78 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 }) => {
   const { isDarkMode: themeIsDarkMode } = useTheme();
   const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
-  const [courseSessions, setCourseSessions] = useState<Session[]>([]);
+
+  // Local Storage Cache Keys
+  const teacherCoursesCacheKey = `smart_teacher_courses_cache_${teacher.id}`;
+  const teacherSelectedCourseCacheKey = `smart_teacher_selected_course_${teacher.id}`;
+
+  // Initial SWR hydration from localStorage for Instant 0ms render
+  const [courses, setCourses] = useState<Course[]>(() => {
+    try {
+      const cached = localStorage.getItem(teacherCoursesCacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  // Sync state tracking: 'syncing' | 'synced' | 'cached' | 'error'
+  const [syncStatus, setSyncStatus] = useState<'syncing' | 'synced' | 'cached' | 'error'>(() => {
+    try {
+      const cached = localStorage.getItem(teacherCoursesCacheKey);
+      return cached ? 'cached' : 'syncing';
+    } catch {
+      return 'syncing';
+    }
+  });
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(`smart_teacher_sync_time_${teacher.id}`);
+    } catch {
+      return null;
+    }
+  });
+
+  const [loading, setLoading] = useState<boolean>(() => {
+    try {
+      const cached = localStorage.getItem(teacherCoursesCacheKey);
+      return !cached; // If cached, loading is false instantly!
+    } catch {
+      return true;
+    }
+  });
+
+  const [selectedCourse, setSelectedCourse] = useState<Course | null>(() => {
+    try {
+      const savedCourse = localStorage.getItem(teacherSelectedCourseCacheKey);
+      if (savedCourse) {
+        const parsed = JSON.parse(savedCourse);
+        if (parsed && parsed.id) return parsed;
+      }
+    } catch {}
+    return null;
+  });
+
+  const [courseSessions, setCourseSessions] = useState<Session[]>(() => {
+    try {
+      const savedCourse = localStorage.getItem(teacherSelectedCourseCacheKey);
+      if (savedCourse) {
+        const parsed = JSON.parse(savedCourse);
+        if (parsed && parsed.id) {
+          const cachedDetails = localStorage.getItem(`smart_course_details_${parsed.id}`);
+          if (cachedDetails) {
+            const parsedDetails = JSON.parse(cachedDetails);
+            if (Array.isArray(parsedDetails?.sessions)) {
+              return parsedDetails.sessions;
+            }
+          }
+        }
+      }
+    } catch {}
+    return [];
+  });
 
   const effectiveSessions = useMemo(() => {
     if (courseSessions && courseSessions.length > 0) {
@@ -457,11 +525,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
   };
 
+  // On-demand fetch overview data only when navigating to COURSE_OVERVIEW tab
   useEffect(() => {
-    if (teacher?.id) {
+    if (teacher?.id && dashboardTab === 'COURSE_OVERVIEW') {
       loadOverviewData();
     }
-  }, [teacher?.id]);
+  }, [teacher?.id, dashboardTab]);
 
   const exportCourseOverviewCSV = (courseOverviewItem: any) => {
     if (!courseOverviewItem) return;
@@ -874,23 +943,47 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   const wsRef = useRef<WebSocket | null>(null);
 
-  const loadTeacherCourses = async () => {
+  const loadTeacherCourses = async (silent = false) => {
     try {
-      setLoading(true);
+      setSyncStatus('syncing');
+      if (!silent && courses.length === 0) {
+        setLoading(true);
+      }
       const list = await fetchCourses(teacher.id);
-      setCourses(list);
-      if (list.length > 0 && !selectedCourse) {
-        handleSelectCourse(list[0]);
+      if (Array.isArray(list)) {
+        setCourses(list);
+        setSyncStatus('synced');
+        const nowTime = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setLastSyncTime(nowTime);
+        try {
+          localStorage.setItem(teacherCoursesCacheKey, JSON.stringify(list));
+          localStorage.setItem(`smart_teacher_sync_time_${teacher.id}`, nowTime);
+        } catch {}
+
+        if (list.length > 0) {
+          if (!selectedCourse) {
+            handleSelectCourse(list[0]);
+          } else {
+            // Keep selected course up to date
+            const updatedSelected = list.find((c) => c.id === selectedCourse.id);
+            if (updatedSelected) {
+              setSelectedCourse(updatedSelected);
+            }
+          }
+        }
       }
     } catch (err) {
-      console.error(err);
+      console.error('Error loading teacher courses:', err);
+      // Fallback: If we have cached courses, mark as cached, otherwise error
+      setSyncStatus(courses.length > 0 ? 'cached' : 'error');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadTeacherCourses();
+    // If we have cached courses, fetch in background silently; otherwise show clean sync
+    loadTeacherCourses(courses.length > 0);
 
     // Get current teacher GPS coords if available
     if (navigator.geolocation) {
@@ -910,9 +1003,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const handleSelectCourse = async (course: Course) => {
     setSelectedCourse(course);
     setSelectedOverviewCourseId(course.id);
+    try {
+      localStorage.setItem(teacherSelectedCourseCacheKey, JSON.stringify(course));
+    } catch {}
+
     if (course.defaultLat && course.defaultLng) {
       updateTeacherCoords({ lat: course.defaultLat, lng: course.defaultLng });
     }
+
+    // Try to load cached course details first for instant UI response
+    try {
+      const cachedDetails = localStorage.getItem(`smart_course_details_${course.id}`);
+      if (cachedDetails) {
+        const parsed = JSON.parse(cachedDetails);
+        if (Array.isArray(parsed?.sessions)) {
+          setCourseSessions(parsed.sessions);
+        }
+        if (Array.isArray(parsed?.members)) {
+          setCurrentCourseMembers(parsed.members);
+        }
+      }
+    } catch {}
+
     try {
       const details = await fetchCourseDetails(course.id);
       const sortedSessions = (details.sessions || []).sort(
@@ -920,8 +1032,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       );
       setCourseSessions(sortedSessions);
       setCurrentCourseMembers(details.members || []);
+      try {
+        localStorage.setItem(`smart_course_details_${course.id}`, JSON.stringify(details));
+      } catch {}
     } catch (err) {
-      console.error(err);
+      console.error('Error fetching course details:', err);
     }
   };
 
@@ -1314,22 +1429,65 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
             }`}>
               <div className="flex items-center justify-between">
-                <h2 className={`text-xs font-extrabold uppercase tracking-wider flex items-center space-x-1.5 ${
-                  isDarkMode ? 'text-slate-300' : 'text-slate-700'
-                }`}>
-                  <BookOpen className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                  <span>รายวิชาที่รับผิดชอบ</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-extrabold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
-                    {filteredCourses.length}/{courses.length}
-                  </span>
-                </h2>
-                <button
-                  onClick={loadTeacherCourses}
-                  className={`p-1 rounded-lg transition ${isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}
-                  title="รีเฟรชข้อมูลวิชา"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center space-x-2">
+                  <h2 className={`text-xs font-extrabold uppercase tracking-wider flex items-center space-x-1.5 ${
+                    isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                  }`}>
+                    <BookOpen className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                    <span>รายวิชาที่รับผิดชอบ</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-extrabold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
+                      {filteredCourses.length}/{courses.length}
+                    </span>
+                  </h2>
+                </div>
+
+                {/* Visual Sync Status Indicator Badge */}
+                <div className="flex items-center space-x-1.5">
+                  {syncStatus === 'syncing' && (
+                    <span className="inline-flex items-center space-x-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/25 animate-pulse">
+                      <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                      <span>กำลังซิงค์...</span>
+                    </span>
+                  )}
+                  {syncStatus === 'synced' && (
+                    <span
+                      title={lastSyncTime ? `ซิงค์ล่าสุดเมื่อ ${lastSyncTime}` : 'ข้อมูลเป็นปัจจุบันแล้ว'}
+                      className="inline-flex items-center space-x-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 transition"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      <span>{lastSyncTime ? `อัปเดต ${lastSyncTime}` : 'ซิงค์แล้ว'}</span>
+                    </span>
+                  )}
+                  {syncStatus === 'cached' && (
+                    <span
+                      title="กำลังแสดงผลจากแคชล่าสุด (กดรีเฟรชเพื่อซิงค์กับเซิร์ฟเวอร์)"
+                      className="inline-flex items-center space-x-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      <span>แคชล่าสุด</span>
+                    </span>
+                  )}
+                  {syncStatus === 'error' && (
+                    <span
+                      title="ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ในขณะนี้"
+                      className="inline-flex items-center space-x-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                      <span>ออฟไลน์</span>
+                    </span>
+                  )}
+
+                  <button
+                    onClick={() => loadTeacherCourses(false)}
+                    disabled={syncStatus === 'syncing'}
+                    className={`p-1 rounded-lg transition disabled:opacity-50 cursor-pointer ${
+                      isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                    }`}
+                    title="รีเฟรชและซิงค์ข้อมูลวิชาใหม่"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${syncStatus === 'syncing' ? 'animate-spin text-sky-500' : ''}`} />
+                  </button>
+                </div>
               </div>
 
               {/* Search & Term Filter controls when courses exist */}

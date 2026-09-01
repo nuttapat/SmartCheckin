@@ -7050,10 +7050,60 @@ app.post('/api/admin/import-csv', async (req, res) => {
   }
 });
 
-// Firestore Database Sync Handler
+// Firestore Database Sync Handler with Parallel Promise.allSettled
 async function syncFromFirestore() {
   try {
-    const fsSettings = await getAllFromFirestore<SystemSettings>(COLLECTIONS.SYSTEM_SETTINGS);
+    // Parallel fetch all 14 Firestore collections at once instead of sequential awaits
+    const [
+      fsSettingsRes,
+      fsUsersRes,
+      fsCoursesRes,
+      fsMembersRes,
+      fsSessionsRes,
+      fsAttendanceRes,
+      fsLeavesRes,
+      fsTeacherAttendanceRes,
+      fsUnivsRes,
+      fsFacsRes,
+      fsDepsRes,
+      fsCurrsRes,
+      fsPrefixesRes,
+      fsNotifsRes,
+      fsPointersRes,
+    ] = await Promise.allSettled([
+      getAllFromFirestore<SystemSettings>(COLLECTIONS.SYSTEM_SETTINGS),
+      getAllFromFirestore<User>(COLLECTIONS.USERS),
+      getAllFromFirestore<Course>(COLLECTIONS.COURSES),
+      getAllFromFirestore<CourseMember>(COLLECTIONS.COURSE_MEMBERS),
+      getAllFromFirestore<Session>(COLLECTIONS.SESSIONS),
+      getAllFromFirestore<AttendanceRecord>(COLLECTIONS.ATTENDANCE),
+      getAllFromFirestore<LeaveRequest>(COLLECTIONS.LEAVE_REQUESTS),
+      getAllFromFirestore<TeacherAttendanceRecord>(COLLECTIONS.TEACHER_ATTENDANCE),
+      getAllFromFirestore<MasterUniversity>(COLLECTIONS.MASTER_UNIVERSITIES),
+      getAllFromFirestore<MasterFaculty>(COLLECTIONS.MASTER_FACULTIES),
+      getAllFromFirestore<MasterDepartment>(COLLECTIONS.MASTER_DEPARTMENTS),
+      getAllFromFirestore<MasterCurriculum>(COLLECTIONS.MASTER_CURRICULUMS),
+      getAllFromFirestore<MasterPrefix>(COLLECTIONS.MASTER_PREFIXES),
+      getAllFromFirestore<NotificationItem>(COLLECTIONS.NOTIFICATIONS),
+      getAllFromFirestore<{ id: string; targetUserId: string }>(COLLECTIONS.USER_POINTERS),
+    ]);
+
+    const fsSettings = fsSettingsRes.status === 'fulfilled' ? fsSettingsRes.value : null;
+    const fsUsers = fsUsersRes.status === 'fulfilled' ? fsUsersRes.value : null;
+    const fsCourses = fsCoursesRes.status === 'fulfilled' ? fsCoursesRes.value : null;
+    const fsMembers = fsMembersRes.status === 'fulfilled' ? fsMembersRes.value : null;
+    const fsSessions = fsSessionsRes.status === 'fulfilled' ? fsSessionsRes.value : null;
+    const fsAttendance = fsAttendanceRes.status === 'fulfilled' ? fsAttendanceRes.value : null;
+    const fsLeaves = fsLeavesRes.status === 'fulfilled' ? fsLeavesRes.value : null;
+    const fsTeacherAttendance = fsTeacherAttendanceRes.status === 'fulfilled' ? fsTeacherAttendanceRes.value : null;
+    const fsUnivs = fsUnivsRes.status === 'fulfilled' ? fsUnivsRes.value : null;
+    const fsFacs = fsFacsRes.status === 'fulfilled' ? fsFacsRes.value : null;
+    const fsDeps = fsDepsRes.status === 'fulfilled' ? fsDepsRes.value : null;
+    const fsCurrs = fsCurrsRes.status === 'fulfilled' ? fsCurrsRes.value : null;
+    const fsPrefixes = fsPrefixesRes.status === 'fulfilled' ? fsPrefixesRes.value : null;
+    const fsNotifs = fsNotifsRes.status === 'fulfilled' ? fsNotifsRes.value : null;
+    const fsPointers = fsPointersRes.status === 'fulfilled' ? fsPointersRes.value : null;
+
     const hasInitializedConfig = Boolean(fsSettings && fsSettings.length > 0);
 
     if (fsSettings && fsSettings.length > 0) {
@@ -7091,7 +7141,6 @@ async function syncFromFirestore() {
     }
 
     // 1. Sync Users
-    const fsUsers = await getAllFromFirestore<User>(COLLECTIONS.USERS);
     if (fsUsers !== null && fsUsers.length > 0) {
       for (const u of fsUsers) {
         if (!u || !u.id) continue;
@@ -7112,7 +7161,6 @@ async function syncFromFirestore() {
     }
 
     // 2. Sync Courses
-    const fsCourses = await getAllFromFirestore<Course>(COLLECTIONS.COURSES);
     if (fsCourses !== null && fsCourses.length > 0) {
       for (const c of fsCourses) {
         if (!c || !c.id) continue;
@@ -7130,7 +7178,6 @@ async function syncFromFirestore() {
     }
 
     // 3. Sync Course Members
-    const fsMembers = await getAllFromFirestore<CourseMember>(COLLECTIONS.COURSE_MEMBERS);
     if (fsMembers !== null && fsMembers.length > 0) {
       const memberMap = new Map<string, CourseMember>();
       courseMembers.forEach((m) => {
@@ -7150,7 +7197,6 @@ async function syncFromFirestore() {
     }
 
     // 4. Sync Sessions
-    const fsSessions = await getAllFromFirestore<Session>(COLLECTIONS.SESSIONS);
     if (fsSessions !== null && fsSessions.length > 0) {
       for (const s of fsSessions) {
         if (!s || !s.id) continue;
@@ -7168,7 +7214,6 @@ async function syncFromFirestore() {
     }
 
     // 5. Sync Attendance Records
-    const fsAttendance = await getAllFromFirestore<AttendanceRecord>(COLLECTIONS.ATTENDANCE);
     if (fsAttendance !== null && fsAttendance.length > 0) {
       const existingIds = new Set(attendanceRecords.map((r) => r.id));
       for (const ar of fsAttendance) {
@@ -7193,7 +7238,6 @@ async function syncFromFirestore() {
       }
     }
 
-    const fsLeaves = await getAllFromFirestore<LeaveRequest>(COLLECTIONS.LEAVE_REQUESTS);
     if (fsLeaves !== null && fsLeaves.length > 0) {
       const existingLeaveIds = new Set(leaveRequests.map((l) => l.id));
       for (const l of fsLeaves) {
@@ -7224,7 +7268,6 @@ async function syncFromFirestore() {
     }
 
     // 7. Sync Teacher Attendance Records
-    const fsTeacherAttendance = await getAllFromFirestore<TeacherAttendanceRecord>(COLLECTIONS.TEACHER_ATTENDANCE);
     if (fsTeacherAttendance !== null && fsTeacherAttendance.length > 0) {
       const existingTeacherRecIds = new Set(teacherAttendanceRecords.map((t) => t.id));
       for (const t of fsTeacherAttendance) {
@@ -7236,7 +7279,6 @@ async function syncFromFirestore() {
     }
 
     // Sync Master Universities
-    const fsUnivs = await getAllFromFirestore<MasterUniversity>(COLLECTIONS.MASTER_UNIVERSITIES);
     if (fsUnivs !== null && fsUnivs.length > 0) {
       for (const u of fsUnivs) {
         if (u && u.id) masterUniversities.set(u.id, u);
@@ -7244,7 +7286,6 @@ async function syncFromFirestore() {
     }
 
     // Sync Master Faculties
-    const fsFacs = await getAllFromFirestore<MasterFaculty>(COLLECTIONS.MASTER_FACULTIES);
     if (fsFacs !== null && fsFacs.length > 0) {
       for (const f of fsFacs) {
         if (f && f.id) masterFaculties.set(f.id, f);
@@ -7252,7 +7293,6 @@ async function syncFromFirestore() {
     }
 
     // Sync Master Departments
-    const fsDeps = await getAllFromFirestore<MasterDepartment>(COLLECTIONS.MASTER_DEPARTMENTS);
     if (fsDeps !== null && fsDeps.length > 0) {
       for (const d of fsDeps) {
         if (d && d.id) masterDepartments.set(d.id, d);
@@ -7260,7 +7300,6 @@ async function syncFromFirestore() {
     }
 
     // Sync Master Curriculums
-    const fsCurrs = await getAllFromFirestore<MasterCurriculum>(COLLECTIONS.MASTER_CURRICULUMS);
     if (fsCurrs !== null && fsCurrs.length > 0) {
       for (const c of fsCurrs) {
         if (c && c.id) masterCurriculums.set(c.id, c);
@@ -7268,7 +7307,6 @@ async function syncFromFirestore() {
     }
 
     // Sync Master Prefixes
-    const fsPrefixes = await getAllFromFirestore<MasterPrefix>(COLLECTIONS.MASTER_PREFIXES);
     if (fsPrefixes !== null && fsPrefixes.length > 0) {
       for (const p of fsPrefixes) {
         if (p && p.id) masterPrefixes.set(p.id, p);
@@ -7276,7 +7314,6 @@ async function syncFromFirestore() {
     }
 
     // Sync Notifications
-    const fsNotifs = await getAllFromFirestore<NotificationItem>(COLLECTIONS.NOTIFICATIONS);
     if (fsNotifs !== null && fsNotifs.length > 0) {
       for (const n of fsNotifs) {
         if (n && n.id) notifications.set(n.id, n);
@@ -7284,7 +7321,6 @@ async function syncFromFirestore() {
     }
 
     // Sync Merged User Pointers
-    const fsPointers = await getAllFromFirestore<{ id: string; targetUserId: string }>(COLLECTIONS.USER_POINTERS);
     if (fsPointers !== null && fsPointers.length > 0) {
       for (const ptr of fsPointers) {
         if (ptr && ptr.id && ptr.targetUserId) {
