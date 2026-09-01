@@ -185,6 +185,89 @@ const deletedLeaveIds = new Set<string>();
 const deletedAttendanceIds = new Set<string>();
 const deletedQuickEventIds = new Set<string>();
 
+// High-Throughput Async Firestore Write Queue for High Concurrency (100+ students)
+interface BackgroundQueueTask {
+  collectionName: string;
+  item: any;
+}
+const backgroundFirestoreQueue: BackgroundQueueTask[] = [];
+let isFlushingQueue = false;
+let queueFlushTimer: NodeJS.Timeout | null = null;
+
+export function queueBackgroundSave(collectionName: string, item: any) {
+  if (!item || !item.id) return;
+  // Deduplicate item in queue for same collection
+  const existingIdx = backgroundFirestoreQueue.findIndex(
+    (q) => q.collectionName === collectionName && q.item.id === item.id
+  );
+  if (existingIdx >= 0) {
+    backgroundFirestoreQueue[existingIdx].item = item;
+  } else {
+    backgroundFirestoreQueue.push({ collectionName, item });
+  }
+
+  // If queue reaches 20 items, trigger immediate flush
+  if (backgroundFirestoreQueue.length >= 20) {
+    flushBackgroundSaveQueue();
+  } else if (!queueFlushTimer) {
+    // Schedule flush in 1.2s for batching
+    queueFlushTimer = setTimeout(() => {
+      queueFlushTimer = null;
+      flushBackgroundSaveQueue();
+    }, 1200);
+  }
+}
+
+export async function flushBackgroundSaveQueue() {
+  if (isFlushingQueue || backgroundFirestoreQueue.length === 0) return;
+  isFlushingQueue = true;
+
+  try {
+    // Take a snapshot of current tasks
+    const tasksToProcess = backgroundFirestoreQueue.splice(0, 100);
+    
+    // Group by collection for high-speed batch operations
+    const collectionGroups = new Map<string, any[]>();
+    for (const task of tasksToProcess) {
+      if (!collectionGroups.has(task.collectionName)) {
+        collectionGroups.set(task.collectionName, []);
+      }
+      collectionGroups.get(task.collectionName)!.push(task.item);
+    }
+
+    // Process all collections in parallel batches
+    const batchPromises: Promise<void>[] = [];
+    for (const [colName, items] of collectionGroups.entries()) {
+      batchPromises.push(batchSaveToFirestore(colName, items));
+    }
+    await Promise.allSettled(batchPromises);
+  } catch (err) {
+    console.warn('[Background Firestore Queue Flush Error]', err);
+  } finally {
+    isFlushingQueue = false;
+    if (backgroundFirestoreQueue.length > 0) {
+      if (queueFlushTimer) clearTimeout(queueFlushTimer);
+      queueFlushTimer = setTimeout(() => {
+        queueFlushTimer = null;
+        flushBackgroundSaveQueue();
+      }, 1000);
+    }
+  }
+}
+
+// Debounced async local cache saver to eliminate disk I/O bottlenecks during mass check-ins
+let localCacheDebounceTimer: NodeJS.Timeout | null = null;
+
+export function debouncedSaveLocalCache(delay = 400) {
+  if (localCacheDebounceTimer) {
+    clearTimeout(localCacheDebounceTimer);
+  }
+  localCacheDebounceTimer = setTimeout(() => {
+    localCacheDebounceTimer = null;
+    saveLocalCache();
+  }, delay);
+}
+
 export function saveLocalCache() {
   try {
     const data = {
@@ -213,7 +296,11 @@ export function saveLocalCache() {
       deletedAttendanceIds: Array.from(deletedAttendanceIds),
       deletedQuickEventIds: Array.from(deletedQuickEventIds),
     };
-    fs.writeFileSync(LOCAL_CACHE_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    fs.writeFile(LOCAL_CACHE_PATH, JSON.stringify(data, null, 2), 'utf-8', (err) => {
+      if (err) {
+        console.error('[Local Cache Async Write Error]', err);
+      }
+    });
   } catch (err) {
     console.error('[Local Cache Save Error]', err);
   }
@@ -3325,7 +3412,7 @@ app.post('/api/checkin', async (req, res) => {
       });
     }
     users.set(student.id, student);
-    await saveToFirestore(COLLECTIONS.USERS, student);
+    queueBackgroundSave(COLLECTIONS.USERS, student);
   }
 
   // Geofence Distance Calculation
@@ -3462,8 +3549,8 @@ app.post('/api/checkin', async (req, res) => {
 
   attendanceRecords.push(newRecord);
   deletedAttendanceIds.delete(newRecord.id);
-  await saveToFirestore(COLLECTIONS.ATTENDANCE, newRecord);
-  saveLocalCache();
+  queueBackgroundSave(COLLECTIONS.ATTENDANCE, newRecord);
+  debouncedSaveLocalCache();
   broadcastCheckinEvent(sessionId, newRecord);
 
   res.json({
@@ -3493,7 +3580,7 @@ app.post('/api/teacher/checkin', async (req, res) => {
       });
     }
     users.set(teacher.id, teacher);
-    await saveToFirestore(COLLECTIONS.USERS, teacher);
+    queueBackgroundSave(COLLECTIONS.USERS, teacher);
   }
 
   // Token Validation if provided or in TOKEN/HYBRID mode
@@ -3572,8 +3659,8 @@ app.post('/api/teacher/checkin', async (req, res) => {
   };
 
   teacherAttendanceRecords.push(record);
-  await saveToFirestore(COLLECTIONS.TEACHER_ATTENDANCE, record);
-  saveLocalCache();
+  queueBackgroundSave(COLLECTIONS.TEACHER_ATTENDANCE, record);
+  debouncedSaveLocalCache();
 
   res.json({
     message: 'อาจารย์เช็คชื่อเข้าสอนสำเร็จเรียบร้อยแล้ว!',
@@ -3653,7 +3740,7 @@ app.post('/api/checkin/quick', async (req, res) => {
       });
     }
     users.set(student.id, student);
-    await saveToFirestore(COLLECTIONS.USERS, student);
+    queueBackgroundSave(COLLECTIONS.USERS, student);
   }
 
   const checkinMode = req.body.checkinMode || 'HYBRID';
@@ -3734,8 +3821,8 @@ app.post('/api/checkin/quick', async (req, res) => {
 
   attendanceRecords.push(newRecord);
   deletedAttendanceIds.delete(newRecord.id);
-  await saveToFirestore(COLLECTIONS.ATTENDANCE, newRecord);
-  saveLocalCache();
+  queueBackgroundSave(COLLECTIONS.ATTENDANCE, newRecord);
+  debouncedSaveLocalCache();
   broadcastCheckinEvent(eventId, newRecord);
 
   res.json({
