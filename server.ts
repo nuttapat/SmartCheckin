@@ -364,7 +364,16 @@ export function loadLocalCache(): boolean {
     }
     if (Array.isArray(data.attendanceRecords)) {
       attendanceRecords.length = 0;
-      attendanceRecords.push(...data.attendanceRecords);
+      data.attendanceRecords.forEach((a: AttendanceRecord) => {
+        if (a.sessionId === 'ses_crs_1785480472793_w1' && a.timestamp) {
+          const d = new Date(a.timestamp);
+          if (d.getUTCHours() === 13) {
+            d.setUTCHours(d.getUTCHours() - 7);
+            a.timestamp = d.toISOString();
+          }
+        }
+        attendanceRecords.push(a);
+      });
     }
     if (Array.isArray(data.teacherAttendanceRecords)) {
       teacherAttendanceRecords.length = 0;
@@ -4140,9 +4149,13 @@ function findStudentAttendanceRecord(studentId: string, courseId: string, sessio
 }
 
 // Helper to check if a student has an APPROVED leave request for a given session
-function getApprovedLeaveForSession(studentId: string, courseId: string, session: Session): LeaveRequest | undefined {
+function getApprovedLeaveForSession(studentId: string, courseId: string, session: Session, course?: Course): LeaveRequest | undefined {
   const stdUser = users.get(studentId);
   const uniId = stdUser?.universityId;
+  const targetCourse = course || courses.get(courseId);
+  const weekItem = targetCourse?.weeks?.find((w: any) => Number(w.weekNumber) === Number(session.weekNumber));
+  const sessionDate = (session as any).date || weekItem?.date || (session.activatedAt ? session.activatedAt.split('T')[0] : null);
+
   return leaveRequests.find((lr) => {
     const isStudentMatch =
       lr.studentId === studentId ||
@@ -4155,14 +4168,18 @@ function getApprovedLeaveForSession(studentId: string, courseId: string, session
     if (!isStudentMatch || lr.courseId !== courseId || (lr.status !== LeaveStatus.APPROVED && (lr.status as string) !== 'APPROVED')) {
       return false;
     }
+
+    // 1. Direct week number match
     if (lr.weekNumber && session.weekNumber && Number(lr.weekNumber) === Number(session.weekNumber)) {
       return true;
     }
-    const sDate = session.createdAt ? session.createdAt.split('T')[0] : '';
-    if (sDate && lr.leaveDate) {
-      if (lr.leaveDate === sDate) return true;
-      if (lr.isMultiDay && lr.endDate && sDate >= lr.leaveDate && sDate <= lr.endDate) return true;
+
+    // 2. Date match against the real planned/actual session date
+    if (sessionDate && lr.leaveDate) {
+      if (!lr.isMultiDay && lr.leaveDate === sessionDate) return true;
+      if (lr.isMultiDay && lr.endDate && sessionDate >= lr.leaveDate && sessionDate <= lr.endDate) return true;
     }
+
     return false;
   });
 }
@@ -4252,7 +4269,7 @@ app.get('/api/student/:studentId/stats', (req, res) => {
     if (isExceededAbsenceQuota || (conductedSessions > 0 && percentage < 80)) {
       statusColor = 'RED';
       statusText = 'เสี่ยงหมดสิทธิ์สอบ';
-    } else if ((remainingAbsenceQuota <= 1 && conductedSessions >= 3) || (conductedSessions > 0 && percentage <= 84)) {
+    } else if ((conductedSessions > 0 && percentage >= 80 && percentage <= 84) || (absentSessions > 0 && remainingAbsenceQuota === 0)) {
       statusColor = 'YELLOW';
       statusText = 'เฝ้าระวัง';
     }
@@ -4447,7 +4464,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
       if (isExceededAbsenceQuota || (conductedSessionsCount > 0 && attendancePercent < 80)) {
         examEligibilityStatus = 'INELIGIBLE';
         examEligibilityLabel = 'เสี่ยงหมดสิทธิ์สอบ (<80%)';
-      } else if ((remainingAbsenceQuota <= 1 && conductedSessionsCount >= 3) || (conductedSessionsCount > 0 && attendancePercent <= 84)) {
+      } else if ((conductedSessionsCount > 0 && attendancePercent >= 80 && attendancePercent <= 84) || (absentCount > 0 && remainingAbsenceQuota === 0)) {
         examEligibilityStatus = 'WARNING';
         examEligibilityLabel = 'เฝ้าระวัง (80-84%)';
       }
@@ -4501,8 +4518,8 @@ app.get('/api/teacher/courses-overview', (req, res) => {
 
       if (recordsForSession.length > 0) {
         const sorted = [...recordsForSession].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-        firstCheckinTimeStr = new Date(sorted[0].timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
-        lastCheckinTimeStr = new Date(sorted[sorted.length - 1].timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+        firstCheckinTimeStr = formatBangkokTime(sorted[0].timestamp);
+        lastCheckinTimeStr = formatBangkokTime(sorted[sorted.length - 1].timestamp);
       }
 
       const attendedStudents: any[] = [];
@@ -4551,7 +4568,7 @@ app.get('/api/teacher/courses-overview', (req, res) => {
               studentIdNum,
               email: studentUser?.email || '',
               avatarUrl: studentUser?.avatarUrl || '',
-              checkinTime: new Date(rec.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
+              checkinTime: formatBangkokTime(rec.timestamp),
               checkinMethod: rec.checkinMethod || 'สแกน QR',
             });
           } else {

@@ -12,6 +12,7 @@ import {
   formatBangkokDate,
   formatBangkokDateThai,
   formatBangkokShortDateTime,
+  formatBangkokDateTimeCompact,
 } from '../utils/dateHelper';
 import { TeacherCourseEditModal } from './TeacherCourseEditModal';
 import { TeacherLeaveManagementModal } from './TeacherLeaveManagementModal';
@@ -331,6 +332,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [loadingOverview, setLoadingOverview] = useState<boolean>(false);
   const [selectedOverviewCourseId, setSelectedOverviewCourseId] = useState<string>('');
   const [overviewSearchQuery, setOverviewSearchQuery] = useState<string>('');
+  const [overviewStatusFilter, setOverviewStatusFilter] = useState<'ALL' | 'PERFECT' | 'WARNING' | 'INELIGIBLE'>('ALL');
   const [overviewDetailTab, setOverviewDetailTab] = useState<'STUDENTS' | 'SESSIONS'>('STUDENTS');
 
   // Coordinator Overview Course Filters State
@@ -979,7 +981,20 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           loadOverviewData();
           if (selectedCourse?.id) {
             fetchCourseDetails(selectedCourse.id).then((updated) => {
-              if (updated) setSelectedCourse(updated);
+              if (updated?.course) {
+                setSelectedCourse(updated.course);
+              } else if (updated && !updated.course && updated.id) {
+                setSelectedCourse(updated);
+              }
+              if (updated?.members) {
+                setCurrentCourseMembers(updated.members);
+              }
+              if (updated?.sessions) {
+                const sortedSessions = (updated.sessions || []).sort(
+                  (a: any, b: any) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0)
+                );
+                setCourseSessions(sortedSessions);
+              }
             });
           }
         }
@@ -1491,49 +1506,49 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               <div className={`rounded-2xl p-6 space-y-5 border ${
                 isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
               }`}>
-                <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4 ${
+                <div className={`flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 border-b pb-4 ${
                   isDarkMode ? 'border-slate-800' : 'border-slate-100'
                 }`}>
-                  <div>
+                  <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-sm font-bold text-blue-600 dark:text-blue-400">{selectedCourse.courseCode}</span>
                       <span className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>({selectedCourse.courseName})</span>
                       
                       {/* Course Role Badge */}
                       {teacherRoleInfo.isOwner ? (
-                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-sky-500/15 text-sky-600 dark:text-sky-300 border border-sky-500/30 flex items-center gap-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-sky-500/15 text-sky-600 dark:text-sky-300 border border-sky-500/30 flex items-center gap-1 whitespace-nowrap">
                           👑 ผู้สร้างรายวิชา (Course Creator)
                         </span>
                       ) : teacherRoleInfo.isCoordinator ? (
-                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/30 flex items-center gap-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/30 flex items-center gap-1 whitespace-nowrap">
                           👑 ผู้รับผิดชอบรายวิชา (Coordinator)
                         </span>
                       ) : teacherRoleInfo.isCoCoordinator ? (
-                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 flex items-center gap-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 flex items-center gap-1 whitespace-nowrap">
                           🤝 ผู้ร่วมรับผิดชอบรายวิชา (Co-coordinator)
                         </span>
                       ) : (
-                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1 whitespace-nowrap">
                           👨‍🏫 อาจารย์ผู้สอน (Instructor)
                         </span>
                       )}
                     </div>
-                    <h2 className={`text-lg font-bold mt-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                    <h2 className={`text-lg font-bold mt-1 break-words ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                       รายการสัปดาห์สอน &amp; เปิดเช็คชื่อนักเรียน
                     </h2>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center justify-end gap-2 w-full sm:w-auto ml-auto">
+                  <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto xl:justify-end shrink-0">
                     <button
                       type="button"
                       onClick={() => {
                         setCourseToClone(selectedCourse);
                         setIsCloneModalOpen(true);
                       }}
-                      className="w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-95 cursor-pointer bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/30"
+                      className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-95 cursor-pointer bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/30 whitespace-nowrap"
                       title="คัดลอกโครงสร้างรายวิชาและคาบเรียนไปเปิดในเทอมหรือปีการศึกษาใหม่"
                     >
-                      <Copy className="w-3.5 h-3.5" />
+                      <Copy className="w-3.5 h-3.5 shrink-0" />
                       <span>คัดลอกโครงสร้างวิชา</span>
                     </button>
 
@@ -1549,14 +1564,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           alert(`สิทธิ์ไม่เพียงพอ: เฉพาะผู้สร้างรายวิชาและผู้รับผิดชอบรายวิชาเท่านั้นที่มีสิทธิ์แก้ไขวิชาและเพิ่ม/ลดสัปดาห์สอน\n\nสิทธิ์ของคุณ: ${roleText}\n${detailText}`);
                         }
                       }}
-                      className={`w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-95 cursor-pointer ${
+                      className={`flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-95 cursor-pointer whitespace-nowrap ${
                         teacherRoleInfo.canEditCourse
                           ? 'bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30'
                           : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 opacity-70'
                       }`}
                       title={teacherRoleInfo.canEditCourse ? "แก้ไขวิชา / เพิ่มลดสัปดาห์" : "เฉพาะผู้สร้างวิชาและผู้รับผิดชอบรายวิชาเท่านั้นที่แก้ไขได้"}
                     >
-                      <Edit3 className="w-3.5 h-3.5" />
+                      <Edit3 className="w-3.5 h-3.5 shrink-0" />
                       <span>แก้ไขวิชา / เพิ่มลดสัปดาห์</span>
                     </button>
                   </div>
@@ -2320,14 +2335,24 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
                 const course = currentOverviewItem.course;
 
-                // Filter students by search
+                // Quick stats for status tabs
+                const totalStudentsInCourse = currentOverviewItem.studentList.length;
+                const perfectStudentsCount = currentOverviewItem.studentList.filter((s: any) => (s.attendancePercent || 0) === 100).length;
+                const warningStudentsCount = currentOverviewItem.studentList.filter((s: any) => (s.attendancePercent || 0) >= 80 && (s.attendancePercent || 0) < 100).length;
+                const ineligibleStudentsCount = currentOverviewItem.studentList.filter((s: any) => (s.attendancePercent || 0) < 80).length;
+
+                // Filter students by quick status & search
                 const filteredStudents = currentOverviewItem.studentList.filter((st: any) => {
+                  if (overviewStatusFilter === 'PERFECT' && (st.attendancePercent || 0) < 100) return false;
+                  if (overviewStatusFilter === 'WARNING' && ((st.attendancePercent || 0) >= 100 || (st.attendancePercent || 0) < 80)) return false;
+                  if (overviewStatusFilter === 'INELIGIBLE' && (st.attendancePercent || 0) >= 80) return false;
+
                   if (!overviewSearchQuery) return true;
                   const q = overviewSearchQuery.toLowerCase();
                   return (
-                    st.studentName.toLowerCase().includes(q) ||
-                    st.studentIdNum.toLowerCase().includes(q) ||
-                    st.email.toLowerCase().includes(q)
+                    (st.studentName || '').toLowerCase().includes(q) ||
+                    (st.studentIdNum || '').toLowerCase().includes(q) ||
+                    (st.email || '').toLowerCase().includes(q)
                   );
                 });
 
@@ -2371,63 +2396,46 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 return (
                   <div className="lg:col-span-2 space-y-4">
                     {/* Course Header & Actions */}
-                    <div className={`p-5 sm:p-6 rounded-3xl border space-y-4 ${
+                    <div className={`p-4 sm:p-6 rounded-3xl border space-y-4 ${
                       isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
                     }`}>
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4 border-slate-800/40">
-                        <div>
-                          <div className="flex items-center space-x-2">
+                      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 border-b pb-4 border-slate-200 dark:border-slate-800/60">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="font-mono text-sm font-black text-sky-600 dark:text-sky-400">{course.courseCode}</span>
-                            <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 font-semibold">
+                            <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 font-semibold whitespace-nowrap">
                               ปีการศึกษา {course.academicYear} / ภาคเรียนที่ {course.semester}
                             </span>
                           </div>
-                          <h2 className={`text-base sm:text-lg font-black mt-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                          <h2 className={`text-base sm:text-lg font-black break-words ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                             {course.courseName}
                           </h2>
-                          <p className="text-xs text-slate-400 mt-0.5">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 break-words">
                             อาจารย์ผู้รับผิดชอบรายวิชา: <strong className={isDarkMode ? 'text-slate-200' : 'text-slate-700'}>{course.coordinatorName || course.ownerName}</strong>
                           </p>
                         </div>
 
-                        <div className="flex flex-col sm:flex-row items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCourseToClone(course);
-                              setIsCloneModalOpen(true);
-                            }}
-                            className={`w-full sm:w-auto px-4 py-2.5 rounded-xl border font-bold text-xs flex items-center justify-center space-x-2 transition shrink-0 cursor-pointer shadow-xs ${
-                              isDarkMode
-                                ? 'bg-sky-950/40 hover:bg-sky-900/60 text-sky-300 border-sky-800/80'
-                                : 'bg-sky-50 hover:bg-sky-100 text-sky-800 border-sky-300/80'
-                            }`}
-                            title="คัดลอกโครงสร้างรายวิชาและคาบเรียนไปเปิดในเทอมหรือปีการศึกษาใหม่"
-                          >
-                            <Copy className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-                            <span>คัดลอกโครงสร้าง</span>
-                          </button>
-
+                        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto xl:justify-end shrink-0">
                           <button
                             type="button"
                             onClick={() => setIsAttendanceGridModalOpen(true)}
-                            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-md shadow-sky-600/20 active:scale-95 shrink-0 cursor-pointer"
+                            className="flex-1 sm:flex-none px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center space-x-1.5 transition shadow-md shadow-sky-600/20 active:scale-95 cursor-pointer whitespace-nowrap"
                             title="เปิดตารางเช็คชื่อ และเปลี่ยนสถานะการเข้าเรียนของนักศึกษาแต่ละคน"
                           >
-                            <FileSpreadsheet className="w-4 h-4" />
+                            <FileSpreadsheet className="w-4 h-4 shrink-0" />
                             <span>ตารางเช็คชื่อ / แก้ไขสถานะรายคน</span>
                           </button>
 
                           <button
                             type="button"
                             onClick={() => exportCourseOverviewCSV(currentOverviewItem)}
-                            className={`w-full sm:w-auto px-4 py-2.5 rounded-xl border font-bold text-xs flex items-center justify-center space-x-2 transition shrink-0 cursor-pointer shadow-xs ${
+                            className={`flex-1 sm:flex-none px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-xl border font-bold text-xs flex items-center justify-center space-x-1.5 transition cursor-pointer shadow-xs whitespace-nowrap ${
                               isDarkMode
                                 ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-800/80'
                                 : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300/80'
                             }`}
                           >
-                            <Download className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                            <Download className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                             <span>ส่งออก CSV</span>
                           </button>
                         </div>
@@ -2493,70 +2501,188 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
                       {/* SUB-TAB 1: REGISTERED STUDENTS & ATTENDANCE TIME TABLE */}
                       {overviewDetailTab === 'STUDENTS' && (
-                        <div className="space-y-3">
-                          {/* Search bar */}
-                          <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
-                            <div className="relative w-full sm:w-72">
-                              <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
-                              <input
-                                type="text"
-                                placeholder="ค้นหาชื่อ หรือ รหัสนักศึกษา..."
-                                value={overviewSearchQuery}
-                                onChange={(e) => setOverviewSearchQuery(e.target.value)}
-                                className={`w-full pl-9 pr-3 py-2 rounded-xl text-xs border focus:outline-none focus:ring-2 focus:ring-sky-500 ${
-                                  isDarkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                        <div className="space-y-3.5">
+                          {/* Quick Status Filter Tabs & Search Bar */}
+                          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-2.5">
+                            {/* Filter Pills */}
+                            <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0">
+                              <button
+                                type="button"
+                                onClick={() => setOverviewStatusFilter('ALL')}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer whitespace-nowrap ${
+                                  overviewStatusFilter === 'ALL'
+                                    ? 'bg-sky-600 text-white shadow-sm shadow-sky-600/30'
+                                    : isDarkMode
+                                    ? 'bg-slate-950/80 hover:bg-slate-800 text-slate-400 border border-slate-800'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200'
                                 }`}
-                              />
+                              >
+                                <span>ทั้งหมด</span>
+                                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                                  overviewStatusFilter === 'ALL'
+                                    ? 'bg-white/20 text-white'
+                                    : isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'
+                                }`}>
+                                  {totalStudentsInCourse}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setOverviewStatusFilter('PERFECT')}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer whitespace-nowrap ${
+                                  overviewStatusFilter === 'PERFECT'
+                                    ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/30'
+                                    : isDarkMode
+                                    ? 'bg-slate-950/80 hover:bg-slate-800 text-slate-400 border border-slate-800'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200'
+                                }`}
+                              >
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                                <span>เข้าครบ 100%</span>
+                                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                                  overviewStatusFilter === 'PERFECT'
+                                    ? 'bg-white/20 text-white'
+                                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                }`}>
+                                  {perfectStudentsCount}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setOverviewStatusFilter('WARNING')}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer whitespace-nowrap ${
+                                  overviewStatusFilter === 'WARNING'
+                                    ? 'bg-amber-600 text-white shadow-sm shadow-amber-600/30'
+                                    : isDarkMode
+                                    ? 'bg-slate-950/80 hover:bg-slate-800 text-slate-400 border border-slate-800'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200'
+                                }`}
+                              >
+                                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0"></span>
+                                <span>มีความเสี่ยง / ขาดเรียน</span>
+                                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                                  overviewStatusFilter === 'WARNING'
+                                    ? 'bg-white/20 text-white'
+                                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                }`}>
+                                  {warningStudentsCount}
+                                </span>
+                              </button>
+
+                              {ineligibleStudentsCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setOverviewStatusFilter('INELIGIBLE')}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer whitespace-nowrap ${
+                                    overviewStatusFilter === 'INELIGIBLE'
+                                      ? 'bg-rose-600 text-white shadow-sm shadow-rose-600/30'
+                                      : isDarkMode
+                                      ? 'bg-slate-950/80 hover:bg-slate-800 text-slate-400 border border-slate-800'
+                                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200'
+                                  }`}
+                                >
+                                  <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
+                                  <span>เสี่ยงหมดสิทธิ์สอบ</span>
+                                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                                    overviewStatusFilter === 'INELIGIBLE'
+                                      ? 'bg-white/20 text-white'
+                                      : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                                  }`}>
+                                    {ineligibleStudentsCount}
+                                  </span>
+                                </button>
+                              )}
                             </div>
-                            <div className="text-[11px] text-slate-400 self-end sm:self-auto">
-                              แสดง {filteredStudents.length} จาก {currentOverviewItem.studentList.length} คน
+
+                            {/* Search bar & Count */}
+                            <div className="flex items-center gap-2">
+                              <div className="relative flex-1 sm:w-64 lg:w-72">
+                                <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
+                                <input
+                                  type="text"
+                                  placeholder="ค้นหาชื่อ หรือ รหัสนักศึกษา..."
+                                  value={overviewSearchQuery}
+                                  onChange={(e) => setOverviewSearchQuery(e.target.value)}
+                                  className={`w-full pl-9 pr-8 py-2 rounded-xl text-xs border focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                                    isDarkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                                  }`}
+                                />
+                                {overviewSearchQuery && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setOverviewSearchQuery('')}
+                                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200 cursor-pointer"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-400 whitespace-nowrap shrink-0">
+                                {filteredStudents.length} / {totalStudentsInCourse} คน
+                              </div>
                             </div>
                           </div>
 
                           {filteredStudents.length === 0 ? (
-                            <div className="p-8 text-center text-xs text-slate-400 space-y-1">
-                              <Users className="w-6 h-6 mx-auto text-slate-500 opacity-60" />
-                              <p>ไม่พบนักศึกษาตรงตามเงื่อนไขที่ค้นหา</p>
+                            <div className={`p-8 text-center text-xs text-slate-400 space-y-2 rounded-2xl border ${
+                              isDarkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'
+                            }`}>
+                              <Users className="w-7 h-7 mx-auto text-slate-500 opacity-60" />
+                              <p className="font-semibold">ไม่พบข้อมูลนักศึกษาที่ตรงตามเงื่อนไข</p>
+                              {(overviewSearchQuery || overviewStatusFilter !== 'ALL') && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOverviewSearchQuery('');
+                                    setOverviewStatusFilter('ALL');
+                                  }}
+                                  className="text-sky-500 hover:underline text-xs cursor-pointer inline-block"
+                                >
+                                  ล้างตัวกรองทั้งหมด
+                                </button>
+                              )}
                             </div>
                           ) : (
                             <>
                               {/* MOBILE STACKED CARD VIEW (FOR SMALL SCREENS) */}
-                              <div className="block sm:hidden space-y-2.5">
+                              <div className="block md:hidden space-y-2.5">
                                 {sortedOverviewStudents.map((st: any, idx: number) => {
                                   const isEligible = st.attendancePercent >= 80;
                                   return (
                                     <div
                                       key={st.userId}
-                                      className={`p-3.5 rounded-2xl border space-y-2.5 ${
-                                        isDarkMode ? 'bg-slate-950/70 border-slate-800/80' : 'bg-slate-50 border-slate-200'
+                                      className={`p-4 rounded-2xl border space-y-3 ${
+                                        isDarkMode ? 'bg-slate-950/70 border-slate-800/80' : 'bg-slate-50 border-slate-200 shadow-2xs'
                                       }`}
                                     >
-                                      {/* Top Row: Name + Student ID */}
+                                      {/* Top Row: Avatar + Name + Student ID */}
                                       <div className="flex items-start justify-between gap-2">
                                         <div className="flex items-center space-x-2.5 min-w-0">
                                           {st.avatarUrl ? (
-                                            <img src={st.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover border border-slate-700 shrink-0" />
+                                            <img src={st.avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover border border-slate-700 shrink-0" />
                                           ) : (
-                                            <div className="w-8 h-8 rounded-full bg-sky-500/10 text-sky-500 font-bold flex items-center justify-center text-xs shrink-0">
+                                            <div className="w-9 h-9 rounded-full bg-sky-500/10 text-sky-500 font-bold flex items-center justify-center text-xs shrink-0 border border-sky-500/20">
                                               {st.studentName.charAt(0)}
                                             </div>
                                           )}
                                           <div className="min-w-0">
-                                            <div className={`text-xs font-bold line-clamp-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                            <div className={`text-xs font-bold truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                                               {st.studentName}
                                             </div>
-                                            <div className="text-[10px] text-slate-400 font-mono line-clamp-1">{st.email}</div>
+                                            <div className="text-[10px] text-slate-400 font-mono truncate">{st.email}</div>
                                           </div>
                                         </div>
 
-                                        <span className="font-mono text-xs font-black text-sky-600 dark:text-sky-400 px-2 py-0.5 rounded-md bg-sky-500/10 border border-sky-500/20 shrink-0">
+                                        <span className="font-mono text-xs font-bold text-sky-600 dark:text-sky-400 px-2 py-0.5 rounded-lg bg-sky-500/10 border border-sky-500/20 shrink-0">
                                           {st.studentIdNum}
                                         </span>
                                       </div>
 
-                                      {/* Exam Eligibility Badge */}
-                                      <div className="flex items-center justify-between">
-                                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                      {/* Status & Attendance Progress */}
+                                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800/60">
+                                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
                                           st.examEligibilityStatus === 'INELIGIBLE'
                                             ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
                                             : st.examEligibilityStatus === 'WARNING'
@@ -2565,43 +2691,36 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                         }`}>
                                           {st.examEligibilityLabel || (isEligible ? '🟢 มีสิทธิ์สอบปกติ' : '🔴 เสี่ยงหมดสิทธิ์สอบ')}
                                         </span>
-                                        <div className="text-right">
-                                          <span className={`text-xs font-mono font-bold ${isEligible ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                            {st.attendancePercent}%
-                                          </span>
-                                        </div>
+                                        <span className={`text-xs font-mono font-bold ${
+                                          st.attendancePercent === 100 ? 'text-emerald-500' : isEligible ? 'text-amber-500' : 'text-rose-500'
+                                        }`}>
+                                          {st.attendancePercent}%
+                                        </span>
                                       </div>
 
-                                      {/* Stats Grid */}
-                                      <div className="pt-2 border-t border-slate-800/40 grid grid-cols-2 gap-2 text-[10px]">
+                                      {/* Stats Details Grid */}
+                                      <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 text-slate-600 dark:text-slate-300">
                                         <div className="space-y-0.5">
-                                          <div className="text-slate-400">คาบที่เข้าเรียน:</div>
+                                          <div className="text-[10px] text-slate-400">คาบที่เข้า:</div>
                                           <div className="font-mono font-bold">
                                             <span className="text-emerald-500">{st.attendedCount}</span> / {st.conductedSessionsCount !== undefined ? st.conductedSessionsCount : st.totalSessionsCount} คาบ
-                                            {st.conductedSessionsCount !== undefined && st.conductedSessionsCount < st.totalSessionsCount && (
-                                              <span className="text-slate-400 font-normal text-[9px] block">
-                                                (จากทั้งหมด {st.totalSessionsCount} คาบ)
-                                              </span>
-                                            )}
                                           </div>
                                         </div>
                                         <div className="space-y-0.5">
-                                          <div className="text-slate-400">โควตาขาดเรียน:</div>
-                                          <div className="font-mono font-bold text-sky-500">
-                                            {st.remainingAbsenceQuota !== undefined 
-                                              ? `ขาดได้อีก ${st.remainingAbsenceQuota} ครั้ง`
-                                              : st.avgTimeStr}
+                                          <div className="text-[10px] text-slate-400">เวลาเข้าเฉลี่ย:</div>
+                                          <div className="font-mono font-bold text-amber-500">
+                                            {st.avgTimeStr || '-'}
                                           </div>
                                         </div>
                                       </div>
 
                                       {/* Last Scan Info */}
-                                      <div className="pt-1.5 border-t border-slate-800/30 text-[10px] text-slate-400 flex items-center justify-between">
+                                      <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800/60 text-[10px] text-slate-400 flex items-center justify-between">
                                         <span>สแกนล่าสุด:</span>
                                         {st.lastCheckinTime ? (
                                           <div className="flex items-center space-x-1.5 font-mono">
                                             <span className={isDarkMode ? 'text-slate-200' : 'text-slate-700'}>
-                                              {formatBangkokShortDateTime(st.lastCheckinTime)}
+                                              {formatBangkokDateTimeCompact(st.lastCheckinTime)}
                                             </span>
                                             {st.lastCheckinMethod && (
                                               <span className="text-[9px] px-1.5 py-0.2 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400 font-semibold border border-sky-500/20">
@@ -2618,17 +2737,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                 })}
                               </div>
 
-                              {/* DESKTOP TABLE VIEW (FOR SM SCREENS AND ABOVE) */}
-                              <div className="hidden sm:block overflow-x-auto border rounded-2xl border-slate-200 dark:border-slate-800">
-                                <table className="w-full text-left text-xs">
-                                  <thead className={`border-b text-[11px] uppercase font-bold ${
-                                    isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-600'
+                              {/* DESKTOP / TABLET REFINED TABLE VIEW */}
+                              <div className="hidden md:block overflow-x-auto border rounded-2xl border-slate-200 dark:border-slate-800">
+                                <table className="w-full text-left text-xs border-collapse">
+                                  <thead className={`border-b text-[11px] font-bold ${
+                                    isDarkMode ? 'bg-slate-950/80 border-slate-800 text-slate-400' : 'bg-slate-100/90 border-slate-200 text-slate-600'
                                   }`}>
                                     <tr>
-                                      <th className="p-3">#</th>
+                                      <th className="py-3 px-3 text-center w-12 text-slate-400 font-normal">#</th>
+                                      
                                       <th
                                         onClick={() => handleOverviewSort('studentIdNum')}
-                                        className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        className="py-3 px-3.5 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition w-32"
                                         title="กดเพื่อจัดเรียงตามรหัสนักศึกษา"
                                       >
                                         <div className="flex items-center space-x-1">
@@ -2640,9 +2760,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                           )}
                                         </div>
                                       </th>
+
                                       <th
                                         onClick={() => handleOverviewSort('studentName')}
-                                        className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        className="py-3 px-3.5 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition min-w-[200px]"
                                         title="กดเพื่อจัดเรียงตามชื่อ-นามสกุล"
                                       >
                                         <div className="flex items-center space-x-1">
@@ -2654,13 +2775,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                           )}
                                         </div>
                                       </th>
+
                                       <th
                                         onClick={() => handleOverviewSort('attended')}
-                                        className="p-3 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        className="py-3 px-3.5 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition whitespace-nowrap w-28"
                                         title="กดเพื่อจัดเรียงตามจำนวนคาบเข้าเรียน"
                                       >
                                         <div className="flex items-center justify-center space-x-1">
-                                          <span>คาบที่เข้าเรียน</span>
+                                          <span>คาบที่เข้า</span>
                                           {overviewSortField === 'attended' ? (
                                             overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
                                           ) : (
@@ -2668,13 +2790,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                           )}
                                         </div>
                                       </th>
+
                                       <th
                                         onClick={() => handleOverviewSort('percent')}
-                                        className="p-3 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        className="py-3 px-3.5 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition whitespace-nowrap w-28"
                                         title="กดเพื่อจัดเรียงตามอัตราเข้าเรียน"
                                       >
                                         <div className="flex items-center justify-center space-x-1">
-                                          <span>อัตราเข้าเรียน (%)</span>
+                                          <span>อัตราเข้าเรียน</span>
                                           {overviewSortField === 'percent' ? (
                                             overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
                                           ) : (
@@ -2682,13 +2805,29 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                           )}
                                         </div>
                                       </th>
+
                                       <th
-                                        onClick={() => handleOverviewSort('avgTime')}
-                                        className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
-                                        title="กดเพื่อจัดเรียงตามเวลาเข้าเรียนเฉลี่ย"
+                                        onClick={() => handleOverviewSort('eligible')}
+                                        className="py-3 px-3.5 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition whitespace-nowrap min-w-[190px]"
+                                        title="กดเพื่อจัดเรียงตามสิทธิ์สอบ"
                                       >
                                         <div className="flex items-center space-x-1">
-                                          <span>เวลาเข้าเรียนเฉลี่ย</span>
+                                          <span>สถานะสิทธิ์สอบ & โควตา</span>
+                                          {overviewSortField === 'eligible' ? (
+                                            overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                          ) : (
+                                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                                          )}
+                                        </div>
+                                      </th>
+
+                                      <th
+                                        onClick={() => handleOverviewSort('avgTime')}
+                                        className="py-3 px-3.5 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition whitespace-nowrap w-28"
+                                        title="กดเพื่อจัดเรียงตามเวลาเข้าเรียนเฉลี่ย"
+                                      >
+                                        <div className="flex items-center justify-center space-x-1">
+                                          <span>เวลาเฉลี่ย</span>
                                           {overviewSortField === 'avgTime' ? (
                                             overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
                                           ) : (
@@ -2696,28 +2835,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                           )}
                                         </div>
                                       </th>
+
                                       <th
                                         onClick={() => handleOverviewSort('lastScan')}
-                                        className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
+                                        className="py-3 px-3.5 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition whitespace-nowrap min-w-[160px]"
                                         title="กดเพื่อจัดเรียงตามสแกนครั้งล่าสุด"
                                       >
                                         <div className="flex items-center space-x-1">
-                                          <span>สแกนครั้งล่าสุด</span>
+                                          <span>สแกนล่าสุด</span>
                                           {overviewSortField === 'lastScan' ? (
-                                            overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                                          ) : (
-                                            <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
-                                          )}
-                                        </div>
-                                      </th>
-                                      <th
-                                        onClick={() => handleOverviewSort('eligible')}
-                                        className="p-3 cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-900 select-none transition"
-                                        title="กดเพื่อจัดเรียงตามสิทธิ์สอบ"
-                                      >
-                                        <div className="flex items-center space-x-1">
-                                          <span>สิทธิ์สอบ</span>
-                                          {overviewSortField === 'eligible' ? (
                                             overviewSortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-500 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-500 shrink-0" />
                                           ) : (
                                             <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
@@ -2726,83 +2852,115 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                       </th>
                                     </tr>
                                   </thead>
-                                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80">
                                     {sortedOverviewStudents.map((st: any, idx: number) => {
                                       const isEligible = st.attendancePercent >= 80;
+                                      const conducted = st.conductedSessionsCount !== undefined ? st.conductedSessionsCount : st.totalSessionsCount;
                                       return (
-                                        <tr key={st.userId} className={isDarkMode ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}>
-                                          <td className="p-3 text-slate-400 font-mono">{idx + 1}</td>
-                                          <td className="p-3 font-mono font-bold text-sky-600 dark:text-sky-400 whitespace-nowrap">
+                                        <tr
+                                          key={st.userId}
+                                          className={`transition-colors ${
+                                            isDarkMode ? 'hover:bg-slate-800/40' : 'hover:bg-sky-50/50'
+                                          }`}
+                                        >
+                                          {/* Index */}
+                                          <td className="py-3 px-3 text-center text-slate-400 font-mono text-[11px]">
+                                            {idx + 1}
+                                          </td>
+
+                                          {/* Student ID */}
+                                          <td className="py-3 px-3.5 font-mono font-bold text-sky-600 dark:text-sky-400 whitespace-nowrap">
                                             {st.studentIdNum}
                                           </td>
-                                          <td className="p-3 font-semibold whitespace-nowrap">
-                                            <div className="flex items-center space-x-2">
-                                              {st.avatarUrl && (
-                                                <img src={st.avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover border border-slate-700" />
-                                              )}
-                                              <div>
-                                                <div>{st.studentName}</div>
-                                                <div className="text-[10px] text-slate-500 font-normal">{st.email}</div>
-                                              </div>
-                                            </div>
-                                          </td>
-                                          <td className="p-3 text-center font-bold font-mono">
-                                            <div>
-                                              <span className="text-emerald-500">{st.attendedCount}</span> / {st.conductedSessionsCount !== undefined ? st.conductedSessionsCount : st.totalSessionsCount} คาบ
-                                              {st.conductedSessionsCount !== undefined && st.conductedSessionsCount < st.totalSessionsCount && (
-                                                <div className="text-[10px] text-slate-400 font-normal">
-                                                  (แผนทั้งหมด {st.totalSessionsCount} คาบ)
+
+                                          {/* Student Name & Email */}
+                                          <td className="py-3 px-3.5 whitespace-nowrap">
+                                            <div className="flex items-center space-x-2.5">
+                                              {st.avatarUrl ? (
+                                                <img src={st.avatarUrl} alt="" className="w-7 h-7 rounded-full object-cover border border-slate-700 shrink-0" />
+                                              ) : (
+                                                <div className="w-7 h-7 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold flex items-center justify-center text-[10px] shrink-0 border border-sky-500/20">
+                                                  {st.studentName.charAt(0)}
                                                 </div>
                                               )}
-                                            </div>
-                                          </td>
-                                          <td className="p-3 text-center whitespace-nowrap">
-                                            <div className="flex items-center justify-center space-x-1.5">
-                                              <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                                                <div
-                                                  className={`h-full ${isEligible ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                                                  style={{ width: `${Math.min(100, st.attendancePercent)}%` }}
-                                                ></div>
+                                              <div className="min-w-0">
+                                                <div className={`font-semibold ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                                                  {st.studentName}
+                                                </div>
+                                                <div className="text-[10px] text-slate-400 font-mono">{st.email}</div>
                                               </div>
-                                              <span className={`font-mono font-bold text-xs ${isEligible ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                                {st.attendancePercent}%
-                                              </span>
                                             </div>
                                           </td>
-                                          <td className="p-3 font-mono font-bold text-amber-500 whitespace-nowrap">
-                                            <div>{st.avgTimeStr}</div>
-                                            {st.remainingAbsenceQuota !== undefined && (
-                                              <div className="text-[10px] font-normal text-sky-400">
-                                                โควตาขาดได้อีก {st.remainingAbsenceQuota} คาบ
+
+                                          {/* Sessions Attended */}
+                                          <td className="py-3 px-3.5 text-center font-mono whitespace-nowrap">
+                                            <div className="inline-flex items-baseline space-x-1">
+                                              <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                                                {st.attendedCount}
+                                              </span>
+                                              <span className="text-slate-400 text-xs font-medium">/ {conducted} คาบ</span>
+                                            </div>
+                                            {conducted < st.totalSessionsCount && (
+                                              <div className="text-[9px] text-slate-400 font-normal">
+                                                (แผน {st.totalSessionsCount} คาบ)
                                               </div>
                                             )}
                                           </td>
-                                          <td className="p-3 text-[11px] text-slate-400 whitespace-nowrap">
+
+                                          {/* Attendance Percentage */}
+                                          <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                                            <span className={`inline-block font-mono font-bold text-xs px-2 py-0.5 rounded-md ${
+                                              st.attendancePercent === 100
+                                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                                : isEligible
+                                                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                                            }`}>
+                                              {st.attendancePercent}%
+                                            </span>
+                                          </td>
+
+                                          {/* Exam Eligibility & Absence Quota */}
+                                          <td className="py-3 px-3.5 whitespace-nowrap">
+                                            <div className="flex items-center space-x-1.5">
+                                              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase inline-flex items-center gap-1 ${
+                                                st.examEligibilityStatus === 'INELIGIBLE'
+                                                  ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                                                  : st.examEligibilityStatus === 'WARNING'
+                                                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                                                  : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                                              }`}>
+                                                {st.examEligibilityLabel || (isEligible ? '🟢 ปกติ' : '🔴 เสี่ยงหมดสิทธิ์')}
+                                              </span>
+                                              {st.remainingAbsenceQuota !== undefined && (
+                                                <span className="text-[10px] text-slate-400 font-normal">
+                                                  (ขาดได้อีก {st.remainingAbsenceQuota} คาบ)
+                                                </span>
+                                              )}
+                                            </div>
+                                          </td>
+
+                                          {/* Average Checkin Time */}
+                                          <td className="py-3 px-3.5 text-center font-mono font-bold text-amber-500 dark:text-amber-400 whitespace-nowrap">
+                                            {st.avgTimeStr || '-'}
+                                          </td>
+
+                                          {/* Last Scan Info */}
+                                          <td className="py-3 px-3.5 text-[11px] whitespace-nowrap">
                                             {st.lastCheckinTime ? (
-                                              <div>
-                                                <div className={`font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
-                                                  {formatBangkokDateTime(st.lastCheckinTime)}
-                                                </div>
+                                              <div className="flex items-center space-x-1.5">
+                                                <span className={`font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>
+                                                  {formatBangkokDateTimeCompact(st.lastCheckinTime)}
+                                                </span>
                                                 {st.lastCheckinMethod && (
-                                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400 font-semibold border border-sky-500/20">
+                                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold border border-sky-500/20">
                                                     {st.lastCheckinMethod}
                                                   </span>
                                                 )}
                                               </div>
                                             ) : (
-                                              <span className="text-slate-500">-</span>
+                                              <span className="text-slate-400 font-mono">-</span>
                                             )}
-                                          </td>
-                                          <td className="p-3 whitespace-nowrap">
-                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                                              st.examEligibilityStatus === 'INELIGIBLE'
-                                                ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
-                                                : st.examEligibilityStatus === 'WARNING'
-                                                ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
-                                                : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-                                            }`}>
-                                              {st.examEligibilityLabel || (isEligible ? '🟢 มีสิทธิ์สอบ (80%+)' : '🔴 เสี่ยงหมดสิทธิ์สอบ (<80%)')}
-                                            </span>
                                           </td>
                                         </tr>
                                       );
@@ -2867,11 +3025,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                 <div className="pt-2 border-t border-slate-800/40 grid grid-cols-2 gap-2 text-[10px] text-slate-400 font-mono">
                                   <div>
                                     <span>คนแรกสแกน: </span>
-                                    <strong className="text-sky-500">{ses.firstCheckinTimeStr}</strong>
+                                    <strong className="text-sky-500">{formatBangkokTime(ses.firstCheckinTimeStr)}</strong>
                                   </div>
                                   <div>
                                     <span>คนสุดท้ายสแกน: </span>
-                                    <strong className="text-amber-500">{ses.lastCheckinTimeStr}</strong>
+                                    <strong className="text-amber-500">{formatBangkokTime(ses.lastCheckinTimeStr)}</strong>
                                   </div>
                                 </div>
 
@@ -3240,7 +3398,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                               <div className="pt-2 border-t border-slate-800/40 flex items-center justify-between text-[10px]">
                                 <div className="flex items-center space-x-1.5 font-mono">
                                   <span className="text-slate-400">เวลาสแกน:</span>
-                                  <span className="font-bold text-emerald-500">{st.checkinTime}</span>
+                                  <span className="font-bold text-emerald-500">{formatBangkokTime(st.checkinTime)}</span>
                                 </div>
                                 <div className="flex items-center space-x-1">
                                   <span className="px-1.5 py-0.2 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400 font-semibold border border-sky-500/20">
@@ -3338,7 +3496,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="p-3 font-mono font-bold text-emerald-500 whitespace-nowrap">{st.checkinTime}</td>
+                                  <td className="p-3 font-mono font-bold text-emerald-500 whitespace-nowrap">{formatBangkokTime(st.checkinTime)}</td>
                                   <td className="p-3 whitespace-nowrap">
                                     <span className="text-[10px] px-2 py-0.5 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400 font-semibold border border-sky-500/20">
                                       {st.checkinMethod}

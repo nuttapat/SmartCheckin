@@ -32,6 +32,32 @@ export function addOneWeekToDate(dateStr?: string): string {
 }
 
 /**
+ * Formats a timestamp into a clean compact date-time string in Bangkok timezone.
+ * Example output: "31 ก.ค. 14:57 น."
+ */
+export function formatBangkokDateTimeCompact(dateInput: string | number | Date | null | undefined): string {
+  if (!dateInput) return '-';
+  try {
+    const dt = new Date(dateInput);
+    if (isNaN(dt.getTime())) return '-';
+    const dayMonth = dt.toLocaleDateString('th-TH', {
+      timeZone: BANGKOK_TIMEZONE,
+      month: 'short',
+      day: 'numeric',
+    });
+    const time = dt.toLocaleTimeString('th-TH', {
+      timeZone: BANGKOK_TIMEZONE,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    return `${dayMonth} ${time} น.`;
+  } catch (e) {
+    return '-';
+  }
+}
+
+/**
  * Formats a timestamp into a full date-time string in Bangkok timezone (Asia/Bangkok, UTC+7).
  * Example output: "01/08/2569 13:15:30"
  */
@@ -124,9 +150,10 @@ export function formatBangkokDateThai(dateInput: string | number | Date | null |
  */
 export function formatBangkokTime(dateInput: string | number | Date | null | undefined): string {
   if (!dateInput) return '-';
+  if (typeof dateInput === 'string' && dateInput.includes('น.')) return dateInput;
   try {
     const dt = new Date(dateInput);
-    if (isNaN(dt.getTime())) return '-';
+    if (isNaN(dt.getTime())) return typeof dateInput === 'string' ? dateInput : '-';
     return dt.toLocaleTimeString('th-TH', {
       timeZone: BANGKOK_TIMEZONE,
       hour: '2-digit',

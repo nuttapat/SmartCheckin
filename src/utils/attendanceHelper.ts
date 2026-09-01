@@ -77,8 +77,15 @@ export function getApprovedLeaveForSession(
   courseId: string,
   session: Session,
   leaves: LeaveRequest[],
-  studentUniversityId?: string
+  studentUniversityId?: string,
+  course?: Course
 ): LeaveRequest | undefined {
+  if (!Array.isArray(leaves) || leaves.length === 0) return undefined;
+
+  // Resolve true session date from course weeks schedule or session date
+  const weekItem = course?.weeks?.find((w) => Number(w.weekNumber) === Number(session.weekNumber));
+  const sessionDate = (session as any).date || weekItem?.date || (session.activatedAt ? session.activatedAt.split('T')[0] : null);
+
   return leaves.find((lr) => {
     const isStudentMatch =
       lr.studentId === studentId ||
@@ -90,14 +97,18 @@ export function getApprovedLeaveForSession(
     if (!isStudentMatch || lr.courseId !== courseId || (lr.status !== LeaveStatus.APPROVED && (lr.status as string) !== 'APPROVED')) {
       return false;
     }
+
+    // 1. Direct week number match if present
     if (lr.weekNumber && session.weekNumber && Number(lr.weekNumber) === Number(session.weekNumber)) {
       return true;
     }
-    const sDate = session.createdAt ? session.createdAt.split('T')[0] : '';
-    if (sDate && lr.leaveDate) {
-      if (lr.leaveDate === sDate) return true;
-      if (lr.isMultiDay && lr.endDate && sDate >= lr.leaveDate && sDate <= lr.endDate) return true;
+
+    // 2. Date match against the real planned/actual session date
+    if (sessionDate && lr.leaveDate) {
+      if (!lr.isMultiDay && lr.leaveDate === sessionDate) return true;
+      if (lr.isMultiDay && lr.endDate && sessionDate >= lr.leaveDate && sessionDate <= lr.endDate) return true;
     }
+
     return false;
   });
 }
@@ -127,7 +138,7 @@ export function calculateAttendanceStats(params: {
   let lateCount = 0;
 
   conductedSessionsList.forEach((s) => {
-    const approvedLeave = getApprovedLeaveForSession(studentId, course.id, s, leaveRequests, studentUniversityId);
+    const approvedLeave = getApprovedLeaveForSession(studentId, course.id, s, leaveRequests, studentUniversityId, course);
     if (approvedLeave) {
       approvedLeaveCount++;
     } else {
@@ -154,7 +165,7 @@ export function calculateAttendanceStats(params: {
   if (isExceededAbsenceQuota || (conductedSessions > 0 && percentage < 80)) {
     statusColor = 'RED';
     statusText = 'เสี่ยงหมดสิทธิ์สอบ';
-  } else if ((remainingAbsenceQuota <= 1 && conductedSessions >= 3) || (conductedSessions > 0 && percentage <= 84)) {
+  } else if ((conductedSessions > 0 && percentage >= 80 && percentage <= 84) || (absentSessions > 0 && remainingAbsenceQuota === 0)) {
     statusColor = 'YELLOW';
     statusText = 'เฝ้าระวัง';
   }

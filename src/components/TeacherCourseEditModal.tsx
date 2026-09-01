@@ -33,17 +33,19 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   const { isDarkMode: themeIsDarkMode } = useTheme();
   const isDarkMode = propIsDarkMode ?? themeIsDarkMode;
   const [isMaximized, setIsMaximized] = useState<boolean>(false);
-  const [courseCode, setCourseCode] = useState<string>(course.courseCode);
-  const [courseName, setCourseName] = useState<string>(course.courseName);
-  const [academicYear, setAcademicYear] = useState<number>(course.academicYear);
-  const [semester, setSemester] = useState<Semester>(course.semester);
-  const [selectedTeacherId, setSelectedTeacherId] = useState<string>(course.ownerId || '');
-  const [coordinatorName, setCoordinatorName] = useState<string>(course.coordinatorName);
-  const [defaultLat, setDefaultLat] = useState<number>(course.defaultLat || 13.7988363);
-  const [defaultLng, setDefaultLng] = useState<number>(course.defaultLng || 100.322944);
-  const [allowedGpsRadius, setAllowedGpsRadius] = useState<number>(course.allowedGpsRadius || 200);
+  const actualCourse = (course as any)?.course || course;
+
+  const [courseCode, setCourseCode] = useState<string>(actualCourse?.courseCode || '');
+  const [courseName, setCourseName] = useState<string>(actualCourse?.courseName || '');
+  const [academicYear, setAcademicYear] = useState<number>(actualCourse?.academicYear || 2569);
+  const [semester, setSemester] = useState<Semester>(actualCourse?.semester || Semester.FIRST);
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string>(actualCourse?.ownerId || '');
+  const [coordinatorName, setCoordinatorName] = useState<string>(actualCourse?.coordinatorName || '');
+  const [defaultLat, setDefaultLat] = useState<number>(actualCourse?.defaultLat || 13.7988363);
+  const [defaultLng, setDefaultLng] = useState<number>(actualCourse?.defaultLng || 100.322944);
+  const [allowedGpsRadius, setAllowedGpsRadius] = useState<number>(actualCourse?.allowedGpsRadius || 200);
   const [showMapPicker, setShowMapPicker] = useState<boolean>(false);
-  const [weeks, setWeeks] = useState<TeachingWeek[]>(course.weeks || []);
+  const [weeks, setWeeks] = useState<TeachingWeek[]>(actualCourse?.weeks || []);
 
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -74,19 +76,21 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
   const activeTeachers = (teachersList && teachersList.length > 0) ? teachersList : fetchedTeachers;
 
   useEffect(() => {
-    setCourseCode(course.courseCode);
-    setCourseName(course.courseName);
-    setAcademicYear(course.academicYear);
-    setSemester(course.semester);
-    setSelectedTeacherId(course.ownerId || '');
-    setCoordinatorName(course.coordinatorName);
-    setDefaultLat(course.defaultLat || 13.7988363);
-    setDefaultLng(course.defaultLng || 100.322944);
-    setAllowedGpsRadius(course.allowedGpsRadius || 200);
-    setWeeks(course.weeks ? [...course.weeks] : []);
-    setErrorMsg('');
-    setSuccessMsg('');
-  }, [course]);
+    if (isOpen && actualCourse) {
+      setCourseCode(actualCourse.courseCode || '');
+      setCourseName(actualCourse.courseName || '');
+      setAcademicYear(actualCourse.academicYear || 2569);
+      setSemester(actualCourse.semester || Semester.FIRST);
+      setSelectedTeacherId(actualCourse.ownerId || '');
+      setCoordinatorName(actualCourse.coordinatorName || '');
+      setDefaultLat(actualCourse.defaultLat || 13.7988363);
+      setDefaultLng(actualCourse.defaultLng || 100.322944);
+      setAllowedGpsRadius(actualCourse.allowedGpsRadius || 200);
+      setWeeks(actualCourse.weeks ? [...actualCourse.weeks] : []);
+      setErrorMsg('');
+      setSuccessMsg('');
+    }
+  }, [isOpen, actualCourse]);
 
   if (!isOpen) return null;
 

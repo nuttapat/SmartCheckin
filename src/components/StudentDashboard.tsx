@@ -289,7 +289,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-slate-400">
                     <span>
-                      โควตาขาดเรียน: ขาดได้อีก <strong className={item.stats.remainingAbsenceQuota <= 1 ? 'text-amber-500 font-bold' : 'text-slate-600 dark:text-slate-300 font-bold'}>{item.stats.remainingAbsenceQuota}</strong> ครั้ง (ขาดไปแล้ว {item.stats.absentSessions}/{item.stats.maxAllowedAbsences} ครั้ง)
+                      โควตาขาดเรียน: ขาดได้อีก <strong className={item.stats.remainingAbsenceQuota === 0 || (item.stats.absentSessions > 0 && item.stats.remainingAbsenceQuota <= 1) ? 'text-amber-500 font-bold' : 'text-slate-600 dark:text-slate-300 font-bold'}>{item.stats.remainingAbsenceQuota}</strong> ครั้ง (ขาดไปแล้ว {item.stats.absentSessions}/{item.stats.maxAllowedAbsences} ครั้ง)
                     </span>
                     {item.stats.approvedLeaveSessions ? (
                       <span className="text-amber-500 font-medium">มีใบลา {item.stats.approvedLeaveSessions} คาบ</span>
