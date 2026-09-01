@@ -5,6 +5,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
+import compression from 'compression';
 import {
   User,
   UserRole,
@@ -37,6 +38,17 @@ import { saveToFirestore, batchSaveToFirestore, getAllFromFirestore, deleteFromF
 const app = express();
 const server = http.createServer(app);
 const PORT = Number(process.env.PORT) || 3000;
+
+// Enable Gzip/Deflate compression for all HTTP responses (reduces bundle size by ~75%)
+app.use(compression({
+  threshold: 1024, // only compress responses above 1KB
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+    return compression.filter(req, res);
+  },
+}));
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
@@ -7305,8 +7317,20 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    // Serve static hashed assets with immutable long-term caching (1 year)
+    app.use('/assets', express.static(path.join(distPath, 'assets'), {
+      maxAge: '1y',
+      immutable: true,
+      etag: true,
+    }));
+    // Serve other root static files with standard 1-hour cache
+    app.use(express.static(distPath, {
+      maxAge: '1h',
+      etag: true,
+    }));
+    // Always serve index.html with no-cache so users get the latest app entry point
     app.get('*', (req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
