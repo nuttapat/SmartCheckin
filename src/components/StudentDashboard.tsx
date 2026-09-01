@@ -72,7 +72,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
   // Auto-open checkin modal if user scanned QR code via mobile phone camera
   useEffect(() => {
     try {
-      const saved = sessionStorage.getItem('pending_qr_checkin');
+      const saved = sessionStorage.getItem('pending_qr_checkin') || localStorage.getItem('pending_qr_checkin');
       if (saved) {
         const data = JSON.parse(saved);
         if (data && data.rawToken) {

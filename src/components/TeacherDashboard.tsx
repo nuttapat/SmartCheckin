@@ -1134,13 +1134,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       <div className={`rounded-3xl p-4 sm:p-6 md:p-8 border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all ${
         isDarkMode 
           ? 'bg-gradient-to-r from-slate-950 via-slate-900 to-sky-950/50 border-sky-900/40 text-white shadow-2xl' 
-          : 'bg-gradient-to-r from-sky-100/80 via-blue-50/70 to-indigo-50/50 border-sky-200/90 text-slate-900 shadow-sm'
+          : 'bg-gradient-to-r from-sky-50/90 via-blue-50/40 to-indigo-50/20 border-sky-200 text-slate-900 shadow-xs'
       }`}>
         <div className="space-y-1 text-left w-full md:w-auto">
           <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-bold border ${
             isDarkMode
               ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
-              : 'bg-sky-100 border-sky-200/90 text-sky-900'
+              : 'bg-sky-100/70 border-sky-200 text-sky-700'
           }`}>
             <ShieldCheck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
             <span>Teacher Console</span>

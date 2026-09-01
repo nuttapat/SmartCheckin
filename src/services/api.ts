@@ -15,6 +15,62 @@ import {
 
 export const API_BASE = '/api';
 
+// In-flight request deduplication and high-speed SWR cache
+const inFlightRequests = new Map<string, Promise<any>>();
+const memoryCache = new Map<string, { data: any; expiry: number }>();
+
+/**
+ * Perform a cached & deduplicated GET request.
+ * If another identical request is already running, wait for it instead of sending duplicate network calls.
+ */
+export async function cachedGet<T = any>(url: string, headers?: Record<string, string>, ttlMs: number = 3000): Promise<T> {
+  const cacheKey = `${url}_${JSON.stringify(headers || {})}`;
+  const now = Date.now();
+
+  // 1. Check valid memory cache
+  const cached = memoryCache.get(cacheKey);
+  if (cached && cached.expiry > now) {
+    return cached.data as T;
+  }
+
+  // 2. Check in-flight promise deduplication
+  if (inFlightRequests.has(cacheKey)) {
+    return inFlightRequests.get(cacheKey) as Promise<T>;
+  }
+
+  // 3. Fetch fresh data
+  const reqPromise = (async () => {
+    try {
+      const res = await fetch(url, { headers });
+      const data = await parseResponse<T>(res);
+      if (ttlMs > 0) {
+        memoryCache.set(cacheKey, { data, expiry: Date.now() + ttlMs });
+      }
+      return data;
+    } finally {
+      inFlightRequests.delete(cacheKey);
+    }
+  })();
+
+  inFlightRequests.set(cacheKey, reqPromise);
+  return reqPromise;
+}
+
+/**
+ * Clear local API memory cache (e.g. on mutation/update)
+ */
+export function invalidateApiCache(prefix?: string) {
+  if (!prefix) {
+    memoryCache.clear();
+    return;
+  }
+  for (const key of memoryCache.keys()) {
+    if (key.includes(prefix)) {
+      memoryCache.delete(key);
+    }
+  }
+}
+
 /**
  * Safely parses API responses to handle non-JSON / HTML error pages gracefully
  * and avoid raw SyntaxError exceptions like "Unexpected token '<', ...".
@@ -156,10 +212,7 @@ export async function googleLogin(
 }
 
 export async function fetchCourses(userId: string): Promise<Course[]> {
-  const res = await fetch(`${API_BASE}/courses`, {
-    headers: { 'x-user-id': userId },
-  });
-  return parseResponse<Course[]>(res);
+  return cachedGet<Course[]>(`${API_BASE}/courses`, userId ? { 'x-user-id': userId } : undefined, 3000);
 }
 
 export async function createCourse(courseData: Partial<Course>): Promise<{ course: Course }> {
@@ -461,15 +514,11 @@ export async function fetchSessionRecords(sessionId: string): Promise<Attendance
 }
 
 export async function fetchStudentStats(studentId: string) {
-  const res = await fetch(`${API_BASE}/student/${studentId}/stats`);
-  if (!res.ok) throw new Error('Failed to fetch student stats');
-  return res.json();
+  return cachedGet(`${API_BASE}/student/${encodeURIComponent(studentId)}/stats`, undefined, 3000);
 }
 
 export async function fetchTeacherCoursesOverview(teacherId: string) {
-  const res = await fetch(`${API_BASE}/teacher/courses-overview?teacherId=${teacherId}`);
-  if (!res.ok) throw new Error('Failed to fetch teacher courses overview');
-  return res.json();
+  return cachedGet(`${API_BASE}/teacher/courses-overview?teacherId=${encodeURIComponent(teacherId)}`, undefined, 3000);
 }
 
 export async function submitLeaveRequest(params: {
@@ -786,8 +835,7 @@ export async function overrideAttendanceRecord(params: {
 // System Settings API
 export async function fetchSystemSettings() {
   try {
-    const res = await fetch(`${API_BASE}/system/settings`);
-    return await parseResponse(res);
+    return await cachedGet(`${API_BASE}/system/settings`, undefined, 5000);
   } catch (err) {
     return {
       id: 'global_config',

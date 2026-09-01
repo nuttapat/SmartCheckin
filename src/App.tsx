@@ -1,20 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Bot, Shield, Wrench, RefreshCw, LogOut, Radio, X, Zap } from 'lucide-react';
 import { User, UserRole, SystemSettings } from './types';
 import { fetchCurrentUser, fetchSystemSettings } from './services/api';
 import { Navbar } from './components/Navbar';
 import { StudentDashboard } from './components/StudentDashboard';
-import { TeacherDashboard } from './components/TeacherDashboard';
 import { RegisterModal } from './components/RegisterModal';
 import { TeacherCourseCreationModal } from './components/TeacherCourseCreationModal';
 import { JoinCourseModal } from './components/JoinCourseModal';
 import { UserSettingsModal } from './components/UserSettingsModal';
 import { LoginPage } from './components/LoginPage';
-import { TestingAgentModal } from './components/TestingAgentModal';
-import { AdminDashboard } from './components/AdminDashboard';
-import { DemoAccountsModal } from './components/DemoAccountsModal';
 import { useTheme } from './context/ThemeContext';
 import { parseCheckinToken } from './utils/qrParser';
+
+// Heavy modules lazy-loaded to reduce student mobile initial bundle size
+const TeacherDashboard = lazy(() => import('./components/TeacherDashboard').then(m => ({ default: m.TeacherDashboard })));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const TestingAgentModal = lazy(() => import('./components/TestingAgentModal').then(m => ({ default: m.TestingAgentModal })));
+const DemoAccountsModal = lazy(() => import('./components/DemoAccountsModal').then(m => ({ default: m.DemoAccountsModal })));
 
 // Sample pre-seeded users for instant testing
 const INITIAL_USERS: User[] = [
@@ -175,6 +177,7 @@ export default function App() {
             timestamp: Date.now(),
           };
           sessionStorage.setItem('pending_qr_checkin', JSON.stringify(payload));
+          localStorage.setItem('pending_qr_checkin', JSON.stringify(payload));
           window.history.replaceState({}, document.title, window.location.pathname);
         }
       }
@@ -382,11 +385,11 @@ export default function App() {
     <div className={`min-h-screen font-sans transition-colors duration-200 ${
       isDarkMode 
         ? isTeacher
-          ? 'bg-slate-950 text-slate-100 selection:bg-blue-500 selection:text-slate-950 dark' 
+          ? 'bg-slate-950 text-slate-100 selection:bg-sky-500 selection:text-slate-950 dark' 
           : 'bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-slate-950 dark'
         : isTeacher
-        ? 'bg-slate-50/70 text-slate-900 selection:bg-blue-600 selection:text-white'
-        : 'bg-slate-50/70 text-slate-900 selection:bg-indigo-500 selection:text-white'
+        ? 'bg-slate-50 text-slate-900 selection:bg-sky-600 selection:text-white'
+        : 'bg-slate-50 text-slate-900 selection:bg-sky-600 selection:text-white'
     }`}>
       {/* System Announcement Broadcast Banner */}
       {(systemSettings?.announcementMessage || systemSettings?.systemAnnouncement) && !announcementDismissed && (
@@ -467,31 +470,38 @@ export default function App() {
 
       {/* Main Content View */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {currentUser.role === UserRole.ADMIN ? (
-          <AdminDashboard
-            key={`admin_${currentUser.id}_${refreshKey}`}
-            adminUser={currentUser}
-            onSwitchUserRole={handleSwitchUserRole}
-            onOpenTestingAgent={() => setIsTestingAgentOpen(true)}
-            isDarkMode={isDarkMode}
-          />
-        ) : currentUser.role === UserRole.TEACHER ? (
-          <TeacherDashboard
-            key={`teacher_${currentUser.id}_${refreshKey}`}
-            teacher={currentUser}
-            onOpenCreateCourse={() => setIsCreateCourseOpen(true)}
-            onOpenQuickEvent={handleOpenQuickEvent}
-            quickEventTrigger={quickEventTrigger}
-            isDarkMode={isDarkMode}
-          />
-        ) : (
-          <StudentDashboard
-            key={`student_${currentUser.id}_${refreshKey}`}
-            student={currentUser}
-            onOpenJoinCourse={() => setIsJoinCourseOpen(true)}
-            isDarkMode={isDarkMode}
-          />
-        )}
+        <Suspense fallback={
+          <div className="flex flex-col items-center justify-center min-h-[300px] space-y-4">
+            <div className="w-10 h-10 border-4 border-sky-500/20 border-t-sky-500 rounded-full animate-spin"></div>
+            <p className="text-sm font-bold text-slate-500 dark:text-slate-400 animate-pulse">กำลังโหลดข้อมูลแดชบอร์ด...</p>
+          </div>
+        }>
+          {currentUser.role === UserRole.ADMIN ? (
+            <AdminDashboard
+              key={`admin_${currentUser.id}_${refreshKey}`}
+              adminUser={currentUser}
+              onSwitchUserRole={handleSwitchUserRole}
+              onOpenTestingAgent={() => setIsTestingAgentOpen(true)}
+              isDarkMode={isDarkMode}
+            />
+          ) : currentUser.role === UserRole.TEACHER ? (
+            <TeacherDashboard
+              key={`teacher_${currentUser.id}_${refreshKey}`}
+              teacher={currentUser}
+              onOpenCreateCourse={() => setIsCreateCourseOpen(true)}
+              onOpenQuickEvent={handleOpenQuickEvent}
+              quickEventTrigger={quickEventTrigger}
+              isDarkMode={isDarkMode}
+            />
+          ) : (
+            <StudentDashboard
+              key={`student_${currentUser.id}_${refreshKey}`}
+              student={currentUser}
+              onOpenJoinCourse={() => setIsJoinCourseOpen(true)}
+              isDarkMode={isDarkMode}
+            />
+          )}
+        </Suspense>
       </main>
 
       {/* Footer */}
@@ -571,20 +581,28 @@ export default function App() {
         isDarkMode={isDarkMode}
       />
 
-      <TestingAgentModal
-        isOpen={isTestingAgentOpen}
-        onClose={() => setIsTestingAgentOpen(false)}
-        currentUser={currentUser}
-        isDarkMode={isDarkMode}
-      />
+      {isTestingAgentOpen && (
+        <Suspense fallback={null}>
+          <TestingAgentModal
+            isOpen={isTestingAgentOpen}
+            onClose={() => setIsTestingAgentOpen(false)}
+            currentUser={currentUser}
+            isDarkMode={isDarkMode}
+          />
+        </Suspense>
+      )}
 
-      <DemoAccountsModal
-        isOpen={isDemoAccountsModalOpen}
-        onClose={() => setIsDemoAccountsModalOpen(false)}
-        allUsers={allUsers}
-        onSelectUser={handleSelectDemoUser}
-        isDarkMode={isDarkMode}
-      />
+      {isDemoAccountsModalOpen && (
+        <Suspense fallback={null}>
+          <DemoAccountsModal
+            isOpen={isDemoAccountsModalOpen}
+            onClose={() => setIsDemoAccountsModalOpen(false)}
+            allUsers={allUsers}
+            onSelectUser={handleSelectDemoUser}
+            isDarkMode={isDarkMode}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

@@ -1,12 +1,91 @@
 <!doctype html>
-<html lang="en">
+<html lang="th">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MUMT Smart Attendance System</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Smart Student Attendance System</title>
+    <meta name="description" content="Smart Student Attendance System with Anti-Proxy Dynamic QR Code, Geofencing, Real-time WebSocket Dashboard, and Course Management." />
+    <meta property="og:title" content="Smart Student Attendance System" />
+    <meta property="og:description" content="Smart Student Attendance System with Anti-Proxy Dynamic QR Code, Geofencing, Real-time WebSocket Dashboard, and Course Management." />
+    <style>
+      /* Immediate Splash Screen Styling matching original light theme */
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #f8fafc;
+        color: #0f172a;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      #app-splash-loader {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #f8fafc;
+        z-index: 99999;
+        transition: opacity 0.3s ease-out;
+      }
+      .splash-box {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        padding: 24px;
+        max-width: 360px;
+      }
+      .splash-logo {
+        width: 64px;
+        height: 64px;
+        border-radius: 20px;
+        background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+        box-shadow: 0 10px 25px -5px rgba(2, 132, 199, 0.35);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 20px;
+        animation: pulseLogo 2s infinite ease-in-out;
+      }
+      .splash-spinner {
+        width: 30px;
+        height: 30px;
+        border: 3px solid rgba(2, 132, 199, 0.15);
+        border-top: 3px solid #0284c7;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin-top: 20px;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      @keyframes pulseLogo {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="app-splash-loader">
+        <div class="splash-box">
+          <div class="splash-logo">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="m9 12 2 2 4-4"/>
+            </svg>
+          </div>
+          <div style="font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: #0f172a; margin-bottom: 6px;">
+            MUMT Attendance
+          </div>
+          <div style="font-size: 13px; color: #64748b; font-weight: 500;">
+            ระบบเช็คชื่ออัจฉริยะ คณะเทคนิคการแพทย์
+          </div>
+          <div class="splash-spinner"></div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

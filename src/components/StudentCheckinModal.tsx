@@ -125,7 +125,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
       updateLocation();
 
       try {
-        const saved = sessionStorage.getItem('pending_qr_checkin');
+        const saved = sessionStorage.getItem('pending_qr_checkin') || localStorage.getItem('pending_qr_checkin');
         if (saved) {
           const data = JSON.parse(saved);
           if (data && data.rawToken) {
@@ -380,6 +380,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
         });
 
         sessionStorage.removeItem('pending_qr_checkin');
+        localStorage.removeItem('pending_qr_checkin');
 
         // Check if server resolved a merged user
         if (res?.resolvedUser) {
@@ -424,6 +425,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
       }
     } catch (err: any) {
       sessionStorage.removeItem('pending_qr_checkin');
+      localStorage.removeItem('pending_qr_checkin');
       setScannedResult('');
       setManualInput('');
       setPendingCameraNotice(null);
