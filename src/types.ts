@@ -50,6 +50,8 @@ export interface LeaveRequest {
   courseId: string;
   courseCode: string;
   courseName: string;
+  academicYear?: number; // ปีการศึกษา เช่น 2569
+  semester?: Semester; // ภาคการศึกษา (1, 2, 3)
   weekNumber?: number; // สัปดาห์ที่ขอลาเรียน (ถ้ามี)
   leaveType: LeaveType;
   leaveDate: string; // YYYY-MM-DD หรือระบุวันที่ลา

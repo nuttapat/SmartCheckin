@@ -16,6 +16,7 @@ import {
 import { TeacherCourseEditModal } from './TeacherCourseEditModal';
 import { TeacherLeaveManagementModal } from './TeacherLeaveManagementModal';
 import { DeleteCourseConfirmModal } from './DeleteCourseConfirmModal';
+import { CloneCourseModal } from './CloneCourseModal';
 import { TeacherInviteModal } from './TeacherInviteModal';
 import { StudentInviteModal } from './StudentInviteModal';
 import { TeacherCheckinModal } from './TeacherCheckinModal';
@@ -66,6 +67,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [currentCourseMembers, setCurrentCourseMembers] = useState<CourseMember[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
+  const [isCloneModalOpen, setIsCloneModalOpen] = useState<boolean>(false);
+  const [courseToClone, setCourseToClone] = useState<Course | null>(null);
   const [isDeleteCourseModalOpen, setIsDeleteCourseModalOpen] = useState<boolean>(false);
   const [isInviteTeacherModalOpen, setIsInviteTeacherModalOpen] = useState<boolean>(false);
   const [isInviteStudentModalOpen, setIsInviteStudentModalOpen] = useState<boolean>(false);
@@ -632,6 +635,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       }
     }
   }, [isTeacherCheckinModalOpen, teacherCheckinMethod]);
+
+  // Auto-open teacher checkin modal if user scanned QR code via mobile phone camera
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('pending_qr_checkin');
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (data && data.rawToken) {
+          setIsTeacherCheckinModalOpen(true);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to trigger auto teacher checkin from pending QR:', e);
+    }
+  }, []);
 
   const handleTeacherFileUploadScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1507,6 +1525,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
                   <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center justify-end gap-2 w-full sm:w-auto ml-auto">
                     <button
+                      type="button"
+                      onClick={() => {
+                        setCourseToClone(selectedCourse);
+                        setIsCloneModalOpen(true);
+                      }}
+                      className="w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-95 cursor-pointer bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/30"
+                      title="คัดลอกโครงสร้างรายวิชาและคาบเรียนไปเปิดในเทอมหรือปีการศึกษาใหม่"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>คัดลอกโครงสร้างวิชา</span>
+                    </button>
+
+                    <button
                       onClick={() => {
                         if (teacherRoleInfo.canEditCourse) {
                           setIsEditModalOpen(true);
@@ -1528,8 +1559,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       <Edit3 className="w-3.5 h-3.5" />
                       <span>แก้ไขวิชา / เพิ่มลดสัปดาห์</span>
                     </button>
-
-
                   </div>
                 </div>
 
@@ -2364,6 +2393,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         <div className="flex flex-col sm:flex-row items-center gap-2">
                           <button
                             type="button"
+                            onClick={() => {
+                              setCourseToClone(course);
+                              setIsCloneModalOpen(true);
+                            }}
+                            className={`w-full sm:w-auto px-4 py-2.5 rounded-xl border font-bold text-xs flex items-center justify-center space-x-2 transition shrink-0 cursor-pointer shadow-xs ${
+                              isDarkMode
+                                ? 'bg-sky-950/40 hover:bg-sky-900/60 text-sky-300 border-sky-800/80'
+                                : 'bg-sky-50 hover:bg-sky-100 text-sky-800 border-sky-300/80'
+                            }`}
+                            title="คัดลอกโครงสร้างรายวิชาและคาบเรียนไปเปิดในเทอมหรือปีการศึกษาใหม่"
+                          >
+                            <Copy className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                            <span>คัดลอกโครงสร้าง</span>
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => setIsAttendanceGridModalOpen(true)}
                             className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-md shadow-sky-600/20 active:scale-95 shrink-0 cursor-pointer"
                             title="เปิดตารางเช็คชื่อ และเปลี่ยนสถานะการเข้าเรียนของนักศึกษาแต่ละคน"
@@ -2953,6 +2999,26 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           teacherId={teacher.id}
           isDarkMode={isDarkMode}
           onSuccess={handleCourseDeleted}
+        />
+      )}
+
+      {/* Clone Course Structure Modal */}
+      {(courseToClone || selectedCourse) && (
+        <CloneCourseModal
+          isOpen={isCloneModalOpen}
+          onClose={() => {
+            setIsCloneModalOpen(false);
+            setCourseToClone(null);
+          }}
+          course={courseToClone || selectedCourse!}
+          teacherId={teacher.id}
+          isDarkMode={isDarkMode}
+          onSuccess={(newCourse) => {
+            loadTeacherCourses();
+            loadOverviewData();
+            handleSelectCourse(newCourse);
+            alert(`คัดลอกโครงสร้างรายวิชา "${newCourse.courseCode}: ${newCourse.courseName}" สำหรับปีการศึกษา ${newCourse.academicYear} ภาคเรียนที่ ${newCourse.semester} สำเร็จแล้ว!`);
+          }}
         />
       )}
 

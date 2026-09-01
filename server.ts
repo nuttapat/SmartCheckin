@@ -9,6 +9,7 @@ import {
   User,
   UserRole,
   Course,
+  TeachingWeek,
   CourseMember,
   CourseMemberRole,
   Session,
@@ -1256,25 +1257,6 @@ function initDefaultSeedData() {
     sessions.set(session2.id, session2);
     sessions.set(session3.id, session3);
   }
-
-  // Seed initial sample leave request
-  leaveRequests.push({
-    id: 'leave_demo_1',
-    studentId: 'usr_student_1',
-    studentNameTh: 'นาย กิตติพงษ์ สุขเสริฐ',
-    studentNameEn: 'Mr. Kittipong Suksert',
-    studentUniversityId: '66010012',
-    courseId: 'crs_test101',
-    courseCode: 'TEST101',
-    courseName: 'Software Architecture & System Design',
-    weekNumber: 3,
-    leaveType: LeaveType.SICK,
-    leaveDate: '2026-07-24',
-    reason: 'มีอาการไข้สูงและปวดศีรษะอย่างรุนแรง แพทย์ให้พักผ่อนเป็นเวลา 2 วัน',
-    attachmentName: 'medical_certificate.pdf',
-    status: LeaveStatus.PENDING,
-    createdAt: new Date().toISOString(),
-  });
 }
 
 /**
@@ -2097,6 +2079,187 @@ app.post('/api/courses', async (req, res) => {
   res.json({ message: 'Course created successfully', course: newCourse });
 });
 
+// Clone / Duplicate Course Structure
+app.post('/api/courses/:id/clone', async (req, res) => {
+  const sourceCourseId = req.params.id;
+  const { teacherId, academicYear, semester, newCourseCode, newCourseName, startDate, includeCoTeachers } = req.body;
+  const reqUserId = (req.headers['x-user-id'] as string) || teacherId;
+
+  const sourceCourse = courses.get(sourceCourseId);
+  if (!sourceCourse || deletedCourseIds.has(sourceCourseId)) {
+    return res.status(404).json({ error: 'ไม่พบรายวิชาต้นแบบที่ต้องการคัดลอก' });
+  }
+
+  const actingUser = reqUserId ? users.get(reqUserId) : null;
+  const isAdmin = actingUser?.role === UserRole.ADMIN;
+  const isOwner = sourceCourse.ownerId === reqUserId;
+  const memberObj = courseMembers.find((m) => m.courseId === sourceCourseId && m.userId === reqUserId);
+  const isTeacherOrCoordinator = memberObj && (
+    memberObj.role === CourseMemberRole.COORDINATOR ||
+    memberObj.role === CourseMemberRole.CO_COORDINATOR ||
+    memberObj.role === CourseMemberRole.CO_TEACHER ||
+    (memberObj.role as string) === 'TEACHER' ||
+    (memberObj.role as string) === 'INSTRUCTOR'
+  );
+
+  if (!isAdmin && !isOwner && !isTeacherOrCoordinator) {
+    return res.status(403).json({
+      error: 'เฉพาะผู้สร้างรายวิชา ผู้รับผิดชอบรายวิชา หรืออาจารย์ผู้สอนเท่านั้นที่มีสิทธิ์คัดลอกโครงสร้างรายวิชา',
+    });
+  }
+
+  const effectiveAcademicYear = parseInt(academicYear, 10) || (sourceCourse.academicYear ? sourceCourse.academicYear + 1 : 2570);
+  const effectiveSemester = semester || sourceCourse.semester || Semester.FIRST;
+  const finalCourseCode = (newCourseCode || sourceCourse.courseCode || '').trim().toUpperCase();
+  const finalCourseName = (newCourseName || sourceCourse.courseName || '').trim();
+
+  // Create clean new Course ID
+  const newCourseId = `crs_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+  // Clone weeks with optional shifted dates
+  const clonedWeeks: TeachingWeek[] = (sourceCourse.weeks || []).map((w, idx) => {
+    const wNum = Number(w.weekNumber) || idx + 1;
+    let computedDate = w.date;
+    if (startDate) {
+      const d = new Date(startDate);
+      d.setDate(d.getDate() + (wNum - 1) * 7);
+      computedDate = d.toISOString().split('T')[0];
+    }
+    return {
+      weekNumber: wNum,
+      topic: w.topic || `สัปดาห์ที่ ${wNum}`,
+      date: computedDate || '',
+    };
+  });
+  clonedWeeks.sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
+
+  const newCourseOwnerId = actingUser?.id || sourceCourse.ownerId;
+  const newCourseOwnerName = actingUser
+    ? `${actingUser.title || ''} ${actingUser.firstNameTh || ''} ${actingUser.lastNameTh || ''}`.trim() || actingUser.email
+    : sourceCourse.ownerName;
+
+  const newCourse: Course = {
+    id: newCourseId,
+    courseCode: finalCourseCode,
+    courseName: finalCourseName,
+    academicYear: effectiveAcademicYear,
+    semester: effectiveSemester,
+    coordinatorName: sourceCourse.coordinatorName || newCourseOwnerName,
+    ownerId: newCourseOwnerId,
+    ownerName: newCourseOwnerName,
+    defaultLat: sourceCourse.defaultLat || 13.7988363,
+    defaultLng: sourceCourse.defaultLng || 100.322944,
+    allowedGpsRadius: sourceCourse.allowedGpsRadius || 200,
+    weeks: clonedWeeks,
+    curriculums: Array.isArray(sourceCourse.curriculums) ? [...sourceCourse.curriculums] : [],
+    facultyCode: sourceCourse.facultyCode || 'MT',
+    departmentCode: sourceCourse.departmentCode || 'ID',
+    majorCode: sourceCourse.majorCode || 'MTMT',
+    degreeLevel: sourceCourse.degreeLevel || 'ปริญญาตรี',
+    createdAt: new Date().toISOString(),
+  };
+
+  courses.set(newCourse.id, newCourse);
+  deletedCourseIds.delete(newCourse.id);
+  await saveToFirestore(COLLECTIONS.COURSES, newCourse);
+
+  // 1. Add owner/creator member
+  const membersToSave: CourseMember[] = [];
+  const ownerMember: CourseMember = {
+    id: `cm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    courseId: newCourse.id,
+    userId: newCourseOwnerId,
+    role: CourseMemberRole.CO_TEACHER,
+    joinedAt: new Date().toISOString(),
+  };
+  courseMembers.push(ownerMember);
+  deletedMemberIds.delete(ownerMember.id);
+  membersToSave.push(ownerMember);
+
+  // 2. Optionally clone Co-teachers and Instructors (cleanly excluding students)
+  if (includeCoTeachers !== false) {
+    const existingSourceTeachers = courseMembers.filter(
+      (m) =>
+        m.courseId === sourceCourseId &&
+        m.userId !== newCourseOwnerId &&
+        m.role !== CourseMemberRole.STUDENT &&
+        (m.role as string) !== 'STUDENT'
+    );
+
+    for (const st of existingSourceTeachers) {
+      const coMember: CourseMember = {
+        id: `cm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        courseId: newCourse.id,
+        userId: st.userId,
+        role: st.role,
+        joinedAt: new Date().toISOString(),
+      };
+      courseMembers.push(coMember);
+      deletedMemberIds.delete(coMember.id);
+      membersToSave.push(coMember);
+    }
+  }
+
+  if (membersToSave.length > 0) {
+    await batchSaveToFirestore(COLLECTIONS.COURSE_MEMBERS, membersToSave);
+  }
+
+  // 3. Create fresh Sessions for each week
+  const newSessionsToSave: Session[] = [];
+  clonedWeeks.forEach((w) => {
+    const wNum = Number(w.weekNumber) || 1;
+    const sesId = `ses_${newCourse.id}_w${wNum}`;
+    const newSession: Session = {
+      id: sesId,
+      courseId: newCourse.id,
+      weekNumber: wNum,
+      topic: w.topic || `สัปดาห์ที่ ${wNum}`,
+      teacherLat: newCourse.defaultLat,
+      teacherLng: newCourse.defaultLng,
+      isActive: false,
+      createdAt: new Date().toISOString(),
+    };
+    sessions.set(sesId, newSession);
+    deletedSessionIds.delete(sesId);
+    newSessionsToSave.push(newSession);
+  });
+
+  if (newSessionsToSave.length > 0) {
+    await batchSaveToFirestore(COLLECTIONS.SESSIONS, newSessionsToSave);
+  }
+
+  // 4. Generate clean static invite tokens for Students & Teachers
+  const studentInviteCode = generateStatic4CharToken(newCourse.id, CourseMemberRole.STUDENT);
+  const studentInvite: InviteLink = {
+    id: `inv_${newCourse.id}_${CourseMemberRole.STUDENT}`,
+    courseId: newCourse.id,
+    role: CourseMemberRole.STUDENT,
+    code: studentInviteCode,
+    expiresAt: '2099-12-31T23:59:59.000Z',
+  };
+  inviteLinks.set(studentInviteCode, studentInvite);
+
+  const teacherInviteCode = generateStatic4CharToken(newCourse.id, CourseMemberRole.INSTRUCTOR);
+  const teacherInvite: InviteLink = {
+    id: `inv_${newCourse.id}_${CourseMemberRole.INSTRUCTOR}`,
+    courseId: newCourse.id,
+    role: CourseMemberRole.INSTRUCTOR,
+    code: teacherInviteCode,
+    expiresAt: '2099-12-31T23:59:59.000Z',
+  };
+  inviteLinks.set(teacherInviteCode, teacherInvite);
+
+  saveLocalCache();
+
+  res.json({
+    message: `คัดลอกโครงสร้างรายวิชา ${finalCourseCode} เรียบร้อยแล้ว (สร้างคาบเรียน ${clonedWeeks.length} สัปดาห์ พร้อมใช้งาน)`,
+    course: newCourse,
+    clonedSessionsCount: clonedWeeks.length,
+    clonedTeachersCount: membersToSave.length,
+    studentInviteCode,
+  });
+});
+
 // Helper function to guarantee Session entries exist for every week in course.weeks
 function ensureCourseSessions(course: Course): Session[] {
   if (!course) return [];
@@ -2414,7 +2577,18 @@ app.delete('/api/courses/:id', async (req, res) => {
   for (const [qId, qEvent] of Array.from(quickEvents.entries())) {
     if ((qEvent as any).courseId === courseId || qEvent.teacherId === user.id) {
       quickEvents.delete(qId);
+      deletedQuickEventIds.add(qId);
       deleteFromFirestore(COLLECTIONS.QUICK_EVENTS, qId).catch(() => {});
+    }
+  }
+
+  // Cascade delete leave requests strictly associated with this courseId
+  for (let i = leaveRequests.length - 1; i >= 0; i--) {
+    if (leaveRequests[i].courseId === courseId) {
+      const leaveId = leaveRequests[i].id;
+      deletedLeaveIds.add(leaveId);
+      leaveRequests.splice(i, 1);
+      deleteFromFirestore(COLLECTIONS.LEAVE_REQUESTS, leaveId).catch(() => {});
     }
   }
 
@@ -3690,6 +3864,8 @@ app.post('/api/leave-requests', (req, res) => {
     courseId: course.id,
     courseCode: course.courseCode,
     courseName: course.courseName,
+    academicYear: course.academicYear || 2569,
+    semester: course.semester || Semester.FIRST,
     ...(weekNumber ? { weekNumber: Number(weekNumber) } : {}),
     leaveType: leaveType as LeaveType,
     leaveDate,
@@ -3752,7 +3928,13 @@ app.post('/api/leave-requests', (req, res) => {
 // Get student's leave requests (ประวัติการแจ้งลาของนักศึกษา)
 app.get('/api/leave-requests/student/:studentId', (req, res) => {
   const { studentId } = req.params;
-  const list = leaveRequests.filter((l) => l.studentId === studentId);
+  const list = leaveRequests.filter(
+    (l) =>
+      l &&
+      l.studentId === studentId &&
+      !deletedLeaveIds.has(l.id) &&
+      (!l.courseId || !deletedCourseIds.has(l.courseId))
+  );
   res.json(list);
 });
 
@@ -3762,41 +3944,46 @@ app.get('/api/leave-requests/teacher/:teacherId', (req, res) => {
     const { teacherId } = req.params;
     if (!teacherId) return res.json([]);
 
+    const user = users.get(teacherId);
+
+    // If Admin, can view all active leaves across system
+    if (user && user.role === UserRole.ADMIN) {
+      const adminList = leaveRequests.filter(
+        (l) => l && l.id && !deletedLeaveIds.has(l.id) && (!l.courseId || !deletedCourseIds.has(l.courseId))
+      );
+      return res.json(adminList);
+    }
+
     // Find courses where teacher is owner or member with instructor/coordinator/co-teacher role
-    const teacherCourseIds = new Set(
-      Array.from(courses.values())
-        .filter((c) => c && c.ownerId === teacherId)
-        .map((c) => c.id)
-    );
-
-    const teacherCourseCodes = new Set(
-      Array.from(courses.values())
-        .filter((c) => c && c.ownerId === teacherId && c.courseCode)
-        .map((c) => c.courseCode.trim().toLowerCase())
-    );
-
-    courseMembers.forEach((cm) => {
-      if (cm && cm.userId === teacherId && cm.role !== CourseMemberRole.STUDENT && (cm.role as string) !== 'STUDENT') {
-        teacherCourseIds.add(cm.courseId);
-        const matchedCourse = courses.get(cm.courseId);
-        if (matchedCourse && matchedCourse.courseCode) {
-          teacherCourseCodes.add(matchedCourse.courseCode.trim().toLowerCase());
-        }
+    const teacherCourseIds = new Set<string>();
+    Array.from(courses.values()).forEach((c) => {
+      if (c && c.ownerId === teacherId && !deletedCourseIds.has(c.id)) {
+        teacherCourseIds.add(c.id);
       }
     });
 
-    const user = users.get(teacherId);
-    let list = leaveRequests.filter((l) => {
-      if (!l) return false;
-      if (l.courseId && teacherCourseIds.has(l.courseId)) return true;
-      if (l.courseCode && typeof l.courseCode === 'string' && teacherCourseCodes.has(l.courseCode.trim().toLowerCase())) return true;
-      return false;
+    courseMembers.forEach((cm) => {
+      if (
+        cm &&
+        cm.userId === teacherId &&
+        cm.role !== CourseMemberRole.STUDENT &&
+        (cm.role as string) !== 'STUDENT' &&
+        !deletedCourseIds.has(cm.courseId)
+      ) {
+        teacherCourseIds.add(cm.courseId);
+      }
     });
 
-    // Fallback for ADMIN or teachers when teacherCourseIds is empty or no direct match found
-    if (user && (user.role === UserRole.ADMIN || (list.length === 0 && (user.role === UserRole.TEACHER || (user.role as string) === 'BOTH')))) {
-      list = leaveRequests;
-    }
+    // Strict Instance Isolation: Only match exact courseId that teacher is responsible for
+    const list = leaveRequests.filter(
+      (l) =>
+        l &&
+        l.id &&
+        !deletedLeaveIds.has(l.id) &&
+        l.courseId &&
+        teacherCourseIds.has(l.courseId) &&
+        !deletedCourseIds.has(l.courseId)
+    );
 
     res.json(list || []);
   } catch (err) {
@@ -6966,15 +7153,44 @@ async function syncFromFirestore() {
       }
     }
 
-    // 6. Sync Leave Requests
+    // 6. Sync Leave Requests & Purge Demo/Orphaned Requests
+    deletedLeaveIds.add('leave_demo_1');
+    deleteFromFirestore(COLLECTIONS.LEAVE_REQUESTS, 'leave_demo_1').catch(() => {});
+
+    // Remove leave_demo_1 from memory if loaded from cache
+    for (let i = leaveRequests.length - 1; i >= 0; i--) {
+      if (leaveRequests[i].id === 'leave_demo_1' || deletedLeaveIds.has(leaveRequests[i].id)) {
+        leaveRequests.splice(i, 1);
+      }
+    }
+
     const fsLeaves = await getAllFromFirestore<LeaveRequest>(COLLECTIONS.LEAVE_REQUESTS);
     if (fsLeaves !== null && fsLeaves.length > 0) {
       const existingLeaveIds = new Set(leaveRequests.map((l) => l.id));
       for (const l of fsLeaves) {
-        if (l && l.id && !deletedLeaveIds.has(l.id) && !existingLeaveIds.has(l.id)) {
+        if (
+          l &&
+          l.id &&
+          l.id !== 'leave_demo_1' &&
+          !deletedLeaveIds.has(l.id) &&
+          !existingLeaveIds.has(l.id) &&
+          l.courseId &&
+          courses.has(l.courseId) &&
+          !deletedCourseIds.has(l.courseId)
+        ) {
           leaveRequests.push(l);
           existingLeaveIds.add(l.id);
         }
+      }
+    }
+
+    // Clean any orphaned leave requests whose course was deleted
+    for (let i = leaveRequests.length - 1; i >= 0; i--) {
+      const lr = leaveRequests[i];
+      if (!lr.courseId || !courses.has(lr.courseId) || deletedCourseIds.has(lr.courseId)) {
+        deletedLeaveIds.add(lr.id);
+        leaveRequests.splice(i, 1);
+        deleteFromFirestore(COLLECTIONS.LEAVE_REQUESTS, lr.id).catch(() => {});
       }
     }
 

@@ -180,6 +180,41 @@ export async function updateCourse(courseId: string, courseData: Partial<Course>
   return parseResponse<{ course: Course; sessions: Session[] }>(res);
 }
 
+export async function cloneCourseStructure(
+  courseId: string,
+  data: {
+    teacherId: string;
+    academicYear: number;
+    semester: string;
+    newCourseCode?: string;
+    newCourseName?: string;
+    startDate?: string;
+    includeCoTeachers?: boolean;
+  }
+): Promise<{
+  message: string;
+  course: Course;
+  clonedSessionsCount: number;
+  clonedTeachersCount: number;
+  studentInviteCode?: string;
+}> {
+  const res = await fetch(`${API_BASE}/courses/${courseId}/clone`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-user-id': data.teacherId,
+    },
+    body: JSON.stringify(data),
+  });
+  return parseResponse<{
+    message: string;
+    course: Course;
+    clonedSessionsCount: number;
+    clonedTeachersCount: number;
+    studentInviteCode?: string;
+  }>(res);
+}
+
 export async function deleteCourseApi(courseId: string, teacherId: string, password?: string): Promise<{ message: string; courseId: string }> {
   const res = await fetch(`${API_BASE}/courses/${courseId}`, {
     method: 'DELETE',

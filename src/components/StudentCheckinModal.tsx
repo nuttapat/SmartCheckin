@@ -5,6 +5,7 @@ import { decodeQRCodeFromImage } from '../utils/qrDecoder';
 import { parseCheckinToken } from '../utils/qrParser';
 import { getDeviceInfo } from '../utils/deviceHelper';
 import { Html5Qrcode } from 'html5-qrcode';
+import { CheckinResultModal, CheckinResultData } from './CheckinResultModal';
 import {
   Sparkles,
   UserCheck,
@@ -19,6 +20,7 @@ import {
   ShieldX,
   Maximize2,
   Minimize2,
+  Loader2,
 } from 'lucide-react';
 
 export interface StudentCheckinModalProps {
@@ -60,6 +62,10 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
   const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [pendingCameraNotice, setPendingCameraNotice] = useState<string | null>(null);
   const autoSubmittedRef = useRef<boolean>(false);
+
+  // Big Result Modal Popup State
+  const [resultModalData, setResultModalData] = useState<CheckinResultData | null>(null);
+  const [isResultModalOpen, setIsResultModalOpen] = useState<boolean>(false);
 
   const [checkinStatus, setCheckinStatus] = useState<{
     success: boolean;
@@ -244,6 +250,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
     setSubmitting(true);
 
     const mode = modeOverride || checkinMode;
+    const devInfo = getDeviceInfo();
 
     try {
       let currentLat = currentCoords?.lat || 13.7563;
@@ -268,7 +275,6 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
         }
       }
 
-      const devInfo = getDeviceInfo();
       const rawInput = qrPayloadText || scannedResult || manualInput.trim();
 
       const parsedToken = parseCheckinToken(rawInput);
@@ -286,7 +292,9 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
         }
 
         const targetItem = effectiveSessionsList.find((item) => item.session.id === targetSessionId);
-        const targetCourseId = targetItem?.course?.id || (courses.length > 0 ? courses[0].id : undefined);
+        const targetCourse = targetItem?.course || (courses.length > 0 ? courses[0] : undefined);
+        const targetCourseId = targetCourse?.id;
+        const targetSession = targetItem?.session;
 
         const res = await submitTeacherCheckin({
           teacherId: currentUser.id,
@@ -310,11 +318,36 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
             ? ` (ระยะห่างจากสถานที่เรียน: ${res.distanceMeters} เมตร)`
             : '';
 
+        const successMsg = (res.message || 'บันทึกการเช็คชื่อเข้าสอนเรียบร้อยแล้ว!') + distMsg;
+
         setCheckinStatus({
           success: true,
-          message: (res.message || 'บันทึกการเช็คชื่อเข้าสอนเรียบร้อยแล้ว!') + distMsg,
+          message: successMsg,
           distance: res.distanceMeters,
         });
+
+        const isLateCheckin = res.message?.includes('สาย');
+
+        // Pop up the large result modal
+        setResultModalData({
+          success: true,
+          status: isLateCheckin ? 'LATE' : 'PRESENT',
+          userRole: 'TEACHER',
+          title: isLateCheckin ? 'บันทึกเวลาเข้าสอนเรียบร้อย (เข้าสอนสาย)' : 'บันทึกเวลาเข้าสอนสำเร็จ!',
+          message: successMsg,
+          courseCode: targetCourse?.courseCode,
+          courseName: targetCourse?.courseName,
+          weekNumber: targetSession?.weekNumber,
+          sessionTopic: targetSession?.topic,
+          timestamp: new Date().toISOString(),
+          userName: `${currentUser?.title || ''} ${currentUser?.firstNameTh || ''} ${currentUser?.lastNameTh || ''}`.trim() || currentUser?.email,
+          userUniversityId: currentUser?.universityId,
+          distanceMeters: res.distanceMeters,
+          allowedRadius: 200,
+          checkinMethod: mode === 'GPS_ONLY' ? 'GPS Location' : mode === 'TOKEN' ? 'Dynamic PIN (6 หลัก)' : 'QR Code + GPS Verification',
+          deviceName: `${devInfo.os} (${devInfo.browser})`,
+        });
+        setIsResultModalOpen(true);
 
         setScannedResult('');
         setManualInput('');
@@ -326,6 +359,10 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
         if (!targetSessionId) {
           throw new Error('ไม่พบคาบเรียนที่กำลังเปิดเช็คชื่ออยู่ในขณะนี้ กรุณาให้อาจารย์ผู้สอนเปิดระบบเช็คชื่อก่อน');
         }
+
+        const targetItem = effectiveSessionsList.find((item) => item.session.id === targetSessionId);
+        const targetCourse = targetItem?.course || (courses.length > 0 ? courses[0] : undefined);
+        const targetSession = targetItem?.session;
 
         const res = await submitCheckin({
           studentId: currentUser.id,
@@ -353,11 +390,35 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
           }
         }
 
+        const isLateCheckin = res.record?.status === 'LATE' || res.message?.includes('สาย');
+        const successMsg = res.message || 'บันทึกการเช็คชื่อเข้าเรียนสำเร็จ!';
+
         setCheckinStatus({
           success: true,
-          message: res.message || 'บันทึกการเช็คชื่อเข้าเรียนสำเร็จ!',
+          message: successMsg,
           distance: res.distanceMeters,
         });
+
+        // Pop up the large result modal
+        setResultModalData({
+          success: true,
+          status: isLateCheckin ? 'LATE' : 'PRESENT',
+          userRole: 'STUDENT',
+          title: isLateCheckin ? 'เช็คชื่อเข้าเรียนสำเร็จ (เข้าเรียนสาย)' : 'เช็คชื่อเข้าเรียนสำเร็จ!',
+          message: successMsg,
+          courseCode: targetCourse?.courseCode,
+          courseName: targetCourse?.courseName,
+          weekNumber: targetSession?.weekNumber,
+          sessionTopic: targetSession?.topic,
+          timestamp: res.record?.timestamp || new Date().toISOString(),
+          userName: `${currentUser?.title || ''} ${currentUser?.firstNameTh || ''} ${currentUser?.lastNameTh || ''}`.trim() || currentUser?.email,
+          userUniversityId: currentUser?.universityId,
+          distanceMeters: res.distanceMeters,
+          allowedRadius: 200,
+          checkinMethod: mode === 'GPS_ONLY' ? 'GPS Location' : mode === 'TOKEN' ? 'Dynamic PIN (6 หลัก)' : 'QR Code + GPS Verification',
+          deviceName: `${devInfo.os} (${devInfo.browser})`,
+        });
+        setIsResultModalOpen(true);
 
         if (onCheckinSuccess) onCheckinSuccess();
       }
@@ -368,80 +429,141 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
       setPendingCameraNotice(null);
       autoSubmittedRef.current = false;
 
+      const errMsg = err?.message || 'เกิดข้อผิดพลาด ไม่สามารถเช็คชื่อได้';
+      const isDuplicateError = errMsg.includes('คุณได้เช็คชื่อในคาบนี้ไปแล้ว');
+
       setCheckinStatus({
         success: false,
-        error: err?.message || 'เกิดข้อผิดพลาด ไม่สามารถเช็คชื่อได้',
+        error: errMsg,
       });
+
+      const targetItem = effectiveSessionsList.find((item) => item.session.id === selectedSessionId);
+      const targetCourse = targetItem?.course || (courses.length > 0 ? courses[0] : undefined);
+      const targetSession = targetItem?.session;
+
+      // Pop up the large result modal for failures or duplicates
+      setResultModalData({
+        success: false,
+        isDuplicate: isDuplicateError,
+        status: isDuplicateError ? 'DUPLICATE' : 'FAILED',
+        userRole: isTeacher ? 'TEACHER' : 'STUDENT',
+        title: isDuplicateError ? 'คุณได้เช็คชื่อในคาบนี้ไปแล้ว' : 'ไม่สามารถเช็คชื่อได้',
+        message: isDuplicateError ? 'ระบบมีประวัติการเข้าเรียนของคุณในคาบเรียนนี้แล้ว ไม่จำเป็นต้องเช็คซ้ำ' : undefined,
+        error: errMsg,
+        courseCode: targetCourse?.courseCode,
+        courseName: targetCourse?.courseName,
+        weekNumber: targetSession?.weekNumber,
+        sessionTopic: targetSession?.topic,
+        timestamp: new Date().toISOString(),
+        userName: `${currentUser?.title || ''} ${currentUser?.firstNameTh || ''} ${currentUser?.lastNameTh || ''}`.trim() || currentUser?.email,
+        userUniversityId: currentUser?.universityId,
+        checkinMethod: mode === 'GPS_ONLY' ? 'GPS Location' : mode === 'TOKEN' ? 'Dynamic PIN (6 หลัก)' : 'QR Code + GPS Verification',
+        deviceName: `${devInfo.os} (${devInfo.browser})`,
+      });
+      setIsResultModalOpen(true);
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (!isOpen) return null;
+  const handleCloseResultModal = () => {
+    setIsResultModalOpen(false);
+    if (resultModalData?.success || resultModalData?.isDuplicate) {
+      onClose();
+    }
+    setResultModalData(null);
+  };
+
+  const handleRetryResultModal = () => {
+    setIsResultModalOpen(false);
+    setResultModalData(null);
+    setCheckinStatus(null);
+    if (checkinMode === 'HYBRID') {
+      startLiveCameraStream();
+    }
+  };
+
+  if (!isOpen && !isResultModalOpen) return null;
 
   return (
-    <div
-      className={`fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md p-3 sm:p-4 overflow-y-auto ${
-        isDarkMode ? 'bg-slate-950/80' : 'bg-slate-900/40'
-      }`}
-    >
-      <div
-        className={`border transition-all duration-300 shadow-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto ${
-          isMaximized
-            ? 'w-full h-full max-w-none max-h-none rounded-none my-0'
-            : 'w-full max-w-lg rounded-3xl max-h-[88vh] my-auto'
-        } ${
-          isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
-        }`}
-      >
-        {/* Header & Controls */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            {isTeacher ? (
-              <UserCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-            ) : (
-              <Sparkles className="w-5 h-5 text-sky-600 dark:text-sky-400" />
+    <>
+      {/* High-Visibility Check-in Result Modal */}
+      <CheckinResultModal
+        isOpen={isResultModalOpen}
+        onClose={handleCloseResultModal}
+        result={resultModalData}
+        onRetry={handleRetryResultModal}
+        isDarkMode={isDarkMode}
+      />
+
+      {isOpen && (
+        <div
+          className={`fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md p-3 sm:p-4 overflow-y-auto ${
+            isDarkMode ? 'bg-slate-950/80' : 'bg-slate-900/40'
+          }`}
+        >
+          <div
+            className={`border transition-all duration-300 shadow-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto ${
+              isMaximized
+                ? 'w-full h-full max-w-none max-h-none rounded-none my-0'
+                : 'w-full max-w-lg rounded-3xl max-h-[88vh] my-auto'
+            } ${
+              isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+            }`}
+          >
+            {/* Header & Controls */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                {isTeacher ? (
+                  <UserCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                ) : (
+                  <Sparkles className="w-5 h-5 text-sky-600 dark:text-sky-400" />
+                )}
+                <h3 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                  {isTeacher ? 'ระบบเช็คชื่อเข้าสอน (Teacher Check-in)' : 'ระบบเช็คชื่อเข้าเรียน (Student Check-in)'}
+                </h3>
+              </div>
+              <div className="flex items-center space-x-1">
+                <button
+                  type="button"
+                  onClick={() => setIsMaximized(!isMaximized)}
+                  title={isMaximized ? 'ย่อขนาดหน้าต่าง' : 'ขยายเต็มหน้าจอ'}
+                  className={`p-1.5 rounded-lg transition cursor-pointer ${
+                    isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className={`p-1.5 rounded-lg transition cursor-pointer ${
+                    isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {pendingCameraNotice && (
+              <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300 flex items-center space-x-2 text-xs font-bold shadow-xs">
+                <Camera className="w-4 h-4 text-sky-500 shrink-0" />
+                <span>📱 {pendingCameraNotice}</span>
+              </div>
             )}
-            <h3 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-              {isTeacher ? 'ระบบเช็คชื่อเข้าสอน (Teacher Check-in)' : 'ระบบเช็คชื่อเข้าเรียน (Student Check-in)'}
-            </h3>
-          </div>
-          <div className="flex items-center space-x-1">
-            <button
-              type="button"
-              onClick={() => setIsMaximized(!isMaximized)}
-              title={isMaximized ? 'ย่อขนาดหน้าต่าง' : 'ขยายเต็มหน้าจอ'}
-              className={`p-1.5 rounded-lg transition cursor-pointer ${
-                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className={`p-1.5 rounded-lg transition cursor-pointer ${
-                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
 
-        {pendingCameraNotice && (
-          <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300 flex items-center space-x-2 text-xs font-bold shadow-xs">
-            <Camera className="w-4 h-4 text-sky-500 shrink-0" />
-            <span>📱 {pendingCameraNotice}</span>
-          </div>
-        )}
-
-        {submitting && (
-          <div className="p-4 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300 flex items-center space-x-3 text-xs font-bold animate-pulse shadow-sm">
-            <div className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin shrink-0"></div>
-            <span>⚡ ระบบกำลังตรวจสอบพิกัด GPS และบันทึกเวลาให้อัตโนมัติ...</span>
-          </div>
-        )}
+            {submitting && (
+              <div className="p-4 rounded-2xl bg-sky-500/15 border-2 border-sky-500/40 text-sky-700 dark:text-sky-200 flex items-center space-x-3 text-xs font-bold animate-pulse shadow-md">
+                <Loader2 className="w-5 h-5 text-sky-500 animate-spin shrink-0" />
+                <div>
+                  <div className="text-sm font-extrabold text-sky-600 dark:text-sky-400">⚡ กำลังประมวลผลการเช็คชื่อ...</div>
+                  <div className="text-[11px] font-normal text-slate-500 dark:text-slate-300 mt-0.5">
+                    ระบบกำลังตรวจสอบพิกัด GPS, สิทธิ์การเข้าห้องเรียน และบันทึกข้อมูล...
+                  </div>
+                </div>
+              </div>
+            )}
 
         {/* Check-in Mode Selector Tabs */}
         <div
@@ -715,8 +837,8 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
             className={`p-4 rounded-2xl border text-xs space-y-1 ${
               checkinStatus.success
                 ? isDarkMode
-                  ? 'bg-stone-800/90 border-stone-700 text-stone-200'
-                  : 'bg-[#efebe2] border-[#ded7c8] text-[#3b3028]'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-800'
                 : isDarkMode
                 ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
                 : 'bg-rose-50 border-rose-200 text-rose-800'
@@ -737,7 +859,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
             </div>
 
             {checkinStatus.success ? (
-              <p className={`text-[11px] font-mono ${isDarkMode ? 'text-stone-300' : 'text-stone-600'}`}>
+              <p className={`text-[11px] font-mono ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
                 {checkinStatus.distance ? `ระยะห่างจากสถานที่เรียน: ${checkinStatus.distance} เมตร | ` : ''}วิธีที่ใช้: {checkinMode}
               </p>
             ) : (
@@ -747,5 +869,7 @@ export const StudentCheckinModal: React.FC<StudentCheckinModalProps> = ({
         )}
       </div>
     </div>
+      )}
+    </>
   );
 };
