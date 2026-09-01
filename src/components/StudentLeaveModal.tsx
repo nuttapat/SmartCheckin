@@ -3,6 +3,7 @@ import { User, Course, LeaveRequest, LeaveType, LeaveStatus } from '../types';
 import { submitLeaveRequest, fetchStudentLeaveRequests, cancelLeaveRequest, fetchCourseDetails } from '../services/api';
 import { FileText, Calendar, Clock, AlertCircle, CheckCircle, XCircle, Upload, Plus, Trash2, X, Eye, FileCheck, ShieldAlert, Sparkles, CalendarDays, Maximize2, Minimize2, Loader2 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { formatBangkokDateTime } from '../utils/dateHelper';
 
 interface StudentLeaveModalProps {
   isOpen: boolean;
@@ -863,7 +864,7 @@ export const StudentLeaveModal: React.FC<StudentLeaveModalProps> = ({
                           )}
 
                           <div className={`text-[10px] text-right pt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
-                            ยื่นเมื่อ: {new Date(leave.createdAt).toLocaleString('th-TH')}
+                            ยื่นเมื่อ: {formatBangkokDateTime(leave.createdAt)}
                           </div>
                         </div>
                       </div>

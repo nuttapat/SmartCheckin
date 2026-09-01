@@ -15,6 +15,7 @@ import { getDeviceInfo, DeviceInfo } from '../utils/deviceHelper';
 import { X, User as UserIcon, Lock, Shield, ShieldCheck, CheckCircle2, ShieldAlert, Eye, EyeOff, KeyRound, Smartphone, Mail, MapPin, Globe, Tablet, Monitor, Sun, Moon, Trash2, Plus, RefreshCw, AlertCircle, Check, Info, Maximize2, Minimize2, Building2 } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { useTheme } from '../context/ThemeContext';
+import { formatBangkokDateThai } from '../utils/dateHelper';
 
 interface UserSettingsModalProps {
   isOpen: boolean;
@@ -1249,7 +1250,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                                 UUID: {dev.deviceId ? dev.deviceId.slice(0, 18) : 'N/A'}...
                               </div>
                               <div className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                ผูกเมื่อ: {new Date(dev.boundAt || Date.now()).toLocaleDateString('th-TH')} | ใช้งานล่าสุด: {new Date(dev.lastUsedAt || Date.now()).toLocaleDateString('th-TH')}
+                                ผูกเมื่อ: {formatBangkokDateThai(dev.boundAt || Date.now())} | ใช้งานล่าสุด: {formatBangkokDateThai(dev.lastUsedAt || Date.now())}
                               </div>
                             </div>
                           </div>

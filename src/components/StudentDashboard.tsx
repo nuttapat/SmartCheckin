@@ -5,6 +5,7 @@ import { QrCode, Camera, AlertTriangle, MapPin, Clock, Award, ChevronRight, Refr
 import { StudentLeaveModal } from './StudentLeaveModal';
 import { StudentCheckinModal } from './StudentCheckinModal';
 import { useTheme } from '../context/ThemeContext';
+import { formatBangkokDateTime, formatBangkokDateThai } from '../utils/dateHelper';
 
 interface StudentDashboardProps {
   student: User;
@@ -300,7 +301,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
                 <div className={`pt-3 border-t flex items-center justify-between ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
                   <span className={`text-xs flex items-center space-x-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    <span>เช็คชื่อล่าสุด: {item.pastCheckins.length > 0 ? new Date(item.pastCheckins[item.pastCheckins.length - 1].timestamp).toLocaleDateString('th-TH') : 'ยังไม่มีประวัติ'}</span>
+                    <span>เช็คชื่อล่าสุด: {item.pastCheckins.length > 0 ? formatBangkokDateThai(item.pastCheckins[item.pastCheckins.length - 1].timestamp) : 'ยังไม่มีประวัติ'}</span>
                   </span>
                   <button
                     onClick={() => setSelectedCourseHistory(item)}
@@ -363,7 +364,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
                         <span>เช็คชื่อสำเร็จ (PRESENT)</span>
                       </div>
                       <p className={`text-[11px] font-mono ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        {new Date(rec.timestamp).toLocaleString('th-TH')}
+                        {formatBangkokDateTime(rec.timestamp)}
                       </p>
                     </div>
                     <div className="text-right text-[11px] space-y-0.5">

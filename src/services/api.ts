@@ -509,6 +509,15 @@ export async function cancelLeaveRequest(leaveId: string): Promise<{ message: st
   return data;
 }
 
+export async function deleteLeaveRequest(leaveId: string, force: boolean = true): Promise<{ message: string; id: string }> {
+  const res = await fetch(`${API_BASE}/leave-requests/${leaveId}?force=${force}`, {
+    method: 'DELETE',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to delete leave request');
+  return data;
+}
+
 // --- ADMIN & REALTIME DATABASE INSPECTOR API ---
 
 export async function fetchAdminDatabaseOverview() {

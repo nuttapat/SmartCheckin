@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Course, Session, AttendanceRecord } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { formatBangkokTimeWithSeconds } from '../utils/dateHelper';
 
 interface DynamicQRModalProps {
   isOpen: boolean;
@@ -151,11 +152,11 @@ export const DynamicQRModal: React.FC<DynamicQRModalProps> = ({
         <div
           className={`p-4 sm:p-6 grid grid-cols-1 ${
             isQrEnlarged ? 'grid-cols-1' : 'md:grid-cols-2'
-          } gap-4 sm:gap-6 items-start overflow-y-auto`}
+          } gap-4 sm:gap-6 items-stretch overflow-y-auto flex-1`}
         >
           {/* Dynamic / Static QR Code Canvas Display */}
           <div
-            className={`relative flex flex-col items-center justify-center p-4 sm:p-6 rounded-2xl border space-y-4 transition-all duration-300 ${
+            className={`relative flex flex-col items-center justify-between p-4 sm:p-6 rounded-2xl border space-y-4 transition-all duration-300 ${
               isQrEnlarged ? 'w-full max-w-2xl mx-auto' : ''
             } ${
               isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
@@ -521,10 +522,10 @@ export const DynamicQRModal: React.FC<DynamicQRModalProps> = ({
           </div>
 
           {/* Real-time Student Check-in Live Stream (WebSockets) */}
-          <div className="space-y-4 h-full flex flex-col justify-between">
-            <div>
+          <div className="space-y-3 h-full flex flex-col justify-between min-h-[420px] md:min-h-full">
+            <div className="flex-1 flex flex-col min-h-0">
               <div
-                className={`flex items-center justify-between pb-2 border-b ${
+                className={`flex items-center justify-between pb-2.5 border-b shrink-0 ${
                   isDarkMode ? 'border-slate-800' : 'border-slate-200'
                 }`}
               >
@@ -541,9 +542,9 @@ export const DynamicQRModal: React.FC<DynamicQRModalProps> = ({
                 </span>
               </div>
 
-              <div className="mt-3 space-y-2 max-h-48 sm:max-h-64 overflow-y-auto pr-1">
+              <div className="mt-3 space-y-2 overflow-y-auto pr-1 flex-1 min-h-[280px] max-h-[480px] md:max-h-[580px] custom-scrollbar">
                 {liveCheckins.length === 0 ? (
-                  <div className={`text-center py-8 sm:py-12 text-xs space-y-2 ${
+                  <div className={`flex flex-col items-center justify-center h-full min-h-[220px] text-xs space-y-2 ${
                     isDarkMode ? 'text-slate-400' : 'text-slate-500'
                   }`}>
                     <Clock className="w-8 h-8 text-slate-400 mx-auto animate-bounce" />
@@ -573,7 +574,7 @@ export const DynamicQRModal: React.FC<DynamicQRModalProps> = ({
                           }`}
                         >
                           รหัส: {rec.studentUniversityId} • เวลา:{' '}
-                          {new Date(rec.timestamp).toLocaleTimeString('th-TH')}
+                          {formatBangkokTimeWithSeconds(rec.timestamp)}
                         </div>
                       </div>
                       <div className="text-right text-[10px]">
@@ -589,7 +590,7 @@ export const DynamicQRModal: React.FC<DynamicQRModalProps> = ({
 
             {/* CSV Download Trigger */}
             <div
-              className={`pt-3 border-t ${
+              className={`pt-3 border-t shrink-0 ${
                 isDarkMode ? 'border-slate-800' : 'border-slate-200'
               }`}
             >

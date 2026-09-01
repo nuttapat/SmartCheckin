@@ -25,6 +25,7 @@ import {
   ArrowUpDown,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { formatBangkokTime } from '../utils/dateHelper';
 
 export interface StudentAttendanceGridItem {
   userId: string;
@@ -502,7 +503,7 @@ export const TeacherAttendanceGridModal: React.FC<TeacherAttendanceGridModalProp
                   ? 'ลาเรียน'
                   : 'ขาดเรียน',
               checkinTime: new Date().toISOString(),
-              checkinTimeBangkok: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
+              checkinTimeBangkok: formatBangkokTime(new Date()),
             };
 
             if (existingIdx >= 0) {

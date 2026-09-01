@@ -37,6 +37,7 @@ import {
   LayoutGrid,
   Table,
 } from 'lucide-react';
+import { formatBangkokDateTime } from '../../utils/dateHelper';
 
 interface AdminOverrideTabProps {
   isDarkMode: boolean;
@@ -955,9 +956,9 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
           : 'ขาด (ABSENT)';
 
       const timeStr = log.timestamp
-        ? new Date(log.timestamp).toLocaleString('th-TH')
+        ? formatBangkokDateTime(log.timestamp)
         : log.createdAt
-        ? new Date(log.createdAt).toLocaleString('th-TH')
+        ? formatBangkokDateTime(log.createdAt)
         : '-';
 
       return [
@@ -2059,7 +2060,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
                               {log.checkinMethod || log.method || 'ADMIN_OVERRIDE'}
                             </div>
                             <div className="font-mono text-[10px] text-slate-400">
-                              {log.timestamp ? new Date(log.timestamp).toLocaleString('th-TH') : log.createdAt ? new Date(log.createdAt).toLocaleString('th-TH') : '-'}
+                              {log.timestamp ? formatBangkokDateTime(log.timestamp) : log.createdAt ? formatBangkokDateTime(log.createdAt) : '-'}
                             </div>
                             {(log.reason || log.note) && (
                               <div className="text-[10px] text-slate-400 truncate max-w-[180px]" title={log.reason || log.note}>
@@ -2210,7 +2211,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
                         <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 pt-1">
                           <span className="font-mono font-bold truncate max-w-[150px]">{log.checkinMethod || log.method || 'ADMIN'}</span>
                           <span className="font-mono">
-                            {log.timestamp ? new Date(log.timestamp).toLocaleString('th-TH') : '-'}
+                            {log.timestamp ? formatBangkokDateTime(log.timestamp) : log.createdAt ? formatBangkokDateTime(log.createdAt) : '-'}
                           </span>
                         </div>
 
@@ -2643,7 +2644,7 @@ export const AdminOverrideTab: React.FC<AdminOverrideTabProps> = ({
                           {/* Time */}
                           {visibleCols.time && (
                             <td className="p-3.5 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                              {log.timestamp ? new Date(log.timestamp).toLocaleString('th-TH') : log.createdAt ? new Date(log.createdAt).toLocaleString('th-TH') : '-'}
+                              {log.timestamp ? formatBangkokDateTime(log.timestamp) : log.createdAt ? formatBangkokDateTime(log.createdAt) : '-'}
                             </td>
                           )}
 

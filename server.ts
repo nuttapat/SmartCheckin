@@ -3895,16 +3895,17 @@ app.put('/api/notifications/mark-all-read/:userId', (req, res) => {
   res.json({ success: true, updatedCount: count });
 });
 
-// Cancel leave request (นักศึกษายกเลิกใบลาที่ยังรอดำเนินการ)
+// Cancel or Delete leave request (นักศึกษายกเลิก หรืออาจารย์/แอดมินลบคำขอลา)
 app.delete('/api/leave-requests/:id', (req, res) => {
   const { id } = req.params;
+  const force = req.query.force === 'true' || req.body?.force === true;
   const itemIndex = leaveRequests.findIndex((l) => l.id === id);
 
   if (itemIndex === -1) {
-    return res.status(404).json({ error: 'ไม่พบข้อมูลใบลาที่ต้องการยกเลิก' });
+    return res.status(404).json({ error: 'ไม่พบข้อมูลใบลาที่ต้องการลบ/ยกเลิก' });
   }
 
-  if (leaveRequests[itemIndex].status !== LeaveStatus.PENDING) {
+  if (!force && leaveRequests[itemIndex].status !== LeaveStatus.PENDING) {
     return res.status(400).json({ error: 'ไม่สามารถยกเลิกใบลาที่ได้รับการพิจารณาไปแล้วได้' });
   }
 
@@ -3915,7 +3916,7 @@ app.delete('/api/leave-requests/:id', (req, res) => {
   saveTombstonesToFirestore().catch(() => {});
 
   res.json({
-    message: 'ยกเลิกใบลาเรียนเรียบร้อยแล้ว',
+    message: 'ลบข้อมูลคำขอลาเรียนเรียบร้อยแล้ว',
     id: removed.id,
   });
 });
@@ -4826,12 +4827,16 @@ app.delete('/api/admin/database/document/:collectionName/:docId', async (req, re
         const idx = attendanceRecords.findIndex((a) => a.id === docId);
         if (idx >= 0) attendanceRecords.splice(idx, 1);
         await deleteFromFirestore(COLLECTIONS.ATTENDANCE, docId);
+        saveLocalCache();
         break;
       }
       case 'leaveRequests': {
         const idx = leaveRequests.findIndex((l) => l.id === docId);
         if (idx >= 0) leaveRequests.splice(idx, 1);
+        deletedLeaveIds.add(docId);
         await deleteFromFirestore(COLLECTIONS.LEAVE_REQUESTS, docId);
+        saveLocalCache();
+        saveTombstonesToFirestore().catch(() => {});
         break;
       }
       case 'quickEvents':

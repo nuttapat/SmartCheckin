@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { User, Course, LeaveRequest, LeaveStatus, LeaveType } from '../types';
-import { fetchTeacherLeaveRequests, updateLeaveRequestStatus } from '../services/api';
-import { FileText, CheckCircle, XCircle, Clock, Search, Filter, Eye, X, MessageSquare, AlertCircle, Sparkles, UserCheck, Download, Maximize2, Minimize2 } from 'lucide-react';
+import { fetchTeacherLeaveRequests, updateLeaveRequestStatus, deleteLeaveRequest } from '../services/api';
+import { FileText, CheckCircle, XCircle, Clock, Search, Filter, Eye, X, MessageSquare, AlertCircle, Sparkles, UserCheck, Download, Maximize2, Minimize2, Trash2 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { formatBangkokDateTime } from '../utils/dateHelper';
 
 interface TeacherLeaveManagementModalProps {
   isOpen: boolean;
@@ -139,6 +140,25 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
       alert(err.message || 'เกิดข้อผิดพลาดในการอัปเดตสถานะ');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeleteRequest = async (item: LeaveRequest) => {
+    if (
+      !window.confirm(
+        `คุณต้องการลบคำขอลาของ "${item.studentNameTh}" (${item.studentUniversityId}) วิชา ${item.courseCode} วันที่ ${item.leaveDate} ออกจากระบบอย่างถาวรหรือไม่?`
+      )
+    ) {
+      return;
+    }
+    try {
+      setLoading(true);
+      await deleteLeaveRequest(item.id, true);
+      await loadRequests();
+    } catch (err: any) {
+      alert(err.message || 'เกิดข้อผิดพลาดในการลบคำขอลา');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -445,7 +465,7 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
                     )}
 
                     <div className={`text-[10px] text-right pt-0.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                      ยื่นคำขอเมื่อ: {new Date(item.createdAt).toLocaleString('th-TH')}
+                      ยื่นคำขอเมื่อ: {formatBangkokDateTime(item.createdAt)}
                     </div>
                   </div>
 
@@ -457,21 +477,36 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
                         <span>🔒 อ่านอย่างเดียว (อาจารย์ผู้สอน)</span>
                       </div>
                     ) : item.status === LeaveStatus.PENDING ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          onClick={() => handleOpenActionModal(item, LeaveStatus.APPROVED)}
-                          className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition active:scale-95 flex items-center justify-center space-x-1.5 cursor-pointer"
-                        >
-                          <CheckCircle className="w-4 h-4 shrink-0" />
-                          <span>อนุมัติ</span>
-                        </button>
+                      <div className="flex flex-col sm:flex-row items-center gap-2">
+                        <div className="grid grid-cols-2 gap-2 flex-1 w-full">
+                          <button
+                            onClick={() => handleOpenActionModal(item, LeaveStatus.APPROVED)}
+                            className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition active:scale-95 flex items-center justify-center space-x-1.5 cursor-pointer"
+                          >
+                            <CheckCircle className="w-4 h-4 shrink-0" />
+                            <span>อนุมัติ</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleOpenActionModal(item, LeaveStatus.REJECTED)}
+                            className="w-full py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md shadow-rose-600/20 transition active:scale-95 flex items-center justify-center space-x-1.5 cursor-pointer"
+                          >
+                            <XCircle className="w-4 h-4 shrink-0" />
+                            <span>ไม่อนุมัติ</span>
+                          </button>
+                        </div>
 
                         <button
-                          onClick={() => handleOpenActionModal(item, LeaveStatus.REJECTED)}
-                          className="w-full py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md shadow-rose-600/20 transition active:scale-95 flex items-center justify-center space-x-1.5 cursor-pointer"
+                          type="button"
+                          onClick={() => handleDeleteRequest(item)}
+                          className={`p-2.5 rounded-xl border transition cursor-pointer shrink-0 ${
+                            isDarkMode
+                              ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border-rose-500/20'
+                              : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                          }`}
+                          title="ลบคำขอลาทิ้งอย่างถาวร"
                         >
-                          <XCircle className="w-4 h-4 shrink-0" />
-                          <span>ไม่อนุมัติ</span>
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     ) : (
@@ -486,17 +521,33 @@ export const TeacherLeaveManagementModal: React.FC<TeacherLeaveManagementModalPr
                           )}
                           <span>สถานะ: {statusConfig.label}</span>
                         </span>
-                        <button
-                          onClick={() => handleOpenActionModal(item, item.status)}
-                          className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition active:scale-95 cursor-pointer flex items-center space-x-1.5 ${
-                            isDarkMode 
-                              ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700' 
-                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-                          }`}
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" />
-                          <span>แก้ไขผลการพิจารณา / ข้อความ</span>
-                        </button>
+                        
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleOpenActionModal(item, item.status)}
+                            className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition active:scale-95 cursor-pointer flex items-center space-x-1.5 ${
+                              isDarkMode 
+                                ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700' 
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>แก้ไขสถานะ / ข้อความ</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRequest(item)}
+                            className={`p-1.5 rounded-xl border transition cursor-pointer ${
+                              isDarkMode
+                                ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border-rose-500/20'
+                                : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                            }`}
+                            title="ลบคำขอลาทิ้งอย่างถาวร"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>

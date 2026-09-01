@@ -6,7 +6,13 @@ import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
 import { decodeQRCodeFromImage } from '../utils/qrDecoder';
 import { getDeviceInfo } from '../utils/deviceHelper';
-import { formatBangkokDateTime, formatBangkokTime } from '../utils/dateHelper';
+import {
+  formatBangkokDateTime,
+  formatBangkokTime,
+  formatBangkokDate,
+  formatBangkokDateThai,
+  formatBangkokShortDateTime,
+} from '../utils/dateHelper';
 import { TeacherCourseEditModal } from './TeacherCourseEditModal';
 import { TeacherLeaveManagementModal } from './TeacherLeaveManagementModal';
 import { DeleteCourseConfirmModal } from './DeleteCourseConfirmModal';
@@ -1550,7 +1556,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           </div>
                           <p className={`text-[11px] flex items-center space-x-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                             <Clock className="w-3.5 h-3.5" />
-                            <span>สร้างเมื่อ {new Date(session.createdAt || Date.now()).toLocaleDateString('th-TH')}</span>
+                            <span>สร้างเมื่อ {formatBangkokDateThai(session.createdAt || Date.now())}</span>
                           </p>
                         </div>
 
@@ -1800,7 +1806,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 </div>
                 <div className="text-xs font-bold mt-1 text-slate-800 dark:text-slate-200">
                   {filteredTeacherHistory.length > 0
-                    ? new Date(filteredTeacherHistory[0].timestamp).toLocaleString('th-TH')
+                    ? formatBangkokDateTime(filteredTeacherHistory[0].timestamp)
                     : 'ยังไม่มีประวัติ'}
                 </div>
               </div>
@@ -1839,7 +1845,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       </div>
                       <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-2 flex items-center justify-between border-t border-slate-200 dark:border-slate-800/80 pt-2">
                         <span>บันทึกล่าสุด:</span>
-                        <span className="font-semibold">{lastCheckin ? new Date(lastCheckin).toLocaleDateString('th-TH') : 'ยังไม่มี'}</span>
+                        <span className="font-semibold">{lastCheckin ? formatBangkokDateThai(lastCheckin) : 'ยังไม่มี'}</span>
                       </div>
                     </div>
                   ))}
@@ -1953,7 +1959,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       {sortedTeacherHistory.map((rec) => (
                         <tr key={rec.id} className={isDarkMode ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'}>
                           <td className="p-3 font-mono font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap">
-                            {new Date(rec.timestamp).toLocaleString('th-TH')}
+                            {formatBangkokDateTime(rec.timestamp)}
                           </td>
                           <td className="p-3 font-bold">
                             {rec.courseCode ? `[${rec.courseCode}] ${rec.courseName}` : 'การสอนทั่วไป'}
@@ -2549,7 +2555,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                         {st.lastCheckinTime ? (
                                           <div className="flex items-center space-x-1.5 font-mono">
                                             <span className={isDarkMode ? 'text-slate-200' : 'text-slate-700'}>
-                                              {new Date(st.lastCheckinTime).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}
+                                              {formatBangkokShortDateTime(st.lastCheckinTime)}
                                             </span>
                                             {st.lastCheckinMethod && (
                                               <span className="text-[9px] px-1.5 py-0.2 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400 font-semibold border border-sky-500/20">
@@ -2729,7 +2735,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                             {st.lastCheckinTime ? (
                                               <div>
                                                 <div className={`font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
-                                                  {new Date(st.lastCheckinTime).toLocaleString('th-TH')}
+                                                  {formatBangkokDateTime(st.lastCheckinTime)}
                                                 </div>
                                                 {st.lastCheckinMethod && (
                                                   <span className="text-[9px] px-1.5 py-0.2 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400 font-semibold border border-sky-500/20">

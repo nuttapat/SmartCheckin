@@ -7,6 +7,7 @@ import {
 import { User, UserRole } from '../types';
 import { fetchCurrentUser, fetchCourses, createCourse, fetchSystemSettings } from '../services/api';
 import { useTheme } from '../context/ThemeContext';
+import { formatBangkokDateTime, formatBangkokTime } from '../utils/dateHelper';
 
 interface TestingAgentModalProps {
   isOpen: boolean;
@@ -356,7 +357,7 @@ export const TestingAgentModal: React.FC<TestingAgentModalProps> = ({
   }
 
   const appendLog = (msg: string) => {
-    const timestamp = new Date().toLocaleTimeString('th-TH');
+    const timestamp = formatBangkokTime(new Date());
     setTerminalLogs((prev) => [`[${timestamp}] ${msg}`, ...prev]);
   };
 
@@ -584,11 +585,10 @@ export const TestingAgentModal: React.FC<TestingAgentModalProps> = ({
     ((passedAuto + passedManual) / (totalAuto + totalManual)) * 100
   );
 
-  const handleCopyReport = () => {
-    const reportText = `=====================================================
+  const fullReportText = `=====================================================
 MUMT SMART ATTENDANCE SYSTEM - QA TEST REPORT
 รายงานผลการทดสอบระบบอัจฉริยะ (Student, Teacher & Admin Coverage)
-เวลาทดสอบ: ${new Date().toLocaleString('th-TH')}
+เวลาทดสอบ: ${formatBangkokDateTime(new Date())}
 ผู้ทดสอบ: ${currentUser ? `${currentUser.title} ${currentUser.firstNameTh} ${currentUser.lastNameTh}` : 'System Admin QA Agent'}
 =====================================================
 
@@ -606,7 +606,8 @@ ${manualChecklist.map((chk, idx) => `${idx + 1}. [${chk.status.toUpperCase()}] $
 =====================================================
 `;
 
-    navigator.clipboard.writeText(reportText);
+  const handleCopyReport = () => {
+    navigator.clipboard.writeText(fullReportText);
     setCopiedReport(true);
     setTimeout(() => setCopiedReport(false), 2000);
   };
@@ -1096,25 +1097,7 @@ ${manualChecklist.map((chk, idx) => `${idx + 1}. [${chk.status.toUpperCase()}] $
                 isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-800'
               }`}>
                 <pre className="whitespace-pre-wrap leading-relaxed font-mono">
-{`=====================================================
-MUMT SMART ATTENDANCE SYSTEM - QA TEST REPORT
-เวลาทดสอบ: ${new Date().toLocaleString('th-TH')}
-ผู้ทดสอบ: ${currentUser ? `${currentUser.title} ${currentUser.firstNameTh} ${currentUser.lastNameTh}` : 'System Admin QA Agent'}
-=====================================================
-
-[ สรุปคะแนนความสมบูรณ์ของระบบ ]
-- อัตราผ่านรวม (Overall Pass Rate): ${overallPassPercentage}%
-- แบบทดสอบอัตโนมัติ (Automated Tests): ผ่าน ${passedAuto}/${totalAuto} เคส
-- รายการตรวจสอบระบบ (Manual Checklist): ผ่าน ${passedManual}/${totalManual} รายการ
-
-[ ขอบเขตการทดสอบที่ครอบคลุม ]
-1. ฝั่งนักศึกษา (Student): สแกน QR, Dynamic PIN, GPS Geofence, Device Binding, ยื่นใบลา
-2. ฝั่งอาจารย์ (Teacher): สร้างวิชา, พิกัด GPS, เปิดคลาส, Dynamic QR, ปรับสถานะแมนนวล, อนุมัติใบลา, ส่งออกไฟล์
-3. ฝั่งผู้ดูแลระบบ (Admin): นโยบายโดเมน, สิทธิ์ผู้ใช้, View Mode switching, System Settings
-
-[ ข้อสรุปกรณี Google Account Interruption ]
-✅ การทดสอบผ่านอย่างสมบูรณ์: หากเกิดกรณีปิดหน้าต่าง หรือเครื่องค้างขณะ Onboarding บัญชี Google ครั้งแรก
-เมื่อกลับเข้ามาล็อกอินด้วย Google Account เดิมซ้ำอีกครั้ง ระบบจะสามารถจำโปรไฟล์ และเปิดป๊อบอัพให้กรอกข้อมูลเพื่อลงทะเบียนต่อได้สำเร็จ 100% โดยไม่เกิดข้อผิดพลาดการสร้างบัญชีซ้ำซ้อน`}
+                  {fullReportText}
                 </pre>
               </div>
             </div>

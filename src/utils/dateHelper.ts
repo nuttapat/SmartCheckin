@@ -1,6 +1,8 @@
 /**
- * Utility functions for session and teaching week date management
+ * Utility functions for session and teaching week date management in Bangkok Timezone (Asia/Bangkok, UTC+7)
  */
+
+export const BANGKOK_TIMEZONE = 'Asia/Bangkok';
 
 /**
  * Safely adds 7 days (1 week) to a date string in YYYY-MM-DD format.
@@ -39,7 +41,7 @@ export function formatBangkokDateTime(dateInput: string | number | Date | null |
     const dt = new Date(dateInput);
     if (isNaN(dt.getTime())) return 'ยังไม่เคยสแกน';
     return dt.toLocaleString('th-TH', {
-      timeZone: 'Asia/Bangkok',
+      timeZone: BANGKOK_TIMEZONE,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -54,7 +56,70 @@ export function formatBangkokDateTime(dateInput: string | number | Date | null |
 }
 
 /**
- * Formats a timestamp into a time-only string in Bangkok timezone (Asia/Bangkok, UTC+7).
+ * Formats a timestamp into a short date-time string in Bangkok timezone (Asia/Bangkok, UTC+7).
+ * Example output: "01/08/2569 13:15"
+ */
+export function formatBangkokShortDateTime(dateInput: string | number | Date | null | undefined): string {
+  if (!dateInput) return '-';
+  try {
+    const dt = new Date(dateInput);
+    if (isNaN(dt.getTime())) return '-';
+    return dt.toLocaleString('th-TH', {
+      timeZone: BANGKOK_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  } catch (e) {
+    return '-';
+  }
+}
+
+/**
+ * Formats a timestamp into a date-only string in Bangkok timezone (Asia/Bangkok, UTC+7).
+ * Example output: "01/08/2569"
+ */
+export function formatBangkokDate(dateInput: string | number | Date | null | undefined): string {
+  if (!dateInput) return '-';
+  try {
+    const dt = new Date(dateInput);
+    if (isNaN(dt.getTime())) return '-';
+    return dt.toLocaleDateString('th-TH', {
+      timeZone: BANGKOK_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  } catch (e) {
+    return '-';
+  }
+}
+
+/**
+ * Formats a timestamp into a date with abbreviated Thai month name in Bangkok timezone.
+ * Example output: "1 ส.ค. 2569"
+ */
+export function formatBangkokDateThai(dateInput: string | number | Date | null | undefined): string {
+  if (!dateInput) return '-';
+  try {
+    const dt = new Date(dateInput);
+    if (isNaN(dt.getTime())) return '-';
+    return dt.toLocaleDateString('th-TH', {
+      timeZone: BANGKOK_TIMEZONE,
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  } catch (e) {
+    return '-';
+  }
+}
+
+/**
+ * Formats a timestamp into a time-only string with "น." suffix in Bangkok timezone (Asia/Bangkok, UTC+7).
  * Example output: "13:15 น."
  */
 export function formatBangkokTime(dateInput: string | number | Date | null | undefined): string {
@@ -63,7 +128,7 @@ export function formatBangkokTime(dateInput: string | number | Date | null | und
     const dt = new Date(dateInput);
     if (isNaN(dt.getTime())) return '-';
     return dt.toLocaleTimeString('th-TH', {
-      timeZone: 'Asia/Bangkok',
+      timeZone: BANGKOK_TIMEZONE,
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
@@ -72,3 +137,32 @@ export function formatBangkokTime(dateInput: string | number | Date | null | und
     return '-';
   }
 }
+
+/**
+ * Formats a timestamp into time with seconds in Bangkok timezone.
+ * Example output: "13:15:30"
+ */
+export function formatBangkokTimeWithSeconds(dateInput: string | number | Date | null | undefined): string {
+  if (!dateInput) return '-';
+  try {
+    const dt = new Date(dateInput);
+    if (isNaN(dt.getTime())) return '-';
+    return dt.toLocaleTimeString('th-TH', {
+      timeZone: BANGKOK_TIMEZONE,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+  } catch (e) {
+    return '-';
+  }
+}
+
+/**
+ * Returns current date string in YYYY-MM-DD format based on Bangkok timezone.
+ */
+export function getBangkokTodayDateString(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: BANGKOK_TIMEZONE });
+}
+
