@@ -97,13 +97,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Interval auto-refresh for overview stats if enabled
   useEffect(() => {
-    let interval: any;
-    if (autoRefresh) {
-      interval = setInterval(() => {
-        loadOverviewData(true);
-      }, 10000); // 10s auto-refresh for overview stats only
+    if (!autoRefresh) return;
+
+    let interval: any = null;
+    const startPolling = () => {
+      if (!interval) {
+        interval = setInterval(() => {
+          loadOverviewData(true);
+        }, 30000); // 30s auto-refresh when visible
+      }
+    };
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        loadOverviewData(true); // Instant refresh on focus
+        startPolling();
+      }
+    };
+
+    if (!document.hidden) {
+      startPolling();
     }
-    return () => clearInterval(interval);
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [autoRefresh]);
 
   return (

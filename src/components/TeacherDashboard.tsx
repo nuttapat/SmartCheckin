@@ -116,21 +116,46 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   });
 
   const effectiveSessions = useMemo(() => {
+    // Build quick lookup map of existing sessions
+    const sessionMap = new Map<number, Session>();
+    if (Array.isArray(courseSessions)) {
+      courseSessions.forEach((s) => {
+        if (s && s.weekNumber !== undefined) {
+          sessionMap.set(Number(s.weekNumber), s);
+        }
+      });
+    }
+
+    // 1. If selectedCourse has weeks array, reconcile with session details
+    if (selectedCourse?.weeks && Array.isArray(selectedCourse.weeks) && selectedCourse.weeks.length > 0) {
+      const merged: Session[] = selectedCourse.weeks.map((w, idx) => {
+        const wNum = Number(w.weekNumber) || idx + 1;
+        const existing = sessionMap.get(wNum);
+        if (existing) {
+          return {
+            ...existing,
+            topic: w.topic || existing.topic || `สัปดาห์ที่ ${wNum}`,
+          };
+        }
+        return {
+          id: `ses_${selectedCourse.id}_w${wNum}`,
+          courseId: selectedCourse.id,
+          weekNumber: wNum,
+          topic: w.topic || `สัปดาห์ที่ ${wNum}`,
+          teacherLat: selectedCourse.defaultLat || 13.7988363,
+          teacherLng: selectedCourse.defaultLng || 100.322944,
+          isActive: false,
+          createdAt: new Date().toISOString(),
+        };
+      });
+      return merged.sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
+    }
+
+    // 2. Fallback to raw courseSessions if course.weeks is empty
     if (courseSessions && courseSessions.length > 0) {
-      return courseSessions;
+      return [...courseSessions].sort((a, b) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0));
     }
-    if (selectedCourse?.weeks && selectedCourse.weeks.length > 0) {
-      return selectedCourse.weeks.map((w) => ({
-        id: `ses_${selectedCourse.id}_w${w.weekNumber}`,
-        courseId: selectedCourse.id,
-        weekNumber: Number(w.weekNumber),
-        topic: w.topic || `สัปดาห์ที่ ${w.weekNumber}`,
-        teacherLat: selectedCourse.defaultLat || 13.7988363,
-        teacherLng: selectedCourse.defaultLng || 100.322944,
-        isActive: false,
-        createdAt: new Date().toISOString(),
-      }));
-    }
+
     return [];
   }, [courseSessions, selectedCourse]);
   const [currentCourseMembers, setCurrentCourseMembers] = useState<CourseMember[]>([]);
@@ -351,11 +376,41 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   };
 
   useEffect(() => {
-    if (teacher.id) {
-      loadPendingLeaveCount();
-      const interval = setInterval(loadPendingLeaveCount, 10000);
-      return () => clearInterval(interval);
+    if (!teacher.id) return;
+    loadPendingLeaveCount();
+
+    let interval: any = null;
+    const startPolling = () => {
+      if (!interval) {
+        interval = setInterval(loadPendingLeaveCount, 35000); // 35s interval
+      }
+    };
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        loadPendingLeaveCount(); // Instant refresh on return
+        startPolling();
+      }
+    };
+
+    if (!document.hidden) {
+      startPolling();
     }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [teacher.id]);
 
   // Active Dynamic QR state
@@ -968,6 +1023,26 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             const updatedSelected = list.find((c) => c.id === selectedCourse.id);
             if (updatedSelected) {
               setSelectedCourse(updatedSelected);
+              try {
+                localStorage.setItem(teacherSelectedCourseCacheKey, JSON.stringify(updatedSelected));
+              } catch {}
+              // Cascade background refresh for the currently selected course details
+              fetchCourseDetails(updatedSelected.id)
+                .then((details) => {
+                  if (details) {
+                    const sortedSessions = (details.sessions || []).sort(
+                      (a: any, b: any) => (Number(a.weekNumber) || 0) - (Number(b.weekNumber) || 0)
+                    );
+                    setCourseSessions(sortedSessions);
+                    if (Array.isArray(details.members)) {
+                      setCurrentCourseMembers(details.members);
+                    }
+                    try {
+                      localStorage.setItem(`smart_course_details_${updatedSelected.id}`, JSON.stringify(details));
+                    } catch {}
+                  }
+                })
+                .catch(() => {});
             }
           }
         }

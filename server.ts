@@ -258,6 +258,25 @@ export async function flushBackgroundSaveQueue() {
 // Debounced async local cache saver to eliminate disk I/O bottlenecks during mass check-ins
 let localCacheDebounceTimer: NodeJS.Timeout | null = null;
 
+export function sendCachedJson(req: express.Request, res: express.Response, data: any, maxAgeSeconds = 30) {
+  try {
+    const jsonStr = JSON.stringify(data);
+    const hash = crypto.createHash('md5').update(jsonStr).digest('hex');
+    const etag = `"${hash}"`;
+
+    res.setHeader('Cache-Control', `public, max-age=${maxAgeSeconds}, must-revalidate`);
+    res.setHeader('ETag', etag);
+
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.send(jsonStr);
+  } catch {
+    return res.json(data);
+  }
+}
+
 export function debouncedSaveLocalCache(delay = 400) {
   if (localCacheDebounceTimer) {
     clearTimeout(localCacheDebounceTimer);
@@ -5170,7 +5189,7 @@ app.delete('/api/admin/database/document/:collectionName/:docId', async (req, re
 // Get public/global system settings
 app.get('/api/system/settings', (req, res) => {
   try {
-    res.json(systemSettings);
+    sendCachedJson(req, res, systemSettings, 45);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Error fetching system settings' });
   }
@@ -5238,7 +5257,7 @@ app.get('/api/admin/master/universities', (req, res) => {
   try {
     seedDefaultMasterData();
     const univs = Array.from(masterUniversities.values());
-    res.json(univs);
+    sendCachedJson(req, res, univs, 60);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Error fetching master universities' });
   }
@@ -5285,7 +5304,7 @@ app.get('/api/admin/master/faculties', (req, res) => {
   try {
     seedDefaultMasterData();
     const facs = Array.from(masterFaculties.values());
-    res.json(facs);
+    sendCachedJson(req, res, facs, 60);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Error fetching master faculties' });
   }
@@ -5350,7 +5369,7 @@ app.post('/api/admin/master/seed-defaults', async (req, res) => {
 app.get('/api/admin/master/departments', (req, res) => {
   try {
     const deps = Array.from(masterDepartments.values());
-    res.json(deps);
+    sendCachedJson(req, res, deps, 60);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Error fetching master departments' });
   }
@@ -5401,7 +5420,7 @@ app.delete('/api/admin/master/departments/:id', async (req, res) => {
 app.get('/api/admin/master/curriculums', (req, res) => {
   try {
     const currs = Array.from(masterCurriculums.values());
-    res.json(currs);
+    sendCachedJson(req, res, currs, 60);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Error fetching master curriculums' });
   }
@@ -5454,7 +5473,7 @@ app.delete('/api/admin/master/curriculums/:id', async (req, res) => {
 app.get('/api/admin/master/prefixes', (req, res) => {
   try {
     const prefixes = Array.from(masterPrefixes.values());
-    res.json(prefixes);
+    sendCachedJson(req, res, prefixes, 60);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Error fetching master prefixes' });
   }

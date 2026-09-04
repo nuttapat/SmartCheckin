@@ -164,8 +164,11 @@ export const TeacherCourseEditModal: React.FC<TeacherCourseEditModalProps> = ({
       });
 
       setSuccessMsg('บันทึกการแก้ไขรายวิชาเรียบร้อยแล้ว!');
+      try {
+        localStorage.removeItem(`smart_course_details_${course.id}`);
+      } catch {}
       setTimeout(() => {
-        onSuccess(res.course);
+        onSuccess(res.course || res);
         onClose();
       }, 600);
     } catch (err: any) {

@@ -158,8 +158,39 @@ export default function App() {
 
   useEffect(() => {
     loadGlobalSettings();
-    const timer = setInterval(loadGlobalSettings, 10000);
-    return () => clearInterval(timer);
+    let timer: any = null;
+
+    const startPolling = () => {
+      if (!timer) {
+        timer = setInterval(loadGlobalSettings, 45000); // 45s interval for settings
+      }
+    };
+
+    const stopPolling = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        loadGlobalSettings(); // Instant re-sync upon focus
+        startPolling();
+      }
+    };
+
+    if (!document.hidden) {
+      startPolling();
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   // Detect direct camera QR scan link from URL query params (e.g. ?checkin=SES:123:ABC)

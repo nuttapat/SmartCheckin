@@ -119,6 +119,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onO
 
   useEffect(() => {
     loadStats(coursesStats.length > 0);
+
+    let lastSyncTimestamp = Date.now();
+    const handleVisibilityChange = () => {
+      if (!document.hidden && Date.now() - lastSyncTimestamp > 45000) {
+        lastSyncTimestamp = Date.now();
+        loadStats(true); // Silent background refresh upon returning to tab
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [student.id]);
 
   // Auto-open checkin modal if user scanned QR code via mobile phone camera
