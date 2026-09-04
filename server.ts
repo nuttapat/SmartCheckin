@@ -53,9 +53,29 @@ app.use(compression({
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
+let isServerReady = false;
+
 // Health Check Endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: isServerReady ? 'ok' : 'initializing',
+    coursesCount: courses.size,
+    usersCount: users.size,
+    sessionsCount: sessions.size,
+    attendanceCount: attendanceRecords.length,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Server Readiness Guard: Prevent race condition requests while Firestore initial hydration is running
+app.use((req, res, next) => {
+  if (!isServerReady && req.path.startsWith('/api') && req.path !== '/api/health') {
+    return res.status(503).json({
+      error: 'ระบบกำลังเริ่มต้นและเชื่อมต่อฐานข้อมูล Cloud Firestore กรุณารอสักครู่ (System Initializing...)',
+      isInitializing: true,
+    });
+  }
+  next();
 });
 
 // --- IN-MEMORY DATABASE & SEED DATA ---
@@ -1135,255 +1155,9 @@ function getHaversineDistance(
   return Math.round(R * c);
 }
 
-// Seed Initial Users & Courses Function
+// Production: No mock data seeding. State is strictly hydrated from Cloud Firestore and local cache.
 function initDefaultSeedData() {
-  const teacherUser: User = {
-    id: 'usr_teacher_1',
-    role: UserRole.TEACHER,
-    title: 'อ.ดร.',
-    firstNameTh: 'สมชาย',
-    lastNameTh: 'ใจดี',
-    firstNameEn: 'Somchai',
-    lastNameEn: 'Jaidee',
-    universityId: 'T1001',
-    email: 'somchai@university.ac.th',
-    password: '123456',
-    deviceId: 'dev_teacher_1',
-    isDemo: true,
-    createdAt: new Date().toISOString(),
-  };
-
-  const coTeacherUser: User = {
-    id: 'usr_teacher_2',
-    role: UserRole.TEACHER,
-    title: 'ผศ.ดร.',
-    firstNameTh: 'วนิดา',
-    lastNameTh: 'เรียนดี',
-    firstNameEn: 'Wanida',
-    lastNameEn: 'Riandee',
-    universityId: 'T1002',
-    email: 'wanida@university.ac.th',
-    password: '123456',
-    deviceId: 'dev_teacher_2',
-    isDemo: true,
-    createdAt: new Date().toISOString(),
-  };
-
-  const studentUser1: User = {
-    id: 'usr_student_1',
-    role: UserRole.STUDENT,
-    title: 'นาย',
-    firstNameTh: 'กิตติพงษ์',
-    lastNameTh: 'สุขเสริฐ',
-    firstNameEn: 'Kittipong',
-    lastNameEn: 'Suksert',
-    universityId: '66010012',
-    email: '66010012@university.ac.th',
-    password: '123456',
-    deviceId: 'dev_student_1',
-    isDemo: true,
-    createdAt: new Date().toISOString(),
-  };
-
-  const studentUser2: User = {
-    id: 'usr_student_2',
-    role: UserRole.STUDENT,
-    title: 'นางสาว',
-    firstNameTh: 'ณัฐธิดา',
-    lastNameTh: 'รักเรียน',
-    firstNameEn: 'Nattida',
-    lastNameEn: 'Rakrien',
-    universityId: '66010045',
-    email: '66010045@university.ac.th',
-    password: '123456',
-    deviceId: 'dev_student_2',
-    isDemo: true,
-    createdAt: new Date().toISOString(),
-  };
-
-  const adminUser: User = {
-    id: 'usr_admin_1',
-    role: UserRole.ADMIN,
-    title: 'ผู้ดูแลระบบ',
-    firstNameTh: 'แอดมิน',
-    lastNameTh: 'คุมระบบ',
-    firstNameEn: 'Admin',
-    lastNameEn: 'System',
-    universityId: 'ADM001',
-    email: 'admin@university.ac.th',
-    password: '123456',
-    deviceId: 'dev_admin_1',
-    isDemo: true,
-    createdAt: new Date().toISOString(),
-  };
-
-  users.set(teacherUser.id, teacherUser);
-  users.set(coTeacherUser.id, coTeacherUser);
-  users.set(studentUser1.id, studentUser1);
-  users.set(studentUser2.id, studentUser2);
-  users.set(adminUser.id, adminUser);
-
-  // Seed Initial Course: TEST101
-  const sampleCourse: Course = {
-    id: 'crs_test101',
-    courseCode: 'TEST101',
-    courseName: 'Software Architecture & System Design',
-    academicYear: 2569,
-    semester: Semester.FIRST,
-    coordinatorName: 'อ.ดร. สมชาย ใจดี',
-    ownerId: teacherUser.id,
-    ownerName: 'อ.ดร. สมชาย ใจดี',
-    defaultLat: 13.7988363,
-    defaultLng: 100.322944,
-    allowedGpsRadius: 200,
-    weeks: [
-      { weekNumber: 1, topic: 'Introduction & Requirements Engineering', date: '2026-07-10' },
-      { weekNumber: 2, topic: 'Microservices & RESTful API Design', date: '2026-07-17' },
-      { weekNumber: 3, topic: 'Database Schema & Anti-Proxy Security', date: '2026-07-24' },
-      { weekNumber: 4, topic: 'WebSockets & Dynamic QR Codes', date: '2026-07-31' },
-      { weekNumber: 5, topic: 'Geofencing & PWA Deployment', date: '2026-08-07' },
-    ],
-    createdAt: new Date().toISOString(),
-  };
-
-  if (!deletedCourseIds.has(sampleCourse.id)) {
-    courses.set(sampleCourse.id, sampleCourse);
-  }
-
-  // Seed Academic Structure Sample Courses (Faculty of Medical Technology)
-  const bioinfoCourse: Course = {
-    id: 'crs_mtid626',
-    courseCode: 'MTID626',
-    courseName: 'Advanced Bioinformatics',
-    academicYear: 2569,
-    semester: Semester.FIRST,
-    coordinatorName: 'อ.ดร. สมชาย ใจดี',
-    ownerId: teacherUser.id,
-    ownerName: 'อ.ดร. สมชาย ใจดี',
-    facultyCode: 'MT',
-    departmentCode: 'ID',
-    majorCode: 'MTMT',
-    degreeLevel: 'บัณฑิตศึกษา',
-    curriculums: [
-      'วิทยาศาสตร์มหาบัณฑิต (เทคนิคการแพทย์)',
-      'ปรัชญาดุษฎีบัณฑิต (เทคนิคการแพทย์)'
-    ],
-    defaultLat: 13.7988363,
-    defaultLng: 100.322944,
-    allowedGpsRadius: 200,
-    weeks: [
-      { weekNumber: 1, topic: 'Genomics & High-Throughput Sequencing Data', date: '2026-07-10' },
-      { weekNumber: 2, topic: 'Machine Learning in Computational Biology', date: '2026-07-17' },
-      { weekNumber: 3, topic: 'Structural Bioinformatics & Molecular Docking', date: '2026-07-24' },
-    ],
-    createdAt: new Date().toISOString(),
-  };
-
-  const dataMgmtCourse: Course = {
-    id: 'crs_mtid204',
-    courseCode: 'MTID204',
-    courseName: 'Data Management with Computer',
-    academicYear: 2569,
-    semester: Semester.FIRST,
-    coordinatorName: 'ผศ.ดร. วนิดา เรียนดี',
-    ownerId: coTeacherUser.id,
-    ownerName: 'ผศ.ดร. วนิดา เรียนดี',
-    facultyCode: 'MT',
-    departmentCode: 'ID',
-    majorCode: 'MTMT',
-    degreeLevel: 'ปริญญาตรี',
-    curriculums: [
-      'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)',
-      'วิทยาศาสตร์บัณฑิต (รังสีเทคนิค)'
-    ],
-    defaultLat: 13.7988363,
-    defaultLng: 100.322944,
-    allowedGpsRadius: 200,
-    weeks: [
-      { weekNumber: 1, topic: 'Database Fundamentals in Medical Context', date: '2026-07-12' },
-      { weekNumber: 2, topic: 'Healthcare Information Systems & Security', date: '2026-07-19' },
-    ],
-    createdAt: new Date().toISOString(),
-  };
-
-  const commTechCourse: Course = {
-    id: 'crs_mtcm303',
-    courseCode: 'MTCM303',
-    courseName: 'Community Medical Technology',
-    academicYear: 2569,
-    semester: Semester.FIRST,
-    coordinatorName: 'อ.ดร. สมชาย ใจดี',
-    ownerId: teacherUser.id,
-    ownerName: 'อ.ดร. สมชาย ใจดี',
-    facultyCode: 'MT',
-    departmentCode: 'CM',
-    majorCode: 'MTMT',
-    degreeLevel: 'ปริญญาตรี',
-    curriculums: [
-      'วิทยาศาสตร์บัณฑิต (เทคนิคการแพทย์)'
-    ],
-    defaultLat: 13.7988363,
-    defaultLng: 100.322944,
-    allowedGpsRadius: 200,
-    weeks: [
-      { weekNumber: 1, topic: 'Principles of Primary Health Care & Field Work', date: '2026-07-15' },
-    ],
-    createdAt: new Date().toISOString(),
-  };
-
-  if (!deletedCourseIds.has(bioinfoCourse.id)) courses.set(bioinfoCourse.id, bioinfoCourse);
-  if (!deletedCourseIds.has(dataMgmtCourse.id)) courses.set(dataMgmtCourse.id, dataMgmtCourse);
-  if (!deletedCourseIds.has(commTechCourse.id)) courses.set(commTechCourse.id, commTechCourse);
-
-  // Add course members
-  if (!deletedCourseIds.has(sampleCourse.id)) {
-    courseMembers.push(
-      { id: 'cm_1', courseId: sampleCourse.id, userId: teacherUser.id, role: CourseMemberRole.CO_TEACHER, joinedAt: new Date().toISOString() },
-      { id: 'cm_2', courseId: sampleCourse.id, userId: coTeacherUser.id, role: CourseMemberRole.CO_TEACHER, joinedAt: new Date().toISOString() },
-      { id: 'cm_3', courseId: sampleCourse.id, userId: studentUser1.id, role: CourseMemberRole.STUDENT, joinedAt: new Date().toISOString() },
-      { id: 'cm_4', courseId: sampleCourse.id, userId: studentUser2.id, role: CourseMemberRole.STUDENT, joinedAt: new Date().toISOString() }
-    );
-  }
-
-  // Seed sessions
-  if (!deletedCourseIds.has(sampleCourse.id)) {
-    const session1: Session = {
-      id: 'ses_1',
-      courseId: sampleCourse.id,
-      weekNumber: 1,
-      topic: 'Introduction & Requirements Engineering',
-      teacherLat: 13.7988363,
-      teacherLng: 100.322944,
-      isActive: false,
-      createdAt: new Date().toISOString(),
-    };
-
-    const session2: Session = {
-      id: 'ses_2',
-      courseId: sampleCourse.id,
-      weekNumber: 2,
-      topic: 'Microservices & RESTful API Design',
-      teacherLat: 13.7988363,
-      teacherLng: 100.322944,
-      isActive: false,
-      createdAt: new Date().toISOString(),
-    };
-
-    const session3: Session = {
-      id: 'ses_3',
-      courseId: sampleCourse.id,
-      weekNumber: 3,
-      topic: 'Database Schema & Anti-Proxy Security',
-      teacherLat: 13.7988363,
-      teacherLng: 100.322944,
-      isActive: true,
-      createdAt: new Date().toISOString(),
-    };
-
-    sessions.set(session1.id, session1);
-    sessions.set(session2.id, session2);
-    sessions.set(session3.id, session3);
-  }
+  console.log('[Seed] Default mock seed disabled in production. Hydrating from Cloud Firestore.');
 }
 
 /**
@@ -1491,11 +1265,13 @@ function bindUserDevice(
   return { success: true, user, isNewDevice: true };
 }
 
-// Boot Initialization: Load Local Cache or Seed Initial Data
+// Boot Initialization: Load Local Cache
 const isCacheLoaded = loadLocalCache();
-if (!isCacheLoaded) {
-  initDefaultSeedData();
-  saveLocalCache();
+if (isCacheLoaded && courses.size > 0 && users.size > 0) {
+  isServerReady = true;
+  console.log(`[Bootstrap] Local cache loaded successfully: ${courses.size} courses, ${users.size} users, ${sessions.size} sessions, ${attendanceRecords.length} attendance records. Ready to serve.`);
+} else {
+  console.log('[Bootstrap] Starting fresh or cache empty. Awaiting Cloud Firestore sync to become ready.');
 }
 
 // --- WEBSOCKET SERVER SETUP ---
@@ -7268,6 +7044,14 @@ async function syncFromFirestore() {
 
     // 2. Sync Courses
     if (fsCourses !== null && fsCourses.length > 0) {
+      const fsCourseIds = new Set(fsCourses.map((c) => c.id));
+      // Purge any phantom mock courses that are not in Firestore
+      for (const [id] of Array.from(courses.entries())) {
+        if (!fsCourseIds.has(id) && (id === 'crs_mtid626' || id === 'crs_mtcm303' || id === 'crs_test101' || id === 'crs_mtid204')) {
+          console.log(`[Firestore Sync] Purging stale phantom mock course from memory: ${id}`);
+          courses.delete(id);
+        }
+      }
       for (const c of fsCourses) {
         if (!c || !c.id) continue;
         if (deletedCourseIds.has(c.id)) {
@@ -7321,16 +7105,35 @@ async function syncFromFirestore() {
 
     // 5. Sync Attendance Records
     if (fsAttendance !== null && fsAttendance.length > 0) {
-      const existingIds = new Set(attendanceRecords.map((r) => r.id));
+      const recordMap = new Map<string, AttendanceRecord>();
+      attendanceRecords.forEach((r) => {
+        if (r && r.id && !deletedAttendanceIds.has(r.id)) {
+          recordMap.set(r.id, r);
+        }
+      });
       for (const ar of fsAttendance) {
         if (!ar || !ar.id) continue;
-        if (ar.id.startsWith('rec_crs_') || ar.id === 'rec_1' || ar.id === 'rec_2' || ar.id === 'rec_3') {
+        if (deletedAttendanceIds.has(ar.id) || ar.id.startsWith('rec_crs_') || ar.id === 'rec_1' || ar.id === 'rec_2' || ar.id === 'rec_3') {
           deleteFromFirestore(COLLECTIONS.ATTENDANCE, ar.id).catch(() => {});
-        } else if (!existingIds.has(ar.id)) {
-          attendanceRecords.push(ar);
-          existingIds.add(ar.id);
+        } else {
+          // Ensure courseId is always present
+          if (!ar.courseId && ar.sessionId) {
+            const sess = sessions.get(ar.sessionId);
+            if (sess && sess.courseId) {
+              ar.courseId = sess.courseId;
+            } else if (ar.sessionId.startsWith('ses_crs_1786083449992')) {
+              ar.courseId = 'crs_1786083449992';
+            } else if (ar.sessionId.startsWith('ses_crs_1785480472793') || ar.sessionId.startsWith('ses_mtid204')) {
+              ar.courseId = 'crs_1785480472793';
+            } else if (ar.sessionId.startsWith('ses_crs_1788228841246') || ar.sessionId === 'ses_1' || ar.sessionId === 'ses_2') {
+              ar.courseId = 'crs_1788228841246';
+            }
+          }
+          recordMap.set(ar.id, ar);
         }
       }
+      attendanceRecords.length = 0;
+      attendanceRecords.push(...recordMap.values());
     }
 
     // 6. Sync Leave Requests & Purge Demo/Orphaned Requests
@@ -7435,22 +7238,43 @@ async function syncFromFirestore() {
       }
     }
 
-    // Ensure base CSV exported attendance records are present if database is empty or missing records
-    if (attendanceRecords.length < 87 && !deletedCourseIds.has('crs_mtid204') && !deletedCourseIds.has('crs_test101')) {
-      await importRealCsvAttendanceRecords();
-    }
-
     // Save updated state to local cache
     saveLocalCache();
+    isServerReady = true;
 
-    console.log(`[Firestore Sync] Database synchronized successfully. Courses: ${courses.size}, Attendance Records Total: ${attendanceRecords.length}`);
+    console.log(`[Firestore Sync] Database synchronized successfully. Courses: ${courses.size}, Users: ${users.size}, Sessions: ${sessions.size}, Attendance Records Total: ${attendanceRecords.length}`);
   } catch (err) {
     console.error('[Firestore Sync Warning] Falling back to local cache data:', err);
+    if (courses.size > 0 && users.size > 0) {
+      isServerReady = true;
+    }
   }
 }
 
 // Mount Vite or static dist in express
 async function startServer() {
+  console.log('[Bootstrap] Initializing server...');
+
+  // Perform initial synchronization with Cloud Firestore BEFORE accepting traffic
+  console.log('[Bootstrap] Awaiting initial Cloud Firestore synchronization...');
+  try {
+    await syncFromFirestore();
+    isServerReady = true;
+    console.log(`[Bootstrap] Initial sync complete! Active courses: ${courses.size}, Users: ${users.size}, Sessions: ${sessions.size}, Attendance records: ${attendanceRecords.length}`);
+  } catch (err) {
+    console.error('[Bootstrap] Initial Firestore sync failed, continuing with local cache:', err);
+    if (courses.size > 0 && users.size > 0) {
+      isServerReady = true;
+    }
+  }
+
+  // Periodic Firestore sync every 3 minutes to keep all server replicas in sync
+  setInterval(() => {
+    syncFromFirestore().catch((err) => {
+      console.warn('[Background Sync] Periodic sync error:', err);
+    });
+  }, 3 * 60 * 1000);
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -7479,10 +7303,6 @@ async function startServer() {
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Smart Student Attendance System running at http://0.0.0.0:${PORT}`);
-    // Sync Firestore in background without blocking server startup
-    syncFromFirestore().catch((err) => {
-      console.error('[Firestore Initial Sync Error]', err);
-    });
   });
 }
 
